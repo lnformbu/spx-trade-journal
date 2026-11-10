@@ -1,8 +1,8 @@
 # `cloud/`: the free online version
 
-> **💸 FREE:** runs on Cloudflare's free plan (Pages + D1). No credit card.
+> **FREE:** runs on Cloudflare's free plan (Pages + D1). No credit card.
 
-**Setting it up for the first time? Follow the step-by-step guide in the [main README](../README.md#-set-it-up-online-about-15-minutes-all-free).**
+**Setting it up for the first time? Follow the step-by-step guide in the [main README](../README.md#set-it-up-online-about-15-minutes-all-free).**
 This page is a reference for later.
 
 ## Commands (run in this folder)

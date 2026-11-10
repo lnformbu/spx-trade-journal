@@ -1,6 +1,6 @@
 # SPX Trade Journal
 
-> ## 💸 100% FREE — no subscription, no credit card, no ads.
+> ## 100% FREE — no subscription, no credit card, no ads.
 > **Runs on Cloudflare's free plan. You pay $0, forever.**
 
 A trade journal for options traders, built for **SPX 0DTE**. Put it online in about 15 minutes and use it from your phone or computer, 24/7, behind your own password.
@@ -9,20 +9,20 @@ A trade journal for options traders, built for **SPX 0DTE**. Put it online in ab
 
 ## What it does
 
-- ⚡ **Log a trade in one line:** type `7550c 6.20 6.80 x2` and press **Enter** (SPX and 0DTE are the defaults)
-- 📥 **Import from Schwab:** export your history from Schwab and click one button. Buys and sells are matched into trades, expired options count as $0, and duplicates are skipped.
-- 📈 **See where you stand:** win rate, profit factor, average win vs. loss, P/L **after fees**, and an equity curve
-- 🔥 **Streaks:** current and longest green-day / red-day streaks
-- 🛑 **Loss discipline:** set a max loss per trade, see every trade that broke it, and what you'd have made if you'd stuck to it
-- 📅 **Calendar** with daily, weekly and monthly P/L
-- 🔎 **Filters:** this year, last 30 days, SPX only, and more
-- 📖 **A Bible verse** for each trading day (King James Version)
+- **Log a trade in one line:** type `7550c 6.20 6.80 x2` and press **Enter** (SPX and 0DTE are the defaults)
+- **Import from Schwab:** export your history from Schwab and click one button. Buys and sells are matched into trades, expired options count as $0, and duplicates are skipped.
+- **See where you stand:** win rate, profit factor, average win vs. loss, P/L **after fees**, and an equity curve
+- **Streaks:** current and longest green-day / red-day streaks
+- **Loss discipline:** set a max loss per trade, see every trade that broke it, and what you'd have made if you'd stuck to it
+- **Calendar** with daily, weekly and monthly P/L
+- **Filters:** this year, last 30 days, SPX only, and more
+- **A Bible verse** for each trading day (King James Version)
 
 Your trades stay private: they live in **your own** Cloudflare account, never in this repository.
 
 ---
 
-## 💸 What it costs: **nothing**
+## What it costs: **nothing**
 
 | | Cost |
 |---|---|
@@ -38,7 +38,7 @@ A journal uses a tiny fraction of the free limits (100,000 requests a day, 5 GB 
 
 ---
 
-## 🚀 Set it up online (about 15 minutes, all free)
+## Set it up online (about 15 minutes, all free)
 
 ### Step 1: Get the free tools
 
@@ -75,13 +75,13 @@ Copy each line, paste it into the terminal, press **Enter**, and wait for it to 
 | 4 | `npm run password` | Type a password for your journal, then press **Enter** (it shows as stars) |
 | 5 | `npm run deploy` | Publishes it and prints your link |
 
-✅ **Done!** Open `https://<your-name>.pages.dev`, type **any username** and the password from step 4, and bookmark it.
+**Done!** Open `https://<your-name>.pages.dev`, type **any username** and the password from step 4, and bookmark it.
 
-> 📱 **On your phone:** open the link, then use *Share → Add to Home Screen*. It opens like an app.
+> **On your phone:** open the link, then use *Share → Add to Home Screen*. It opens like an app.
 
 ---
 
-## 📒 Using it
+## Using it
 
 | To… | Do this |
 |---|---|
@@ -98,7 +98,7 @@ Keyboard: **/** jumps to Quick type · **Enter** saves · **Esc** cancels an edi
 
 ---
 
-## 🔧 Later changes (run in the `cloud` folder)
+## Later changes (run in the `cloud` folder)
 
 | To… | Run |
 |---|---|
@@ -110,7 +110,7 @@ Your trades are never touched by these commands.
 
 ---
 
-## ❓ Problems?
+## Problems?
 
 | You see | Fix |
 |---|---|
@@ -124,14 +124,14 @@ Your trades are never touched by these commands.
 
 ---
 
-## 💻 Prefer to run it only on your computer?
+## Prefer to run it only on your computer?
 
 Also free, with no account at all. In the main folder, run `node server.js` (or double-click `run.bat` on Windows) and open http://localhost:4949.
 Trades are saved to `trades.json` in that folder. This version only works while your computer is on.
 
 ---
 
-## 🗂 What's in this repository
+## What's in this repository
 
 | File | What it is |
 |---|---|
