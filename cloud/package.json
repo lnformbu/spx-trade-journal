@@ -1,0 +1,20 @@
+{
+  "name": "spx-trade-journal",
+  "private": true,
+  "description": "Trade journal on Cloudflare Pages + D1. Wrangler runs via npx, so nothing is installed into this (OneDrive) folder.",
+  "scripts": {
+    "login": "npx --yes wrangler@4.154.0 login",
+    "setup": "node scripts/setup.js",
+    "setup:local": "node scripts/setup.js --local",
+    "create": "node scripts/pages.js create",
+    "password": "node scripts/pages.js password",
+    "deploy": "node scripts/pages.js deploy",
+    "dev": "node scripts/pages.js dev",
+    "verses": "node scripts/verses.js",
+    "schwab:setup": "node scripts/schwab-watch.js setup",
+    "schwab:check": "node scripts/schwab-watch.js check",
+    "schwab:watch": "node scripts/schwab-watch.js watch",
+    "schwab:install": "powershell -NoProfile -ExecutionPolicy Bypass -File install-schwab-watcher.ps1",
+    "schwab:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File uninstall-schwab-watcher.ps1"
+  }
+}

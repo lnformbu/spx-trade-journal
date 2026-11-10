@@ -1,0 +1,13 @@
+# Cloudflare Pages site for the trade journal -> https://<name>.pages.dev
+# `npm run deploy` copies ../index.html and src/worker.js (as _worker.js) into public/ and publishes it.
+
+# Change this to your own site name: your journal will be https://<name>.pages.dev (must be unique)
+name = "my-spx-journal"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "spx-journal"
+# filled in by `npm run setup`
+database_id = "00000000-0000-0000-0000-000000000000"

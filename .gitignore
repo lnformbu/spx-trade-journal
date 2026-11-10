@@ -1,0 +1,17 @@
+# Personal data — never commit
+trades.json
+trades.json.tmp
+*.csv
+trade-backup-*.json
+quotes-*.txt
+
+# Logs
+*.log
+
+# Cloudflare / Node build output and local state
+node_modules/
+cloud/.wrangler/
+cloud/public/
+cloud/.dev.vars
+cloud/seed.sql
+cloud/verses.sql
