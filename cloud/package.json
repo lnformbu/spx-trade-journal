@@ -9,6 +9,7 @@
     "create": "node scripts/pages.js create",
     "password": "node scripts/pages.js password",
     "deploy": "node scripts/pages.js deploy",
+    "schwab:keys": "node scripts/pages.js keys",
     "dev": "node scripts/pages.js dev",
     "verses": "node scripts/verses.js",
     "schwab:setup": "node scripts/schwab-watch.js setup",

@@ -10,6 +10,8 @@
  * total contracts). Expired / exercised / cash-settled closes count as exits; Schwab books
  * expirations as "Journaled Shares" rows (no price) on the next business day.
  * Short trades (Sell to Open / Buy to Close) and stock trades are skipped.
+ *
+ * The Schwab Trader API sync (apiToFills) feeds the same pairing, so trades match CSV imports.
  */
 
 const ROOT_TO_TICKER = { SPXW: "SPX", NDXP: "NDX", RUTW: "RUT", XSPW: "XSP" };
@@ -76,7 +78,7 @@ export function schwabToTrades(csvText) {
   const C = { date: col("date"), action: col("action"), symbol: col("symbol"), desc: col("description"), qty: col("quantity"), price: col("price"), fees: col("fees"), amount: col("amount") };
 
   // Schwab lists newest first; replay oldest first, keeping same-day order
-  const txns = rows.slice(hi + 1)
+  const fills = rows.slice(hi + 1)
     .filter((r) => r.length > 2 && isoDate(r[C.date]))
     .reverse()
     .map((r, i) => ({
@@ -89,9 +91,67 @@ export function schwabToTrades(csvText) {
       price: money(r[C.price]),
       fees: Math.abs(money(C.fees >= 0 ? r[C.fees] : "") || 0),
       amount: money(C.amount >= 0 ? r[C.amount] : ""),
-    }))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.i - b.i));
+    }));
+  return pairFills(fills);
+}
 
+// OCC option symbol from the Schwab API: "SPXW  261027C07720000"
+export function parseOccSymbol(sym) {
+  const m = String(sym || "").trim().match(/^([A-Z.$]+)\s*(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/i);
+  if (!m) return null;
+  const root = m[1].toUpperCase(), exp = `20${m[2]}-${m[3]}-${m[4]}`, strike = String(+m[6] / 1000), cp = m[5].toUpperCase();
+  return { key: `${root} ${exp} ${strike} ${cp}`, ticker: ROOT_TO_TICKER[root] || root, exp, strike, cp };
+}
+
+// Trading day in New York time (the API gives UTC timestamps)
+const nyDate = (ts) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts));
+
+// Schwab Trader API transactions (GET /trader/v1/accounts/{hash}/transactions) -> fills for pairFills.
+// Each transaction has transferItems: the option leg(s) plus fee items (feeType set, cost = fee).
+export function apiToFills(transactions) {
+  const fills = [];
+  const list = (transactions || []).filter((t) => t && t.status !== "CANCELED" && Array.isArray(t.transferItems))
+    .sort((a, b) => String(a.time || a.tradeDate).localeCompare(String(b.time || b.tradeDate)) || (a.activityId || 0) - (b.activityId || 0));
+  for (const t of list) {
+    const items = t.transferItems;
+    const fees = items.filter((x) => x.feeType).reduce((s, x) => s + Math.abs(+x.cost || 0), 0);
+    const desc = [t.description, ...items.map((x) => x.instrument && x.instrument.description)].filter(Boolean).join(" ");
+    let feesLeft = fees;
+    for (const x of items) {
+      const ins = x.instrument || {};
+      if (x.feeType || ins.assetType === "CURRENCY") continue;
+      const sym = ins.assetType === "OPTION" ? parseOccSymbol(ins.symbol) : null;
+      if (sym) sym.key = (t.accountNumber || "") + " " + sym.key; // pair within one account
+      const buy = x.cost ? x.cost < 0 : x.amount > 0;
+      const eff = x.positionEffect;
+      let action;
+      if (t.type === "TRADE") {
+        action = eff === "OPENING" ? (buy ? "buy to open" : "sell to open")
+          : eff === "CLOSING" ? (buy ? "buy to close" : "sell to close")
+          : buy ? "buy" : "sell";
+      } else {
+        // expiration / exercise / cash settlement: only a removal of a long position matters
+        if (buy) continue;
+        action = /expir/i.test(desc) ? "expired" : "removed";
+      }
+      fills.push({
+        i: fills.length,
+        date: nyDate(t.time || t.tradeDate),
+        action, desc, sym,
+        qty: Math.abs(+x.amount || 0),
+        price: x.price != null && t.type === "TRADE" ? +x.price : null,
+        fees: feesLeft,
+        amount: t.type === "TRADE" ? null : (+t.netAmount || 0),
+      });
+      feesLeft = 0; // fees belong to the transaction, count them once
+    }
+  }
+  return fills;
+}
+
+// Fills (oldest first) -> trades. Shared by the CSV import and the Schwab API sync.
+export function pairFills(fills) {
+  const txns = fills.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.i - b.i));
   const stats = { skippedShort: 0, skippedStock: 0, missingOpen: 0, open: 0 };
   const pos = new Map();
   const trades = [];

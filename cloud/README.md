@@ -14,9 +14,22 @@ This page is a reference for later.
 | `npm run create` | Create the Pages site named in `wrangler.toml` |
 | `npm run password` | Set the site password (then `npm run deploy` to apply it) |
 | `npm run deploy` | Publish `../index.html` and the server code |
+| `npm run schwab:keys` | Save your Schwab app key and secret (see below) |
 | `npm run verses` | Send `../quotes.txt` to the site (verses added on the site are copied into the file first) |
 
-## Optional: automatic Schwab import (Windows)
+## Optional: Schwab account sync (free Schwab Trader API)
+
+Pulls your trades straight from Schwab every time you open the journal (at most every 10 minutes), or when you click **Sync now**.
+
+1. On [developer.schwab.com](https://developer.schwab.com): **Dashboard → Create App**, product **Accounts and Trading Production**,
+   callback URL `https://<your-site>.pages.dev/schwab/callback`. Wait until the app says **Ready For Use** (Schwab reviews it first).
+2. Here: `npm run schwab:keys`, then paste the **App Key** and the **Secret**. It deploys by itself.
+3. In the journal: **Connect Schwab** (bottom of the page), then log in on Schwab's own page.
+
+Schwab ends the login after **7 days**; click **Reconnect Schwab** when the journal asks.
+Your Schwab password is never stored, only the login tokens Schwab hands back. The keys are Cloudflare secrets, not files.
+
+## Optional: import Schwab export files automatically (Windows)
 
 Imports any Schwab *History → Export* file that lands in your Downloads folder.
 
@@ -31,8 +44,8 @@ Imports any Schwab *History → Export* file that lands in your Downloads folder
 
 | File | Purpose |
 |---|---|
-| `src/worker.js` | Online server: password check, saves trades and verses, Schwab import |
-| `src/schwab.js` | Turns a Schwab transactions CSV into journal trades |
+| `src/worker.js` | Online server: password check, saves trades and verses, Schwab import and account sync |
+| `src/schwab.js` | Turns Schwab transactions (CSV export or Trader API) into journal trades |
 | `scripts/` | The commands above |
 | `wrangler.toml` | Your site name and database id (`setup` fills in the id) |
 | `schema.sql` | Database table |

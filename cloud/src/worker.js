@@ -4,14 +4,20 @@
  *   GET/POST /api/data    trades + start date (was trades.json)
  *   GET/POST /api/quotes  daily verses       (was quotes.txt)
  *   POST /api/import-schwab   Schwab History CSV -> new trades (?dry=1 = preview only)
+ *   GET  /schwab/login, /schwab/callback   connect your Schwab account (Schwab Trader API, OAuth)
+ *   GET  /api/schwab/status, POST /api/schwab/sync, POST /api/schwab/disconnect
  * Everything else is the static page from public/.
  *
  * The whole site is behind a password (Worker secret JOURNAL_PASSWORD).
  * If no password is set, the site refuses to open rather than going public.
+ *
+ * Schwab sync needs the secrets SCHWAB_APP_KEY and SCHWAB_APP_SECRET (npm run schwab:keys).
+ * You log in on Schwab's own page; only the tokens Schwab hands back are stored (D1 key "schwab").
+ * Schwab expires that login after 7 days, so the page asks you to reconnect once a week.
  */
 
 // "../src/" resolves both from src/worker.js and from the deployed public/_worker.js
-import { schwabToTrades, mergeImported } from "../src/schwab.js";
+import { schwabToTrades, mergeImported, apiToFills, pairFills } from "../src/schwab.js";
 
 const CHUNK = 90000; // D1 caps one SQL statement at 100 KB
 
@@ -62,6 +68,113 @@ function authorized(req, env) {
   return diff === 0;
 }
 
+// Adds trades not already in the journal; re-reads just before writing so a
+// concurrent save or sync isn't overwritten.
+async function addTrades(env, trades, dry) {
+  let d = await readData(env);
+  let { added, duplicates } = mergeImported(d.trades, trades);
+  if (!dry && added.length) {
+    d = await readData(env);
+    ({ added, duplicates } = mergeImported(d.trades, trades));
+    if (added.length) {
+      d.trades = d.trades.concat(added);
+      d.rev = (d.rev || 0) + 1;
+      await writeBlob(env, "data", JSON.stringify(d));
+    }
+  }
+  return { added, duplicates };
+}
+
+// ---- Schwab Trader API ----
+const SCHWAB = "https://api.schwabapi.com";
+const DAY = 864e5;
+const LOGIN_DAYS = 7; // Schwab refresh tokens last 7 days
+
+const schwabReady = (env) => !!(env.SCHWAB_APP_KEY && env.SCHWAB_APP_SECRET);
+async function schwabState(env) {
+  try { return JSON.parse((await readBlob(env, "schwab")) || "{}"); } catch (e) { return {}; }
+}
+const saveSchwab = (env, s) => writeBlob(env, "schwab", JSON.stringify(s));
+const callbackUrl = (url) => url.origin + "/schwab/callback";
+
+async function schwabToken(env, params) {
+  const r = await fetch(SCHWAB + "/v1/oauth/token", {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + btoa(env.SCHWAB_APP_KEY + ":" + env.SCHWAB_APP_SECRET),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(params),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.access_token) {
+    const err = new Error(body.error_description || body.error || `Schwab login failed (${r.status})`);
+    err.login = r.status === 400 || r.status === 401;
+    throw err;
+  }
+  return body;
+}
+
+async function schwabAccess(env, s) {
+  if (s.access && s.accessExp > Date.now() + 60000) return s.access;
+  const t = await schwabToken(env, { grant_type: "refresh_token", refresh_token: s.refresh });
+  s.access = t.access_token;
+  s.accessExp = Date.now() + (t.expires_in || 1800) * 1000;
+  if (t.refresh_token) s.refresh = t.refresh_token; // the 7-day clock still runs from login
+  return s.access;
+}
+
+async function schwabGet(token, path) {
+  const r = await fetch(SCHWAB + path, { headers: { Authorization: "Bearer " + token, Accept: "application/json" } });
+  if (r.status === 401) { const e = new Error("Schwab connection expired. Reconnect."); e.login = true; throw e; }
+  if (!r.ok) throw new Error(`Schwab returned ${r.status} for ${path.split("?")[0].replace(/accounts\/[^/]+\//, "accounts/…/")}`);
+  return r.json();
+}
+
+function schwabStatus(env, s) {
+  const expiresAt = s.refresh ? s.loginAt + LOGIN_DAYS * DAY : null;
+  return {
+    configured: schwabReady(env),
+    connected: !!s.refresh && expiresAt > Date.now(),
+    expiresAt, lastSync: s.lastSync || null, last: s.last || null,
+  };
+}
+
+async function schwabSync(env) {
+  const s = await schwabState(env);
+  const st = schwabStatus(env, s);
+  if (!st.configured) return { ok: false, error: "Schwab app keys aren't set yet" };
+  if (!st.connected) return { ok: false, needLogin: true, error: "Connect your Schwab account first" };
+  try {
+    const token = await schwabAccess(env, s);
+    const end = Date.now();
+    // first sync: up to a year back (the API's limit); after that, a 10-day overlap
+    // so trades opened before the last sync still pair up. Duplicates are skipped.
+    const start = s.lastSync ? Math.max(s.lastSync - 10 * DAY, end - 360 * DAY) : end - 360 * DAY;
+    const accounts = await schwabGet(token, "/trader/v1/accounts/accountNumbers");
+    let txns = [];
+    for (const a of accounts || []) {
+      for (const type of ["TRADE", "RECEIVE_AND_DELIVER"]) {
+        const q = new URLSearchParams({ startDate: new Date(start).toISOString(), endDate: new Date(end).toISOString(), types: type });
+        const list = await schwabGet(token, `/trader/v1/accounts/${a.hashValue}/transactions?${q}`);
+        if (Array.isArray(list)) txns = txns.concat(list.map((t) => ({ ...t, accountNumber: t.accountNumber || a.accountNumber })));
+      }
+    }
+    const result = pairFills(apiToFills(txns));
+    const { added, duplicates } = await addTrades(env, result.trades);
+    s.lastSync = end;
+    s.last = { at: end, added: added.length, duplicates, open: result.open, missingOpen: result.missingOpen };
+    delete s.lastError;
+    await saveSchwab(env, s);
+    return { ok: true, ...s.last };
+  } catch (e) {
+    if (e.login) { delete s.refresh; delete s.access; }
+    s.lastError = e.message;
+    await saveSchwab(env, s);
+    return { ok: false, needLogin: !!e.login, error: e.message };
+  }
+}
+
 async function handle(req, env) {
   const url = new URL(req.url);
 
@@ -91,13 +204,7 @@ async function handle(req, env) {
     try { result = schwabToTrades(await req.text()); }
     catch (e) { return json({ ok: false, error: e.message }, 400); }
     const dry = url.searchParams.get("dry") === "1";
-    const d = await readData(env);
-    const { added, duplicates } = mergeImported(d.trades, result.trades);
-    if (!dry && added.length) {
-      d.trades = d.trades.concat(added);
-      d.rev = (d.rev || 0) + 1;
-      await writeBlob(env, "data", JSON.stringify(d));
-    }
+    const { added, duplicates } = await addTrades(env, result.trades, dry);
     return json({
       ok: true, dry, added: added.length, duplicates, open: result.open,
       skippedShort: result.skippedShort, skippedStock: result.skippedStock, missingOpen: result.missingOpen,
@@ -115,6 +222,47 @@ async function handle(req, env) {
       await writeBlob(env, "quotes", cur + (cur && !cur.endsWith("\n") ? "\n" : "") + lines.join("\n") + "\n");
       return json({ ok: true, added: lines.length });
     }
+  }
+
+  // ---- Schwab account connection ----
+  if (url.pathname === "/schwab/login") {
+    if (!schwabReady(env)) return new Response("Schwab isn't set up yet: run  npm run schwab:keys  (in the cloud folder).", { status: 503 });
+    const s = await schwabState(env);
+    s.pending = { state: crypto.randomUUID(), at: Date.now() };
+    await saveSchwab(env, s);
+    const q = new URLSearchParams({ client_id: env.SCHWAB_APP_KEY, redirect_uri: callbackUrl(url), state: s.pending.state });
+    return Response.redirect(SCHWAB + "/v1/oauth/authorize?" + q, 302);
+  }
+  if (url.pathname === "/schwab/callback") {
+    const s = await schwabState(env);
+    const p = s.pending;
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    // only accept a callback for a login started from this journal in the last 15 minutes
+    if (!code || !p || Date.now() - p.at > 15 * 60000 || (state && state !== p.state)) {
+      return Response.redirect(url.origin + "/?schwab=failed", 302);
+    }
+    try {
+      const t = await schwabToken(env, { grant_type: "authorization_code", code, redirect_uri: callbackUrl(url) });
+      Object.assign(s, { refresh: t.refresh_token, loginAt: Date.now(), access: t.access_token, accessExp: Date.now() + (t.expires_in || 1800) * 1000 });
+      delete s.pending; delete s.lastError;
+      await saveSchwab(env, s);
+      return Response.redirect(url.origin + "/?schwab=connected", 302);
+    } catch (e) {
+      delete s.pending; s.lastError = e.message;
+      await saveSchwab(env, s);
+      return Response.redirect(url.origin + "/?schwab=failed", 302);
+    }
+  }
+  if (url.pathname === "/api/schwab/status" && req.method === "GET") {
+    const s = await schwabState(env);
+    return json({ ...schwabStatus(env, s), error: s.lastError || null });
+  }
+  if (url.pathname === "/api/schwab/sync" && req.method === "POST") return json(await schwabSync(env));
+  if (url.pathname === "/api/schwab/disconnect" && req.method === "POST") {
+    const s = await schwabState(env);
+    await saveSchwab(env, { lastSync: s.lastSync, last: s.last });
+    return json({ ok: true });
   }
 
   if (url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 });

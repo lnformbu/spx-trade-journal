@@ -323,6 +323,11 @@
   /* ---------- footer / toast ---------- */
   .tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:18px;}
   .foot{text-align:center;color:var(--ink-3);font-size:12px;margin-top:12px;}
+  [hidden]{display:none!important;}
+  .schbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:18px;font-size:13px;color:var(--ink-2);}
+  .schbar .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:none;}
+  .schbar.on .dot{background:var(--win);} .schbar.warn .dot{background:var(--accent);}
+  .schbar.warn .sch-st{color:var(--accent);}
   .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;pointer-events:none;background:#1b2130;border:1px solid #3a4358;border-radius:10px;padding:10px 14px;font-size:13.5px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 30px rgba(0,0,0,.5);transition:opacity .2s,transform .2s;z-index:60;max-width:calc(100vw - 32px);}
   .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
   .toast button{background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;padding:2px 4px;}
@@ -555,6 +560,12 @@
     </aside>
   </div>
 
+  <div class="schbar" id="schBar" hidden>
+    <span class="dot" aria-hidden="true"></span>
+    <span class="sch-st" id="schSt" role="status"></span>
+    <button class="btn" id="schGo"></button>
+    <button class="linkbtn" id="schOff" hidden>Disconnect</button>
+  </div>
   <div class="tools">
     <button class="btn" id="exportBtn">Export CSV</button>
     <button class="btn" id="exportJson">Export backup</button>
@@ -683,8 +694,66 @@
   }
   // pick up trades imported in the background whenever you come back to the tab
   document.addEventListener("visibilitychange",async()=>{
-    if(document.visibilityState==="visible"&&loaded&&rev!==undefined){ await load(); refresh(); }
+    if(document.visibilityState==="visible"&&loaded&&rev!==undefined){ await load(); refresh(); schwabAuto(); }
   });
+
+  // ---- Schwab account connection (online journal only; hidden on the local server) ----
+  // Trades are pulled whenever the page opens or you come back to it (at most every 10 minutes).
+  let sch=null, schBusy=false;
+  const ago=ms=>{ const m=Math.round(ms/60000); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":plural(Math.round(m/1440),"day")+" ago"; };
+  async function schwabLoad(){
+    try{ const r=await fetch("/api/schwab/status"); sch=r.ok?await r.json():null; }catch(e){ sch=null; }
+    renderSchwab();
+  }
+  function renderSchwab(){
+    const bar=$("#schBar"); bar.hidden=!sch; if(!sch) return;
+    const go=$("#schGo"), now=Date.now();
+    const left=sch.connected?sch.expiresAt-now:0;
+    let st, btn, warn=false;
+    if(!sch.configured){ st="Schwab auto-import: waiting for your Schwab app to be approved"; btn=null; }
+    else if(!sch.connected){
+      st=sch.lastSync?"Schwab login expired (Schwab requires this weekly)":"Schwab auto-import is ready";
+      btn=sch.lastSync?"Reconnect Schwab":"Connect Schwab"; warn=!!sch.lastSync;
+    }else{
+      const days=Math.floor(left/864e5);
+      st="Schwab connected · "+(schBusy?"syncing…":sch.lastSync?"synced "+ago(now-sch.lastSync):"not synced yet")
+        +" · "+(days>=1?"reconnect in "+plural(days,"day"):"reconnect today");
+      warn=days<1; btn=warn?"Reconnect Schwab":"Sync now";
+    }
+    bar.className="schbar"+(sch.connected&&!warn?" on":warn?" warn":"");
+    $("#schSt").textContent=st;
+    go.hidden=!btn; go.textContent=btn||""; go.disabled=schBusy;
+    $("#schOff").hidden=!sch.connected;
+  }
+  $("#schGo").onclick=()=>{
+    if(sch.connected&&$("#schGo").textContent==="Sync now") schwabSync(false);
+    else location.href="/schwab/login";
+  };
+  $("#schOff").onclick=async()=>{
+    if(!confirm("Disconnect Schwab? Trades already imported stay in the journal.")) return;
+    await fetch("/api/schwab/disconnect",{method:"POST"}).catch(()=>{});
+    schwabLoad();
+  };
+  async function schwabSync(quiet){
+    if(schBusy) return;
+    schBusy=true; renderSchwab();
+    try{
+      const res=await (await fetch("/api/schwab/sync",{method:"POST"})).json();
+      if(!res.ok){ if(!quiet||res.needLogin) toast("Schwab: "+(res.error||"sync failed")); }
+      else{
+        if(res.added){ await load(); refresh(); }
+        if(!quiet||res.added){
+          const extra=[res.duplicates?`${res.duplicates} already in journal`:"",res.open?`${res.open} still open`:""].filter(Boolean).join(", ");
+          toast(`Schwab: ${plural(res.added,"new trade")} added${extra?" ("+extra+")":""}.`);
+        }
+      }
+    }catch(e){ if(!quiet) toast("Schwab sync failed — check your connection."); }
+    schBusy=false;
+    await schwabLoad();
+  }
+  function schwabAuto(){
+    if(sch&&sch.connected&&(!sch.lastSync||Date.now()-sch.lastSync>10*60000)) schwabSync(true);
+  }
 
   // ---- aggregation ----
   // One entry per calendar day that has at least one closed trade, oldest first.
@@ -1535,6 +1604,14 @@
     $("#fDate").value=todayISO;
     $("#fStrike").value=lastStrike("SPX");
     refresh(); livePreview();
+    // back from Schwab's login page
+    const back=new URLSearchParams(location.search).get("schwab");
+    if(back){
+      history.replaceState(null,"",location.pathname);
+      toast(back==="connected"?"Schwab connected. Pulling your trades…":"Schwab connection didn't finish. Try Connect Schwab again.");
+    }
+    await schwabLoad();
+    if(back==="connected") schwabSync(false); else schwabAuto();
   })();
 })();
 </script>
