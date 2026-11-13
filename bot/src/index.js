@@ -42,9 +42,9 @@ async function health(env, st, t, now) {
 }
 import { runGreeks as greekJob } from "./greekjob.js";
 
-const GREEKS_CRON = "*/5 13-21 * * 1-5";
+const GREEKS_CRON = "*/5 13-21 * * MON-FRI";
 // SPX greek exposure board: 0-3 day expirations, 40 strikes around spot; every 5 minutes
-const SIGNALS_CRON = "* 13-21 * * 1-5";
+const SIGNALS_CRON = "* 13-21 * * MON-FRI";
 
 // ---- training: "Setup:" / "Idea:" / "Lesson:" posts (and "Result:" replies) in the plan channel ----
 const TRAINING = /^\s*\**\s*(setup|idea|lesson|trade|result)\b/i;
@@ -329,7 +329,7 @@ async function run(env, { force = false } = {}) {
     // plans: every post in the plan channel today (every minute 9:15-9:45, every 5 minutes 8:00-15:30) + a pasted one
     const pk = "bot:plans:" + today;
     let plans = (await readJSON(env, pk)) || { posts: [] };
-    if (force || (t.min >= 555 && t.min <= 585) || (t.min >= 480 && t.min <= 930 && t.min % 5 === 0)) {
+    if (force || (t.min >= 555 && t.min <= 585) || (t.min >= 240 && t.min <= 930 && t.min % 5 === 0)) {
       try {
         const d = await discordPosts(env, today);
         if (d) {
@@ -395,6 +395,7 @@ export default {
     if (!env.BOT_ADMIN_KEY || req.headers.get("x-bot-key") !== env.BOT_ADMIN_KEY) return new Response("Not found", { status: 404 });
     const json = (o) => new Response(JSON.stringify(o, null, 1), { headers: { "Content-Type": "application/json" } });
     if (url.pathname === "/run") return json(await run(env, { force: true }));
+    if (url.pathname === "/cron-test") { const which = url.searchParams.get("job"); try { const r = which === "signals" ? await runSignals(env, deps) : which === "greeks" ? await greekJob(env, deps) : await run(env); return json({ ok: true, skipped: r && r.skipped, errors: r && r.errors, keys: r && Object.keys(r).slice(0, 12) }); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 600) }); } }
     if (url.pathname === "/signals") return json(await runSignals(env, deps, { force: true, dry: url.searchParams.get("send") !== "1", half: +(url.searchParams.get("half") || 0) }));
     if (url.pathname === "/signals/test") return json(await testWebhook(env));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));

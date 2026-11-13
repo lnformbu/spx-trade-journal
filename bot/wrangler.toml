@@ -8,7 +8,7 @@ workers_dev = true
 [triggers]
 # bot: 4:00-16:20 ET work; signals: 9:30-16:00 ET
 # greeks board: every 5 minutes 9:30-16:00 ET
-crons = ["* 8-22 * * 1-5", "* 13-21 * * 1-5", "*/5 13-21 * * 1-5"]
+crons = ["* 8-22 * * MON-FRI", "* 13-21 * * MON-FRI", "*/5 13-21 * * MON-FRI"]
 
 [vars]
 # Your Discord channel IDs (Developer Mode -> right-click a channel -> Copy Channel ID)

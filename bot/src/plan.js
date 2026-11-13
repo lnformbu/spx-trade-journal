@@ -27,7 +27,8 @@ const REFS = [
   [/(?:put|short) trigger/gi, "-0.236"],
   [/\bVWAP\b/gi, "vwap"],
   [/hourly 200|1h 200/gi, "ema1h200"],
-  [/10m (?:21|ribbon)|10 ?min(?:ute)? (?:21|ribbon)/gi, "ema10m21"],
+  [/10m (?:EMA )?200|10 ?min(?:ute)? (?:EMA )?200/gi, "ema10m200"],
+  [/10m (?:21|ribbon|trend|cloud)|10 ?min(?:ute)? (?:21|ribbon|trend|cloud)/gi, "ema10m21"],
   [/\b(?:and|&) (?:the )?200\b/gi, "ema10m200"],
   [/\bHOD\b|high of (?:the )?day/gi, "hod"],
   [/\bLOD\b|low of (?:the )?day/gi, "lod"],
@@ -128,11 +129,13 @@ export function parsePlan(raw, ref, ticker = "SPY") {
     const parts = line.split(/(?=\bIf\b)/).map((s) => s.trim()).filter(Boolean);
     for (const s of parts) {
       if (!/^if\b/i.test(s)) { plan.notes.push(s); continue; }
-      const cut = s.search(/,\s*(?:then\s+)?(?:(?:we |i )?(?:can )?look|looking|i[’']?m looking|expect|target|we can)|\s(?:look|looking) for\b/i);
+      const cut = s.search(/,\s*(?:then\s+)?(?:(?:we |i )?(?:can )?look|looking|i[’']?m looking|expect|target|we can|we have|next)|\s(?:look|looking) for\b|\s+on the way to\b/i);
       const cond = cut > 0 ? s.slice(0, cut) : s;
       const then = cut > 0 ? s.slice(cut) : "";
-      const bull = count(BULL, cond) + count(/continuation up|\bhigher\b/gi, then);
-      const bear = count(BEAR, cond) + count(/continuation down|\bdown\b|\blower\b|weakness/gi, then);
+      // "holds" (trend / support holds) is bullish unless it's resistance holding
+      const holds = /\bholds?\b/i.test(cond) && !/resistance/i.test(cond) ? 1 : 0;
+      const bull = count(BULL, cond) + holds + count(/continuation up|\bhigher\b|\bup\b/gi, then);
+      const bear = count(BEAR, cond) + count(/continuation down|\bdown\b|\blower\b|weakness|\bbelow\b/gi, then);
       const dir = bull > bear ? "bull" : bear > bull ? "bear" : null;
       const ct = tokens(cond, ref, ticker), tt = tokens(then, ref, ticker);
       plan.scenarios.push({ text: s, dir, condition: ct.map(strip), targets: tt.map(strip) });
