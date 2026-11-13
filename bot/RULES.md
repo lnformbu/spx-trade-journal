@@ -237,6 +237,35 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 - Every decision is logged: trades taken **and** setups skipped, with the reason and score.
 - Paper trades show in the journal, separate from real ones.
 
+### How paper trading is built (src/paper.js)
+
+- **What it trades:** the bot's own SPX and SPY signals (A/A+ setups, your plan triggers, 1m/3m divergence and compression breakouts,
+  10m compression breakouts, phase flips, squeezes, momentum). SPY signals are converted to SPX with the live SPX/SPY ratio.
+- **Contract:** your posted SPX contract for that side if today's plan has one, otherwise SPX 0DTE with delta 0.45-0.60 and a spread of at most 5% of mid.
+- **Flow:** signal → hard rules (window, limits, cooldown) → learned model → queued → filled at the next minute's ask
+  (A/A+ only after SPX breaks the signal candle, within 9 minutes) → managed every minute with the profit ladder and exits above → sold at the bid.
+- Not modeled yet: the "ribbon flips against the trade" and "rejection at a level" exits (an opposite signal closes the trade instead).
+- Every decision is in the journal's Bot view (Paper trading) and every entry/exit is posted to #signals as 📄 PAPER.
+
+## **NEW** Self-training (src/learn.js, every day 4:10-4:30 PM)
+
+| What it learns from | |
+|---|---|
+| Every scored SPX/SPY signal | traded or not, so a switched-off setup keeps being measured and can come back |
+| Paper trades | real option results, counted double |
+| Each paper trade's option price path | followed for 30 minutes after the exit, so other exit settings can be replayed |
+
+| What it changes | Rule |
+|---|---|
+| Setup families on/off | off after 15+ results from 3+ different days averaging below −0.15R (averages are shrunk toward 0 so a few results can't decide); back on above 0R |
+| Context adjustments | time window, chop, gamma regime, with/against your plan, VIX agreement: each adds or subtracts expected R (8+ results needed, at most ±0.5R) |
+| Minimum A/A+ score | 70 → 80 → 90 when lower score bands lose money; lowered again when they recover |
+| Exit settings | stop (−20/−25/−30%), target 1 (+40/60/80/100%), time stop (10/15/20 min): fitted on the older 70% of trades, kept only if also better on the newest 30% (needs 20+ trades) |
+
+- It can **never** change: the −30% maximum stop, 15% maximum loss, sizing, daily limits, entry window.
+- Changes are posted to #signals (🧠 Bot learning) and listed in the journal; a weekly paper report posts on Fridays.
+- In live mode, learned changes will need your approval before they apply.
+
 ## **NEW** Live mode (only after paper; switched on by you)
 
 - Entries use limit orders at or just through the ask, raised in small steps a limited number of times, then cancelled.

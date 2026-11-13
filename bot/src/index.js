@@ -14,6 +14,7 @@ import { etToMs } from "./time.js";
 const oscOut = (o) => (o ? { ...o, _track: undefined, _osc: undefined } : null);
 import { parsePlans, resolvePlan, reviewPlan } from "./plan.js";
 import { runSignals, testWebhook, post } from "./signals.js";
+import { runPaper, runLearning } from "./paper.js";
 import { readChart } from "./vision.js";
 
 // ---- keep-alive warnings in #signals: Schwab login about to expire, or the bot stopped ----
@@ -385,9 +386,16 @@ const deps = { schwabToken, schwab, history, readJSON, writeJSON, plansByTicker 
 
 export default {
   async scheduled(event, env, ctx) {
-    if (event.cron === SIGNALS_CRON) ctx.waitUntil(runSignals(env, deps).catch((e) => console.error("signals", e)));
+    if (event.cron === SIGNALS_CRON) ctx.waitUntil(runSignals(env, deps)
+      .then((r) => r && r.paper ? runPaper(env, deps, { ...r.paper, t: et(Date.now()) }) : null)
+      .catch((e) => console.error("signals/paper", e)));
     else if (event.cron === GREEKS_CRON) ctx.waitUntil(greekJob(env, deps).catch((e) => console.error("greeks", e)));
-    else ctx.waitUntil(run(env));
+    else {
+      ctx.waitUntil(run(env));
+      // nightly learning run, 4:10-4:30 PM ET (once per day)
+      const t = et(Date.now());
+      if (t.min >= 970 && t.min <= 990) ctx.waitUntil(runLearning(env, deps, { t }).catch((e) => console.error("learning", e)));
+    }
   },
   // private: only with the admin key (for checks and testing)
   async fetch(req, env) {
@@ -398,6 +406,8 @@ export default {
     if (url.pathname === "/cron-test") { const which = url.searchParams.get("job"); try { const r = which === "signals" ? await runSignals(env, deps) : which === "greeks" ? await greekJob(env, deps) : await run(env); return json({ ok: true, skipped: r && r.skipped, errors: r && r.errors, keys: r && Object.keys(r).slice(0, 12) }); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 600) }); } }
     if (url.pathname === "/signals") return json(await runSignals(env, deps, { force: true, dry: url.searchParams.get("send") !== "1", half: +(url.searchParams.get("half") || 0) }));
     if (url.pathname === "/signals/test") return json(await testWebhook(env));
+    if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
+    if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));
     if (url.pathname === "/vision-test") {
       const lib = await readJSON(env, "lib:setups");

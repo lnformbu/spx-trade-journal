@@ -531,6 +531,22 @@
     </div>
   </details>
 
+  <section class="card bstats" id="paperCard" aria-labelledby="ppH">
+    <div class="card-head"><h2 id="ppH">Paper trading</h2><span class="hint">The bot trades SPX 0DTE from its own signals on live quotes: buys at the ask, sells at the bid, fees included. No real orders.</span></div>
+    <div class="bs-body">
+      <div class="kpis" id="ppKpis"></div>
+      <div class="bs-grid two">
+        <section class="bd-box"><h3>Open position</h3><div id="ppOpen"></div></section>
+        <section class="bd-box"><h3>Today's decisions <small>every signal: taken, skipped and why</small></h3><div class="bs-scroll" style="max-height:220px"><table class="bs-t" id="ppLog"></table></div></section>
+      </div>
+      <section class="bd-box"><h3>Paper trades</h3><div class="bs-scroll"><table class="bs-t" id="ppTrades"></table></div></section>
+      <div class="bs-grid two">
+        <section class="bd-box"><h3>What it has learned <small id="ppModelV"></small></h3><table class="bs-t" id="ppFams"></table><div id="ppParams" style="margin-top:8px"></div></section>
+        <section class="bd-box"><h3>Learning changes <small>trains itself after every close</small></h3><div class="bs-scroll" style="max-height:260px" id="ppChanges"></div></section>
+      </div>
+    </div>
+  </section>
+
   <section class="card bstats" id="botStats" aria-labelledby="bsH">
     <div class="card-head"><h2 id="bsH">Bot scorecard</h2><span class="hint">Each signal is scored by whether price reached its target before its stop. R = result ÷ risk (−1R = stopped out).</span></div>
     <div class="bs-body">
@@ -552,7 +568,6 @@
         <section class="bd-box"><h3>Training posts <small>Setup: / Idea: / Lesson: in #spx-plan</small></h3><div id="bsLib"></div></section>
       </div>
       <section class="bd-box"><h3>Recent signal outcomes</h3><div class="bs-scroll"><table class="bs-t" id="bsRecent"></table></div></section>
-      <p class="hint">Paper trades (the bot trading your posted contracts with the profit ladder) will appear here in phase 2.</p>
     </div>
   </section>
 
@@ -1110,7 +1125,42 @@
     const body=rows.filter(([,s])=>s.n+s.nt>0).map(([k,s])=>`<tr><td>${esc(k)}</td><td>${s.n}</td><td>${pct(s.win)}</td><td class="${s.avg>0?"up":s.avg<0?"dn":""}">${rr(s.avg)}</td><td class="${s.total>0?"up":s.total<0?"dn":""}">${rr(s.total)}</td></tr>`).join("");
     $(el).innerHTML=`<tr><th>${label}</th><th>Scored</th><th>Win</th><th>Avg</th><th>Total</th></tr>`+(body||`<tr><td colspan="5" class="hint">No scored signals yet</td></tr>`);
   }
+  const FAM={star:"A/A+ setups",mom:"Momentum",flip:"Phase flip",squeeze:"Squeeze",box:"10m compression breakout",div1m:"1m divergence",div3m:"3m divergence",cbox1m:"1m compression breakout",cbox3m:"3m compression breakout","plan-trigger":"Your plan triggers","plan-scenario":"Plan scenarios"};
+  function renderPaper(){
+    const P=bsData&&bsData.paper; if(!P) return;
+    const A=P.acct||{start:2000,balance:2000,log:[]}, M=P.model||{fams:{},changes:[],params:{}}, T=P.trades||[];
+    const cut=bsPeriod==="all"?"":bsPeriod==="1"?todayISO:new Date(Date.now()-(+bsPeriod)*864e5).toISOString().slice(0,10);
+    const tr=T.filter(x=>!cut||x.date>=cut), w=tr.filter(x=>x.pnl>0), gw=w.reduce((s,x)=>s+x.pnl,0), gl=-tr.filter(x=>x.pnl<=0).reduce((s,x)=>s+x.pnl,0);
+    let peak=A.start||2000, dd=0; T.forEach(x=>{ peak=Math.max(peak,x.balance); dd=Math.max(dd,(peak-x.balance)/peak); });
+    const usd=x=>x==null?"—":(x<0?"−$":"$")+Math.abs(x).toFixed(2), cls=x=>x>0?"pos":x<0?"neg":"";
+    const kpi=(l,v,sub,c="")=>`<div class="kpi"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}</div></div>`;
+    const day=A.day&&A.day.date===todayISO?A.day:null;
+    $("#ppKpis").innerHTML=[
+      kpi("Paper account",usd(A.balance),`started ${usd(A.start||2000)} · ${usd(A.balance-(A.start||2000))}`,cls(A.balance-(A.start||2000))),
+      kpi("Today",usd(day?day.pnl:0),day?`${day.trades}/4 trades${day.done?" · done: "+esc(day.done):""}`:"no trades yet",cls(day&&day.pnl)),
+      kpi("Win rate",tr.length?Math.round(w.length/tr.length*100)+"%":"—",`${tr.length} trades`),
+      kpi("Profit factor",gl?(gw/gl).toFixed(2):gw?"∞":"—",`P/L ${usd(gw-gl)}`,cls(gw-gl)),
+      kpi("Max drawdown",Math.round(dd*100)+"%","from the account's peak",dd>0.15?"neg":""),
+    ].join("");
+    const o=A.open;
+    $("#ppOpen").innerHTML=o?[
+      ["Contract",`<b>${esc(o.label)}</b> 0DTE × ${o.qtyOpen}/${o.qty}${o.posted?" (your posted contract)":""}`],
+      ["Entry",`${usd(o.entry)} at ${esc(o.et)} ET`],["Now (bid)",o.lastBid!=null?`${usd(o.lastBid)} (${Math.round((o.lastBid/o.entry-1)*100)}%)`:"—"],
+      ["Stop",usd(o.stop)+(o.t1?" · target 1 hit, trailing":"")],["From signal",esc(o.signal)],
+    ].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join(""):`<p class="hint">No open position. Trades SPX/SPY signals 9:33–3:00 ET, closes everything by 3:45.</p>`;
+    const lg=(A.log||[]).slice().reverse();
+    $("#ppLog").innerHTML=(day&&lg.length)?lg.map(x=>`<tr><td>${esc(x.et)}</td><td style="text-align:left">${esc(x.action)}</td><td style="text-align:left">${esc(x.title)}<br><small style="color:var(--ink-3)">${esc(x.why)}</small></td></tr>`).join(""):`<tr><td class="hint">Nothing yet today.</td></tr>`;
+    $("#ppTrades").innerHTML=`<tr><th>When</th><th>Contract</th><th>Setup</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th><th>R</th><th>Exit reason</th></tr>`+
+      (tr.slice().reverse().slice(0,60).map(x=>`<tr><td>${esc(x.date.slice(5))} ${esc(x.et)}</td><td>${esc(x.label)}</td><td style="text-align:left">${esc(FAM[x.fam]||x.fam||"")}${x.grade?" "+esc(x.grade):""}</td><td>${x.qty}</td><td>${usd(x.entry)}</td><td>${usd(x.avgExit)}</td><td class="${x.pnl>0?"up":"dn"}">${usd(x.pnl)}</td><td>${x.R}</td><td style="text-align:left">${esc(x.exitWhy)}</td></tr>`).join("")||`<tr><td colspan="9" class="hint">The first paper trades come in during the next market session.</td></tr>`);
+    const fams=Object.entries(M.fams||{}).sort((a,b)=>b[1].r-a[1].r);
+    $("#ppModelV").textContent=M.v?`v${M.v} · ${M.samples?M.samples.signals+" signals + "+M.samples.trades+" trades":""}`:"not trained yet";
+    $("#ppFams").innerHTML=`<tr><th>Setup</th><th>Results</th><th>Win</th><th>Avg</th><th>Status</th></tr>`+(fams.map(([k,f])=>`<tr><td>${esc(FAM[k]||k)}</td><td>${f.n}</td><td>${Math.round(f.win*100)}%</td><td class="${f.r>0?"up":f.r<0?"dn":""}">${f.r>0?"+":""}${f.r}R</td><td>${f.off?"⛔ off":"✅ on"}</td></tr>`).join("")||`<tr><td colspan="5" class="hint">Trains after the first close with scored signals.</td></tr>`);
+    const p=M.params||{};
+    $("#ppParams").innerHTML=[["Exits now",`stop −${Math.round((p.stopPct||.3)*100)}% · target 1 +${Math.round((p.t1Pct||.6)*100)}% · time stop ${p.timeStopMin||10} min`],["Min A/A+ score",M.minScore||70]].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join("");
+    $("#ppChanges").innerHTML=(M.changes||[]).map(c=>`<div class="bs-line"><span>${esc(c.text)}</span><span>${esc(c.date.slice(5))}</span></div>`).join("")||`<p class="hint">No changes yet. Setups are switched off only after 15+ results averaging below −0.15R; exit settings change only when a walk-forward test on newer trades agrees.</p>`;
+  }
   function renderBotStats(){
+    try{ renderPaper(); }catch(e){ console.error(e); }
     if(!bsData){ $("#bsKpis").innerHTML=`<p class="hint">Couldn't load the bot's stats.</p>`; return; }
     const cut=bsPeriod==="all"?"":bsPeriod==="1"?todayISO:new Date(Date.now()-(+bsPeriod)*864e5).toISOString().slice(0,10);
     const items=(bsData.items||[]).filter(x=>!cut||x.date>=cut);

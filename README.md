@@ -18,7 +18,7 @@ A trade journal for options traders, built for **SPX 0DTE**. Put it online in ab
 - **Filters:** this year, last 30 days, SPX only, and more
 - **A Bible verse** for each trading day (King James Version)
 - **Schwab auto-sync** (online version): connect your Schwab account once and new trades come in by themselves
-- **Optional signal bot** ([`bot/`](bot/README.md)): live levels, your Discord morning plan, signals to Discord, an **SPX greek exposure board** and a **0DTE leaderboard** in the journal's Bot desk, and a scorecard of how its signals did. It does not place trades.
+- **Optional signal bot** ([`bot/`](bot/README.md)): live levels, your Discord morning plan, signals to Discord, an **SPX greek exposure board** and a **0DTE leaderboard** in the journal's Bot desk, and a scorecard of how its signals did. It does not place real trades: it **paper trades** SPX 0DTE from its own signals and **trains itself** after every close (switches losing setups off, tunes exits with a walk-forward test).
 
 Your trades stay private: they live in **your own** Cloudflare account, never in this repository.
 

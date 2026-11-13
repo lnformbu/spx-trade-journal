@@ -286,7 +286,9 @@ async function handle(req, env) {
   if (url.pathname === "/api/bot/stats" && req.method === "GET") {
     const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };
     const stats = await get("bot:stats"), reviews = await get("bot:reviews"), lib = await get("lib:setups");
+    const pAcct = await get("paper:acct"), pTrades = await get("paper:trades"), pModel = await get("paper:model");
     return json({
+      paper: { acct: pAcct, model: pModel, trades: pTrades ? pTrades.items.slice(-400).map(({ path, ctx, params, ...x }) => x) : [] },
       ok: true, items: stats ? stats.items : [], reviews: reviews ? reviews.days : {},
       library: lib ? lib.items.map(({ context, raw, images, ...x }) => ({ ...x, text: String(raw || "").slice(0, 200) })) : [],
     });

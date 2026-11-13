@@ -9,6 +9,7 @@ import { et, hhmm, OPEN, CLOSE, dayLevels, aggregate, ema, intradayLevels, ribbo
 import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
+import { famOf } from "./learn.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -489,13 +490,19 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           : (idea(list, dir) && `${show(sym)} ${idea(list, dir)}`);
         found.push({
           kind: "star", sym, key: `star:${sym}:${pat.bar.datetime}:${dir}`, once: true, color: grade === "A+" ? COLORS.star : COLORS[dir],
-          grade, track: { dir, entry: dir === "bull" ? pat.bar.high : pat.bar.low, stop, target: next ?? null, needTrigger: true },
+          grade, score, track: { dir, entry: dir === "bull" ? pat.bar.high : pat.bar.low, stop, target: next ?? null, needTrigger: true },
           title: `${grade === "A+" ? "⭐ A+" : "✅ A"} ${show(sym)} ${dir === "bull" ? "CALLS" : "PUTS"} · score ${score}`,
           text: checks.map(([txt, ok]) => `${ok === true ? "✓" : ok === false ? "✗" : "·"} ${txt}`).join("\n")
             + `\n**Entry** on a 1m close ${dir === "bull" ? "above" : "below"} ${r2(dir === "bull" ? pat.bar.high : pat.bar.low)} · **stop** beyond ${r2(stop)} · **target** ${next ?? "—"}`
             + (c ? `\nContract: ${c}` : ""),
         });
       }
+      // market context of every signal from this ticker (the learning run compares winners and losers by it)
+      const gexSide = GX && GX.flip != null && (sym === "$SPX" || (sym === "SPY" && ratio)) ? ((sym === "SPY" ? c0 * ratio : c0) >= GX.flip ? "positive" : "negative") : null;
+      for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
+        chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
+        plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
+      };
     } catch (e) {
       errors.push(`${show(sym)}: ${e.message}`);
     }
@@ -503,6 +510,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
 
   // dedupe, cooldowns, per-ticker hourly cap (whales, plan and A+ alerts are never capped)
   const sent = [];
+  const candidates = [];
   for (const a of found) {
     const last = st.fired[a.key];
     if (last && (a.once || now - last < (a.cooldown || 10) * 60000)) continue;
@@ -512,7 +520,13 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     const alert = { at: now, et: hhmm(t.min), kind: a.kind, sym: a.sym, title: a.title, text: a.text };
     st.alerts.push(alert);
     if (!dry && a.track && a.track.entry != null && a.track.stop != null && a.track.entry !== a.track.stop) {
-      (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, title: a.title, at: now, et: hhmm(t.min) });
+      (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, at: now, et: hhmm(t.min) });
+    }
+    // SPX/SPY signals with a stop are paper-trade candidates (SPY prices converted to SPX)
+    if (!dry && a.track && a.track.stop != null && (a.sym === "$SPX" || (a.sym === "SPY" && ratio))) {
+      const k = a.sym === "SPY" ? ratio : 1, cv = (v) => (v == null ? null : Math.round(v * k * 100) / 100);
+      candidates.push({ key: a.key, fam: famOf(a.key), kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, et: hhmm(t.min), sym: a.sym,
+        dir: a.track.dir, uEntry: cv(a.track.entry), uStop: cv(a.track.stop), uTarget: cv(a.track.target), needTrigger: !!a.track.needTrigger });
     }
     sent.push(alert);
     if (!dry) {
@@ -525,14 +539,17 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   if (resolved.length) {
     const stats = (await readJSON(env, "bot:stats")) || { items: [] };
     for (const r of resolved) stats.items.push({ date: t.date, sym: r.sym, kind: r.kind, grade: r.grade, title: r.title, dir: r.dir, et: r.et, at: r.at,
-      entry: r2(r.entry), stop: r2(r.stop), target: r2(r.target), outcome: r.outcome, R: r.R, mfeR: r.mfeR, maeR: r.maeR });
+      entry: r2(r.entry), stop: r2(r.stop), target: r2(r.target), outcome: r.outcome, R: r.R, mfeR: r.mfeR, maeR: r.maeR, key: r.key, fam: famOf(r.key), score: r.score ?? null, ctx: r.ctx || null });
     stats.items = stats.items.slice(-3000);
     await writeJSON(env, "bot:stats", stats);
   }
   st.errors = errors;
   st.updatedAt = now;
   if (!dry) await writeJSON(env, key, st);
-  return { group, plans: Object.keys(plans), sent, errors, found: found.length };
+  const planOf = (s) => plans[s] && plans[s].plan;
+  const paper = { candidates, spx: quotes.$SPX && quotes.$SPX.quote ? quotes.$SPX.quote.lastPrice : null,
+    plan: { call: (planOf("SPY") || {}).spxCall || (planOf("$SPX") || {}).spxCall || null, put: (planOf("SPY") || {}).spxPut || (planOf("$SPX") || {}).spxPut || null } };
+  return { group, plans: Object.keys(plans), sent, errors, found: found.length, paper };
 }
 
 export async function testWebhook(env) {
