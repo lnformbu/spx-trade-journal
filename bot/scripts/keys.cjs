@@ -24,4 +24,14 @@ if (!only || only === "admin") {
   fs.writeFileSync(path.join(root, ".admin-key"), key);
   console.log("Admin key saved.");
 }
+// phone alerts (free ntfy app): makes a private topic name, stores it as NTFY_TOPIC and prints it so you can subscribe
+if (only === "ntfy") {
+  const topic = "spxbot-" + crypto.randomBytes(9).toString("hex");
+  execSync(w + "NTFY_TOPIC", { cwd: root, input: topic, stdio: ["pipe", "inherit", "inherit"] });
+  console.log("\n==============================================");
+  console.log("  Your private alert topic:  " + topic);
+  console.log("==============================================");
+  console.log("Phone: install the free 'ntfy' app -> + (Subscribe to topic) -> type the topic above exactly -> Subscribe.");
+  console.log("Keep the topic name private: anyone with it can read the alerts.");
+}
 console.log("\nDone. The bot picks up new keys within a minute.");

@@ -40,7 +40,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 export const FAM_NAMES = {
   star: "A/A+ setups", mom: "Momentum", flip: "Phase flip", squeeze: "Squeeze", box: "10m compression breakout",
   div1m: "1m divergence", div3m: "3m divergence", cbox1m: "1m compression breakout", cbox3m: "3m compression breakout",
-  "plan-trigger": "Your plan triggers",
+  "plan-trigger": "Your plan triggers", you: "Your training setups",
 };
 export const famOf = (key) => {
   const [p, a, b] = String(key).split(":");
@@ -73,6 +73,9 @@ export function decide(model, cand) {
   if (F && F.off) return { ok: false, est: F.r, why: `${FAM_NAMES[cand.fam] || cand.fam} is switched off by learning (${F.n} results, avg ${F.r}R)` };
   if (cand.fam === "star" && cand.score != null && cand.score < m.minScore) return { ok: false, why: `score ${cand.score} under the learned minimum ${m.minScore}` };
   let est = F ? F.r : 0;
+  // your ✅/❌ reactions on this kind of signal
+  const fb = m.fb && m.fb[cand.fam];
+  if (fb && fb.adj) est += fb.adj;
   const parts = [];
   for (const [k, v] of Object.entries(features(cand))) {
     const adj = v != null && m.feats[k + "=" + v];
@@ -105,21 +108,27 @@ export function replay(path, P, two) {
 const avgReplay = (trades, P) => trades.reduce((s, x) => s + replay(x.path, P, x.qty >= 2), 0) / (trades.length || 1);
 
 // The nightly training run. Returns { model, changes }.
-export function learn(prev, statsItems, trades, today) {
+// extra: { replay: past-data signal results (weight 0.5), training: your #spx-training posts with results (weight 1.5),
+//          feedback: your ✅/❌ reactions on #signals posts }
+export function learn(prev, statsItems, trades, today, extra = {}) {
   const m = JSON.parse(JSON.stringify(prev || DEFAULT_MODEL));
   m.params = { ...DEFAULT_PARAMS, ...m.params };
   const changes = [];
-  // samples: SPX/SPY signals graded in R (last 1500), paper trades in R of their dollar risk (counted twice)
+  const clampR = (r) => Math.max(-1.5, Math.min(4, r));
+  // samples: live signals graded in R (last 1500, weight 1), paper trades in R of their dollar risk (weight 2)
   const sig = (statsItems || []).filter((x) => x.R != null).slice(-1500)
-    .map((x) => ({ date: x.date, fam: x.fam || famOf(x.key || "") || kindFam(x), kind: x.kind, grade: x.grade, score: x.score, et: x.et, ctx: x.ctx, R: Math.max(-1.5, Math.min(4, x.R)), w: 1 }));
-  const pt = (trades || []).filter((x) => x.R != null).map((x) => ({ ...x, R: Math.max(-1.5, Math.min(4, x.R)), w: 2 }));
-  const all = [...sig, ...pt].filter((x) => x.fam);
+    .map((x) => ({ date: x.date, fam: x.fam || famOf(x.key || "") || kindFam(x), kind: x.kind, grade: x.grade, score: x.score, et: x.et, ctx: x.ctx, R: clampR(x.R), w: 1 }));
+  const pt = (trades || []).filter((x) => x.R != null).map((x) => ({ ...x, R: clampR(x.R), w: 2, paper: true }));
+  const rp = (extra.replay || []).filter((x) => x.R != null).map((x) => ({ ...x, R: clampR(x.R), w: 0.5 }));
+  // your own setups: result % on the option ÷ 30% (a full stop) = R; context from the snapshot taken when you posted
+  const tp = (extra.training || []).map(trainingSample).filter(Boolean);
+  const all = [...sig, ...pt, ...rp, ...tp].filter((x) => x.fam);
   const tot = all.reduce((s, x) => s + x.w, 0), sumAll = all.reduce((s, x) => s + x.R * x.w, 0);
   const base = shrunk(sumAll, tot);
 
   // 1. families
   const byFam = {};
-  for (const x of all) { const f = (byFam[x.fam] = byFam[x.fam] || { n: 0, sum: 0, wins: 0, trades: 0, days: new Set() }); f.days.add(x.date); f.n += x.w; f.sum += x.R * x.w; if (x.R > 0) f.wins += x.w; if (x.w === 2) f.trades++; }
+  for (const x of all) { const f = (byFam[x.fam] = byFam[x.fam] || { n: 0, sum: 0, wins: 0, trades: 0, days: new Set() }); f.days.add(x.date); f.n += x.w; f.sum += x.R * x.w; if (x.R > 0) f.wins += x.w; if (x.paper) f.trades++; }
   for (const [fam, f] of Object.entries(byFam)) {
     const r = r2(shrunk(f.sum, f.n)), was = m.fams[fam] && m.fams[fam].off;
     const off = was ? !(r > ON_R) : f.n >= MIN_N && f.days.size >= MIN_DAYS && r < OFF_R;
@@ -171,7 +180,16 @@ export function learn(prev, statsItems, trades, today) {
   }
 
   m.base = r2(base);
-  m.samples = { signals: sig.length, trades: pt.length };
+  // your reactions: each family gets up to ±0.3R from your ✅ vs ❌ (5 neutral votes of prior)
+  const fbNew = {};
+  for (const x of extra.feedback || []) { if (!x.fam) continue; const f = (fbNew[x.fam] = fbNew[x.fam] || { up: 0, down: 0 }); if (x.v > 0) f.up++; else if (x.v < 0) f.down++; }
+  for (const [fam, f] of Object.entries(fbNew)) {
+    f.adj = r2((0.3 * (f.up - f.down)) / (f.up + f.down + 5));
+    const old = (m.fb && m.fb[fam] && m.fb[fam].adj) || 0;
+    if (Math.abs(f.adj - old) >= 0.1) changes.push(`👍 Your reactions on ${FAM_NAMES[fam] || fam}: ${f.up} ✅ / ${f.down} ❌ → ${f.adj > 0 ? "+" : ""}${f.adj}R`);
+  }
+  m.fb = fbNew;
+  m.samples = { signals: sig.length, trades: pt.length, replay: rp.length, training: tp.length, feedback: (extra.feedback || []).length };
   m.lastRun = today;
   if (changes.length) {
     m.v = (m.v || 0) + 1;
@@ -181,6 +199,21 @@ export function learn(prev, statsItems, trades, today) {
   return { model: m, changes };
 }
 // older scorecard rows have no family: derive it from the kind and title
+// one of your #spx-training posts with a result -> a learning sample
+function trainingSample(x) {
+  if (!x || !x.result) return null;
+  const r = String(x.result).toLowerCase();
+  const pct = r.match(/([+\-]?\d+(?:\.\d+)?)\s*%/);
+  const R = pct ? +pct[1] / 30 : /win|won/.test(r) ? 1 : /loss|lost/.test(r) ? -1 : /be|breakeven|scratch/.test(r) ? 0 : null;
+  if (R == null) return null;
+  const c = x.context || {}, dir = x.dir;
+  const t = x.time || (c.late ? null : x.postedAt && new Date(x.postedAt).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" }));
+  const fresh = !c.late;   // a snapshot taken long after the trade only tells the time (when you wrote it)
+  const vixAgree = c.vixDir && dir ? (dir === "bull") === (c.vixDir === "falling") : null;
+  return { date: x.date, fam: "you", kind: "you", et: t, R: Math.max(-1.5, Math.min(4, R)), w: 1.5,
+    ctx: fresh ? { chop: c.choppy ?? null, gex: c.gamma ? (c.gamma.aboveFlip ? "positive" : "negative") : null, vix: vixAgree,
+      plan: c.planSide && dir ? (c.planSide === "range" ? "between" : (c.planSide === "calls") === (dir === "bull") ? "with" : "against") : null } : {} };
+}
 function kindFam(x) {
   if (x.kind === "star") return "star";
   if (x.kind === "momentum") return "mom";

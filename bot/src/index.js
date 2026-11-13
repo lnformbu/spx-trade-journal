@@ -406,8 +406,11 @@ export default {
     if (url.pathname === "/cron-test") { const which = url.searchParams.get("job"); try { const r = which === "signals" ? await runSignals(env, deps) : which === "greeks" ? await greekJob(env, deps) : await run(env); return json({ ok: true, skipped: r && r.skipped, errors: r && r.errors, keys: r && Object.keys(r).slice(0, 12) }); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 600) }); } }
     if (url.pathname === "/signals") return json(await runSignals(env, deps, { force: true, dry: url.searchParams.get("send") !== "1", half: +(url.searchParams.get("half") || 0) }));
     if (url.pathname === "/signals/test") return json(await testWebhook(env));
+    // replay support (scripts/replay.mjs runs on your computer): past candles through the bot's Schwab login, and saving the results
+    if (url.pathname === "/history") return json(await history(await schwabToken(env), Object.fromEntries(url.searchParams)));
+    if (url.pathname === "/replay/save" && req.method === "POST") { const body = await req.json(); await writeJSON(env, "bot:replay", { at: Date.now(), ...body }); return json({ ok: true, items: (body.items || []).length }); }
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
-    if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", t: et(Date.now()) }));
+    if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));
     if (url.pathname === "/vision-test") {
       const lib = await readJSON(env, "lib:setups");

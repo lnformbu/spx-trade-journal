@@ -10,7 +10,7 @@
 // Hard limits every style keeps: max loss 15% of the account per trade, −30% stop at most, daily limits, one position, 3:59 close.
 import { hhmm } from "./levels.js";
 import { post } from "./signals.js";
-import { decide, learn, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES } from "./learn.js";
+import { decide, learn, famOf, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES } from "./learn.js";
 
 const FEE = 0.65;            // Schwab, per contract per side
 const START = 2000;
@@ -59,11 +59,16 @@ function freshDay(b, t) {
 const log = (b, t, action, title, why) => { b.log.push({ et: hhmm(t.min), action, title, why: why || "" }); b.log = b.log.slice(-80); };
 
 // hard rules (every style) + the style's trading hours
-function gate(b, cfg, cand, t, now) {
+function gate(b, cfg, cand, t, now, events = []) {
   const d = b.day, sb = d.startBal;
   if (!TRADED.has(cand.fam)) return "not a tradable setup";
   if (t.min < 573) return "before 9:33 (opening range)";
   if (t.min >= 955) return "no new entries after 3:55";
+  // event days (your plan's "Event:" line): no entries 15 min either side; a pre-market event = A+ only until 9:45
+  const ev = events.find((e) => t.min >= e.min - 15 && t.min < e.min + 15);
+  if (ev) return `${ev.name} at ${hhmm(ev.min)}: no entries 15 minutes either side`;
+  const pre = events.find((e) => e.min < 570);
+  if (pre && t.min < 585 && cand.grade !== "A+") return `${pre.name} day: A+ only until 9:45`;
   if (cfg.window === "morning" && t.min >= 690) return "this style trades mornings only";
   if (cfg.window !== "all" && t.min >= 690 && t.min < 810 && !(cand.fam === "star" && (cand.grade === "A+" || cand.score >= 90))) return "midday 11:30-1:30: A-grade (90+) only";
   if (d.done) return d.done;
@@ -143,7 +148,7 @@ async function stepBook(b, cfg, X) {
       id: now + ":" + k.symbol, date: t.date, symbol: k.symbol, label: k.label, under: p.sym, delta: k.delta, dir: p.dir,
       qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
       at: now, et: hhmm(t.min), stop: r2(ask * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,
-      uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer),
+      uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer), bestU: underPx ?? p.uEntry, rib0: X.tf10[p.sym] || null,
       fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est,
       exits: [], realized: 0, path: [r3((bid || ask) / ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct }, style: cfg.name,
     };
@@ -185,9 +190,21 @@ async function stepBook(b, cfg, X) {
       }
       if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
       const opp = candidates.find((c) => group(c.sym) === group(pos.under) && c.dir !== pos.dir && decide(model, c).ok);
+      // rejected at a level: the ticker reached a key level beyond the entry, then gave back half the move while the option is green
+      if (u != null) pos.bestU = bull ? Math.max(pos.bestU ?? u, u) : Math.min(pos.bestU ?? u, u);
+      const tol = Math.abs(pos.uEntry) * 0.0004, run = bull ? pos.bestU - pos.uEntry : pos.uEntry - pos.bestU;
+      const lvl = run > tol ? (X.kl[pos.under] || []).filter(([, v]) => (bull ? v > pos.uEntry + tol && pos.bestU >= v - tol : v < pos.uEntry - tol && pos.bestU <= v + tol))
+        .sort((a, z) => (bull ? z[1] - a[1] : a[1] - z[1]))[0] : null;
+      const rejected = lvl && u != null && (bull ? pos.bestU - u : u - pos.bestU) >= 0.5 * run && pct > 0;
+      // invalidated: the 10m Saty cloud flipped against the trade since the entry
+      const cloud = X.tf10[pos.under], flipped = cloud && cloud === (bull ? "bearish" : "bullish") && pos.rib0 !== cloud;
+      const evSoon = X.events.find((e) => e.min >= 570 && t.min >= e.min - 5 && t.min < e.min);
       let why = null;
       if (bid <= pos.stop) why = pos.stop > E ? (pos.t1 ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
       else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
+      else if (rejected) why = `rejected at ${lvl[0]} ${lvl[1]}`;
+      else if (flipped) why = "10m Saty cloud flipped against the trade";
+      else if (evSoon) why = `closing before ${evSoon.name} at ${hhmm(evSoon.min)}`;
       else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain) why = `time stop (no +${Math.round(P.timeStopGain * 100)}% in ${P.timeStopMin} min)`;
       else if (pos.t1 && now - pos.bestAt >= P.stallMin * 60000) why = `runner stalled ${P.stallMin} min`;
       else if (opp) why = "opposite signal: " + opp.title;
@@ -202,7 +219,7 @@ async function stepBook(b, cfg, X) {
     for (const p of b.pending) {
       if (p.done || b.open) continue;
       const bull = p.dir === "bull", u = px(p.sym);
-      const g = gate(b, cfg, p, t, now);
+      const g = gate(b, cfg, p, t, now, X.events);
       if (g) { p.done = true; log(b, t, "skipped", p.title, g); continue; }
       if (now - p.at > 9 * 60000) { p.done = true; log(b, t, "dropped", p.title, `entry ${r2(p.uEntry)} not reached within 9 minutes`); continue; }
       if (u == null) continue;
@@ -219,7 +236,7 @@ async function stepBook(b, cfg, X) {
 
   // ---- this minute's new signals ----
   for (const c of candidates) {
-    const g = gate(b, cfg, c, t, now);
+    const g = gate(b, cfg, c, t, now, X.events);
     if (g) { log(b, t, "skipped", c.title, g); continue; }
     if (b.open) { log(b, t, "skipped", c.title, "a position is already open"); continue; }
     const d = decide(model, c);
@@ -238,7 +255,7 @@ async function stepBook(b, cfg, X) {
 }
 
 // candidates = this minute's new signals that were posted with a contract (from runSignals)
-export async function runPaper(env, deps, { candidates = [], now = Date.now(), t }) {
+export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, now = Date.now(), t }) {
   const { schwabToken, schwab, readJSON, writeJSON } = deps;
   candidates = candidates.filter((c) => TRADED.has(c.fam) && paperTicker(env, c.contract));
   const acct = (await readJSON(env, "paper:acct")) || newBook();
@@ -258,7 +275,7 @@ export async function runPaper(env, deps, { candidates = [], now = Date.now(), t
   const Q = await quotes(schwab, token, syms);
   const chains = {};
   const X = {
-    env, candidates, Q, model, now, t, closed: [], messages: [], shadow: acct.shadow,
+    env, candidates, events, kl, tf10, Q, model, now, t, closed: [], messages: [], shadow: acct.shadow,
     px: (sym) => (Q[sym] ? Q[sym].last ?? Q[sym].mark : null),
     // SPX 0DTE chain for the delta styles, fetched at most once per side per minute
     chain: (dir) => (chains[dir] = chains[dir] || (async () => {
@@ -331,13 +348,18 @@ export function pickWinner(ch) {
 }
 
 // After the close: the nightly learning run, the champion-vs-challenger check, and a weekly report on Fridays.
-export async function runLearning(env, deps, { force = false, report = false, now = Date.now(), t }) {
+export async function runLearning(env, deps, { force = false, report = false, quiet = false, now = Date.now(), t }) {
   const { readJSON, writeJSON } = deps;
   const prev = (await readJSON(env, "paper:model")) || DEFAULT_MODEL;
   if (!force && prev.lastRun === t.date) return { skipped: "already trained today" };
   const stats = (await readJSON(env, "bot:stats")) || { items: [] };
   const trades = (await readJSON(env, "paper:trades")) || { items: [] };
-  const { model, changes } = learn(prev, stats.items, trades.items, t.date);
+  const fbRes = await collectFeedback(env, readJSON, writeJSON, t).catch((e) => ({ err: e.message, items: [] }));
+  const replayData = (await readJSON(env, "bot:replay")) || { items: [] };
+  const lib = (await readJSON(env, "lib:setups")) || { items: [] };
+  const { model, changes } = learn(prev, stats.items, trades.items, t.date, {
+    replay: replayData.items, training: lib.items.filter((x) => x.result), feedback: fbRes.items || [],
+  });
 
   // a winning challenger takes over the paper account (its style becomes the champion; a new set of challengers starts)
   const ch = await readJSON(env, "paper:challengers");
@@ -355,7 +377,7 @@ export async function runLearning(env, deps, { force = false, report = false, no
   }
   await writeJSON(env, "paper:model", model);
   if (changes.length && !(win && changes.length === 1)) await post(env, { title: `🧠 Bot learning v${model.v}: ${changes.length} change${changes.length > 1 ? "s" : ""}`, description: changes.join("\n").slice(0, 3900), color: 0x3b82f6, footer: { text: `from ${model.samples.signals} scored signals + ${model.samples.trades} paper trades · paper only` } }).catch(() => {});
-  if (t.wd === "Fri" || report) {
+  if (!quiet && (t.wd === "Fri" || report)) {
     const acct = (await readJSON(env, "paper:acct")) || newBook();
     const wk = trades.items.filter((x) => now - x.closedAt < 7 * 864e5);
     const w = wk.filter((x) => x.pnl > 0), l = wk.filter((x) => x.pnl <= 0);
@@ -379,5 +401,70 @@ export async function runLearning(env, deps, { force = false, report = false, no
       color: 0x3b82f6,
     }).catch(() => {});
   }
-  return { v: model.v, changes, samples: model.samples, promoted: win ? win.cfg.name : null };
+  // ---- daily recap ----
+  if (!quiet) try {
+    const day = t.date;
+    const tr = trades.items.filter((x) => x.date === day);
+    const sg = stats.items.filter((x) => x.date === day && x.R != null);
+    const sw = sg.filter((x) => x.R > 0), sumR = sg.reduce((s, x) => s + x.R, 0);
+    const byFam = {};
+    for (const x of sg) { const f = (byFam[x.fam || x.kind] = byFam[x.fam || x.kind] || { n: 0, R: 0 }); f.n++; f.R += x.R; }
+    const famLines = Object.entries(byFam).sort((a, b) => b[1].R - a[1].R).map(([k, f]) => `${FAM_NAMES[k] || k}: ${f.n} · ${f.R >= 0 ? "+" : ""}${r2(f.R)}R`);
+    const rv = ((await readJSON(env, "bot:reviews")) || { days: {} }).days[day];
+    const acct = (await readJSON(env, "paper:acct")) || newBook();
+    const c2 = (await readJSON(env, "paper:challengers")) || { books: {}, hist: {} };
+    const lead = Object.entries(c2.books).map(([id, x]) => [x.cfg.name, (c2.hist[id] || {})[day]]).filter(([, h]) => h && h.trades).sort((a, b) => b[1].pnl - a[1].pnl)[0];
+    const champDay = (c2.hist.champion || {})[day];
+    const fbToday = (fbRes.items || []).filter((x) => x.date === day);
+    await post(env, {
+      title: `🗓️ Daily recap ${day.slice(5)} · paper ${usd(acct.day && acct.day.date === day ? acct.day.pnl : 0)} · account ${usd(acct.balance)}`,
+      description: [
+        `**Paper trades:** ${tr.length ? tr.map((x) => `${x.et} ${x.label} ×${x.qty} ${usd(x.pnl)} (${x.exitWhy})`).join("\n") : "none"}`,
+        lead ? `**Best challenger today:** ${lead[0]} ${usd(lead[1].pnl)} (your style: ${usd(champDay ? champDay.pnl : 0)})` : null,
+        `**Signals scored:** ${sg.length} · ${sg.length ? Math.round((sw.length / sg.length) * 100) : 0}% won · ${sumR >= 0 ? "+" : ""}${r2(sumR)}R${famLines.length ? "\n" + famLines.slice(0, 6).join("\n") : ""}`,
+        rv ? `**Your plan:** ${rv.ok} checks right, ${rv.no} wrong${rv.side ? ` · ${rv.side}` : ""}` : "**Your plan:** no review today",
+        `**Your reactions:** ${fbToday.filter((x) => x.v > 0).length} ✅ · ${fbToday.filter((x) => x.v < 0).length} ❌${fbRes.err ? ` (couldn't read reactions: ${fbRes.err}; the bot needs Read Message History in #signals)` : ""}`,
+        changes.length ? `**Learned today:** ${changes.length} change${changes.length > 1 ? "s" : ""} (see 🧠 post)` : "**Learned today:** no changes",
+      ].filter(Boolean).join("\n\n").slice(0, 3900),
+      color: 0x8b5cf6,
+    });
+  } catch (e) { console.error("recap", e); }
+  return { v: model.v, changes, samples: model.samples, promoted: win ? win.cfg.name : null, feedback: { added: fbRes.added, err: fbRes.err } };
+}
+
+// Your ✅ / ❌ (also 👍 🔥 / 👎) on the last 5 days' signal posts -> "bot:feedback" (reactions by the bot itself don't count)
+async function collectFeedback(env, readJSON, writeJSON, t) {
+  const byMid = {};
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(Date.parse(t.date + "T12:00:00Z") - i * 864e5).toISOString().slice(0, 10);
+    const s = await readJSON(env, "sig:day:" + d);
+    for (const a of (s && s.alerts) || []) if (a.mid) byMid[a.mid] = { ...a, date: d };
+  }
+  const fb = (await readJSON(env, "bot:feedback")) || { items: [] };
+  if (!Object.keys(byMid).length || !env.DISCORD_BOT_TOKEN) return { added: 0, items: fb.items };
+  let before = null, added = 0, err = null;
+  const oldest = Math.min(...Object.values(byMid).map((a) => a.at));
+  for (let page = 0; page < 5; page++) {
+    const r = await fetch(`https://discord.com/api/v10/channels/${env.SIGNALS_CHANNEL_ID}/messages?limit=100${before ? "&before=" + before : ""}`,
+      { headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)" } });
+    if (!r.ok) { err = r.status; break; }
+    const msgs = await r.json();
+    if (!Array.isArray(msgs) || !msgs.length) break;
+    for (const m of msgs) {
+      const a = byMid[m.id];
+      if (!a || !m.reactions) continue;
+      const cnt = (names) => m.reactions.filter((x) => names.includes(x.emoji && x.emoji.name)).reduce((s, x) => s + x.count - (x.me ? 1 : 0), 0);
+      const up = cnt(["✅", "👍", "🔥"]), down = cnt(["❌", "👎"]);
+      const v = up > down ? 1 : down > up ? -1 : 0;
+      const i = fb.items.findIndex((x) => x.mid === m.id);
+      if (!v) { if (i >= 0) fb.items.splice(i, 1); continue; }
+      const rec = { mid: m.id, date: a.date, key: a.key, fam: famOf(a.key || ""), v, title: a.title };
+      if (i >= 0) fb.items[i] = rec; else { fb.items.push(rec); added++; }
+    }
+    before = msgs[msgs.length - 1].id;
+    if (Date.parse(msgs[msgs.length - 1].timestamp) < oldest) break;
+  }
+  fb.items = fb.items.slice(-3000);
+  await writeJSON(env, "bot:feedback", fb);
+  return { added, err, items: fb.items };
 }

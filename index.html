@@ -423,6 +423,8 @@
   .viewsw{display:flex;justify-content:flex-start;margin:0 0 14px;} .viewsw .seg{min-width:260px;}
   .bstats{display:none;margin-bottom:14px;}
   body.view-bot .bstats{display:block;} body.view-bot .mine{display:none !important;}
+  /* the Bot desk (levels, plan, signals, greek board, leaderboard) lives only on the Bot tab */
+  body:not(.view-bot) #botCard{display:none !important;}
   .bs-body{padding:14px 18px 16px;display:flex;flex-direction:column;gap:12px;}
   @media(max-width:640px){.bs-body{padding:12px 14px;}}
   .bs-period{align-self:flex-start;max-width:100%;overflow-x:auto;} .bs-period label{flex:0 0 auto;} .bs-period span{min-height:32px;padding:0 12px;font-size:12.5px;white-space:nowrap;}
@@ -1155,7 +1157,8 @@
     $("#ppTrades").innerHTML=`<tr><th>When</th><th>Contract</th><th>Setup</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th><th>R</th><th>Exit reason</th></tr>`+
       (tr.slice().reverse().slice(0,60).map(x=>`<tr><td>${esc(x.date.slice(5))} ${esc(x.et)}</td><td>${esc(x.label)}</td><td style="text-align:left">${esc(FAM[x.fam]||x.fam||"")}${x.grade?" "+esc(x.grade):""}</td><td>${x.qty}</td><td>${usd(x.entry)}</td><td>${usd(x.avgExit)}</td><td class="${x.pnl>0?"up":"dn"}">${usd(x.pnl)}</td><td>${x.R}</td><td style="text-align:left">${esc(x.exitWhy)}</td></tr>`).join("")||`<tr><td colspan="9" class="hint">The first paper trades come in during the next market session.</td></tr>`);
     const fams=Object.entries(M.fams||{}).sort((a,b)=>b[1].r-a[1].r);
-    $("#ppModelV").textContent=M.v?`v${M.v} · ${M.samples?M.samples.signals+" signals + "+M.samples.trades+" trades":""}`:"not trained yet";
+    const sm=M.samples||{};
+    $("#ppModelV").textContent=M.lastRun?`v${M.v||0} · ${sm.signals||0} live signals · ${sm.replay||0} replayed · ${sm.trades||0} paper trades · ${sm.training||0} of your setups · ${sm.feedback||0} reactions`:"not trained yet";
     $("#ppFams").innerHTML=`<tr><th>Setup</th><th>Results</th><th>Win</th><th>Avg</th><th>Status</th></tr>`+(fams.map(([k,f])=>`<tr><td>${esc(FAM[k]||k)}</td><td>${f.n}</td><td>${Math.round(f.win*100)}%</td><td class="${f.r>0?"up":f.r<0?"dn":""}">${f.r>0?"+":""}${f.r}R</td><td>${f.off?"⛔ off":"✅ on"}</td></tr>`).join("")||`<tr><td colspan="5" class="hint">Trains after the first close with scored signals.</td></tr>`);
     const p=M.params||{};
     $("#ppParams").innerHTML=[["Exits now",`stop −${Math.round((p.stopPct||.3)*100)}% · target 1 +${Math.round((p.t1Pct||.6)*100)}% · time stop ${p.timeStopMin||10} min`],["Min A/A+ score",M.minScore||70]].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join("");

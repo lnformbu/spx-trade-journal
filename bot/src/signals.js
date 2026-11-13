@@ -23,7 +23,15 @@ const money = (x) => (Math.abs(x) >= 1e6 ? "$" + (x / 1e6).toFixed(2) + "M" : "$
 const COLORS = { whale: 0x8b5cf6, big: 0xf0b429, bull: 0x2ec26b, bear: 0xf0556b, plan: 0x3b82f6, star: 0xffd700 };
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
+// free phone push (ntfy app) for paper trades, style takeovers, recaps and bot health; topic is a Cloudflare secret
+const PUSH = /^(📄|🏆|🔑|⛔|✅ Bot|🗓️)/u;
+async function push(env, embed) {
+  if (!env.NTFY_TOPIC || !PUSH.test(embed.title || "")) return;
+  await fetch("https://ntfy.sh/", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic: env.NTFY_TOPIC, title: String(embed.title).slice(0, 200), message: String(embed.description || "").replace(/\*\*/g, "").slice(0, 1500) || " " }) }).catch(() => {});
+}
 export async function post(env, embed) {
+  await push(env, embed);
   if (env.SIGNALS_WEBHOOK) {
     return fetch(env.SIGNALS_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Signals", embeds: [embed] }) });
   }
@@ -52,6 +60,19 @@ function ideaO(list, dir, target = 0.4) {
 function idea(list, dir, target = 0.4) {
   const best = ideaO(list, dir, target);
   return best ? `${fmtC(best)} (Δ ${Math.abs(best.delta).toFixed(2)})` : null;
+}
+// Contracts follow price: a posted contract whose delta has drifted outside 0.30-0.65 (price ran away from it, or through it)
+// is swapped for the same-expiry strike nearest delta 0.45. The post says what changed; the paper trade uses the new one.
+async function adjustContract(c, dir, getList) {
+  if (!c || c.delta == null) return { c, note: "" };
+  const d = Math.abs(c.delta);
+  if (d >= 0.3 && d <= 0.65) return { c, note: "" };
+  const list = await getList();
+  const o = ideaO(list, dir, 0.45);
+  if (!o || o.symbol === c.symbol) return { c, note: "" };
+  const root = String(o.symbol).split(" ")[0].replace(/^SPXW$/, "SPX");
+  const n = cobj(o, root === "SPX" ? "$SPX" : root);
+  return { c: n, note: `\n↪️ **Adjusted** to ${n.label} ~ $${r2(o.mark)} (Δ ${Math.abs(o.delta).toFixed(2)}): price moved, ${c.label} is now Δ ${d.toFixed(2)}` };
 }
 // the contract a signal shows, in a form the paper trader can buy
 const cobj = (o, sym) => (o ? { symbol: o.symbol, label: `${show(sym)} ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)}`, bid: o.bid, ask: o.ask, mark: o.mark, delta: o.delta } : null);
@@ -182,6 +203,15 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const toDate = big(sym) ? t.date : isoDay(now + 8 * 864e5);
       const chain = await schwab(token, `/marketdata/v1/chains?symbol=${encodeURIComponent(sym)}&strikeCount=16&fromDate=${t.date}&toDate=${toDate}`);
       const list = contracts(chain);
+      // the chain to re-pick a drifted contract from (SPX 0DTE for SPX contracts, fetched only when needed)
+      const spxLists = {};
+      const listFor = async (c, dir) => {
+        const root = String(c.symbol).split(" ")[0];
+        if ((root === "SPXW" || root === "SPX") && sym !== "$SPX") {
+          return (spxLists[dir] = spxLists[dir] || contracts(await schwab(token, `/marketdata/v1/chains?symbol=%24SPX&contractType=${dir === "bull" ? "CALL" : "PUT"}&strikeCount=30&fromDate=${t.date}&toDate=${t.date}`).catch(() => ({}))));
+        }
+        return list;
+      };
       const prev = st.vol[sym];
       const cur = {};
       const flow = (st.flow[sym] || []).filter((f) => now - f.at < 60 * 60000);
@@ -294,6 +324,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         if (GX.eye) add("Eye of Sauron " + GX.eye.strike, GX.eye.strike);
         [...GX.strikes].sort((a, b) => Math.abs(b.gex) - Math.abs(a.gex)).slice(0, 3).forEach((r) => add(`GEX node ${r.strike}`, r.strike));
       }
+      // key levels for the paper trader's "rejected at a level" exit
+      if (big(sym)) (st.kl = st.kl || {})[sym] = keyLevels.filter(([, v]) => v != null && isFinite(v)).map(([n, v]) => [n, r2(v)]);
 
       // ---- momentum (not on choppy days) ----
       if (rth.length >= 10 && !choppy) {
@@ -388,8 +420,33 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         if (GX && GX.lb && GX.lb.maxPainZone && t.min >= 950 && t.min <= 955) found.push({
           kind: "setup", sym, key: `maxpain:${t.date}`, once: true, color: COLORS.star,
           title: `🎯 LB max pain into the close: ${GX.lb.maxPainZone.low}–${GX.lb.maxPainZone.high}`,
-          text: `Spot range that pays the leaderboard's in-the-money holders the least (best ${GX.lb.maxPain}). SPX ${r2(c0)}.`,
+          text: `Spot range that pays the leaderboard's in-the-money holders the least (best ${GX.lb.maxPain}). SPX ${r2(c0)}.`
+            + `\n**How to trade it:**`
+            + `\n• Price is often pulled toward this zone in the last 10 minutes; big GEX nodes and charm add to the pull.`
+            + `\n• ${c0 > GX.lb.maxPainZone.high ? "SPX is above the zone: favor puts / take call profits now" : c0 < GX.lb.maxPainZone.low ? "SPX is below the zone: favor calls / take put profits now" : "SPX is inside the zone: expect a pin; take profits, avoid new 0DTE trades"}.`
+            + `\n• Don't hold a 0DTE position against the pull; exit by 3:59.`,
         });
+        // LB shakeout watch: a top-5 leaderboard contract is 20%+ above its VWAP, so its holders are likely to be shaken out first
+        if (GX && GX.lb && GX.lb.top && t.min >= OPEN + 15 && t.min < CLOSE - 20) {
+          for (const c of GX.lb.top.slice(0, 5).filter((x) => x.shakeout)) {
+            const calls = c.type === "C";
+            const stack = keyLevels.filter(([, v]) => v != null && (calls ? v < c0 : v > c0))
+              .sort((a, b) => (calls ? b[1] - a[1] : a[1] - b[1])).slice(0, 3).map(([n, v]) => `${n} ${r2(v)}`);
+            const regime = GX.flip != null ? (c0 >= GX.flip ? "above the gamma flip: shakeouts usually stay shallow" : "below the gamma flip: shakeouts can run deeper, size down") : null;
+            found.push({
+              kind: "setup", sym, key: `lbshake:${c.label}:${t.date}`, once: true, color: COLORS.big,
+              title: `🏁 LB SHAKEOUT WATCH: SPX ${c.label} +${c.pnlPct}% vs VWAP (${calls ? "calls" : "puts"} crowded)`,
+              text: `#${GX.lb.top.indexOf(c) + 1} on the leaderboard · last $${c.last} vs VWAP $${c.vwap} · SPX ${r2(c0)}${regime ? `\n${regime}` : ""}`
+                + `\n**How to trade it:**`
+                + `\n1. Expect a **${calls ? "dip" : "pop"}** against the ${calls ? "call" : "put"} holders first, into: ${stack.join(" · ") || "the next key level"}.`
+                + `\n2. At that level wait for a 1m/3m reversal candle (engulfing, pin bar, false break).`
+                + `\n3. Enter **${calls ? "calls" : "puts"}** (the crowd's direction); stop just beyond the shakeout's ${calls ? "low" : "high"}.`
+                + `\n4. Targets: next big GEX node, then the ${calls ? "call wall" + (GX.callWall ? " " + GX.callWall : "") : "put wall" + (GX.putWall ? " " + GX.putWall : "")}. Bank half at target 1, trail the rest.`
+                + `\n5. If the level breaks and a candle closes through it, it can turn into a reversal: only trade the other way after a confirming candle and the cloud turning.`
+                + `\nThe ⭐ A/A+ cards mark "LB shakeout" when this lines up.`,
+            });
+          }
+        }
       }
 
       // ---- your plan for this ticker (an SPX|SPY plan is tracked on SPY prices, under SPX) ----
@@ -411,7 +468,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           const crossed = dir === "bull" ? c3 <= trig && c0 > trig : c3 >= trig && c0 < trig;
           if (crossed && !ps[dir]) {
             ps[dir] = { at: now, trig };
-            const cc = await contract(dir), c = cc && cc.text;
+            let cc = await contract(dir);
+            if (cc && cc.c) { const adj = await adjustContract(cc.c, dir, () => listFor(cc.c, dir)); cc = { text: cc.text + adj.note, c: adj.c }; }
+            const c = cc && cc.text;
             found.push({
               kind: "plan", sym, key: `plan:${sym}:${dir}`, once: true, color: COLORS[dir], contract: (cc && cc.c) || undefined,
               track: { dir, entry: c0, stop: dir === "bull" ? trig * 0.9985 : trig * 1.0015, target: null },
@@ -496,15 +555,33 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         const cc = P && (dir === "bull" ? P.callTrigger : P.putTrigger) != null
           ? (sym === "SPY" && (P.spxCall || P.spxPut) ? await spxContract(schwab, token, t.date, dir === "bull" ? P.spxCall : P.spxPut, type)
             : po ? { text: `${show(sym)} ${fmtC(po)}`, c: cobj(po, sym) } : null)
-          : ideaO(list, dir) ? { text: `${show(sym)} ${idea(list, dir)}`, c: cobj(ideaO(list, dir), sym) } : null;
-        const c = cc && cc.text;
+          : null;
+        if (cc && cc.c) { const adj = await adjustContract(cc.c, dir, () => listFor(cc.c, dir)); cc.text += adj.note; cc.c = adj.c; }
+        // no posted contract: the bot's pick (the paper account's style delta for SPX)
+        let ccFinal = cc;
+        if (!ccFinal) {
+          const tgt = sym === "$SPX" && paperStyle && paperStyle.delta ? paperStyle.delta : 0.4, o = ideaO(list, dir, tgt);
+          ccFinal = o ? { text: `${show(sym)} ${idea(list, dir, tgt)}`, c: cobj(o, sym) } : null;
+        }
+        // quick-read card: what to buy, where, then one line of what agrees and one of what doesn't
+        const short = (txt) => txt.startsWith("Candlestick") ? null : txt.startsWith("Saty/key level") ? null
+          : txt.startsWith("3m Saty") ? "3m cloud" : txt.startsWith("10m Saty") ? "10m cloud" : txt.startsWith("Phase") ? "phase osc"
+          : txt.startsWith("VWAP") ? "VWAP" : txt.startsWith("Volume Stack") ? "vol stack" : txt.startsWith("Volume") ? "volume"
+          : txt.startsWith("Hourly") ? "1h cloud" : txt.startsWith("Room") ? `room (${dtr ?? "—"}% used)` : txt.startsWith("VIX") ? "VIX"
+          : txt.startsWith("LB shakeout") ? "LB shakeout" : txt.startsWith("Chop") ? (choppy ? "chop" : "trending")
+          : txt.startsWith("Options flow") ? `flow ${money(net30)}` : txt.startsWith("Your plan") ? "your plan" : txt;
+        const yes = checks.filter(([txt, ok]) => ok === true && short(txt)).map(([txt]) => short(txt));
+        const no = checks.filter(([txt, ok]) => ok === false && short(txt)).map(([txt]) => short(txt));
+        const entryPx = r2(dir === "bull" ? pat.bar.high : pat.bar.low);
         found.push({
           kind: "star", sym, key: `star:${sym}:${pat.bar.datetime}:${dir}`, once: true, color: grade === "A+" ? COLORS.star : COLORS[dir],
-          grade, score, contract: (cc && cc.c) || undefined, track: { dir, entry: dir === "bull" ? pat.bar.high : pat.bar.low, stop, target: next ?? null, needTrigger: true },
-          title: `${grade === "A+" ? "⭐ A+" : "✅ A"} ${show(sym)} ${dir === "bull" ? "CALLS" : "PUTS"} · score ${score}`,
-          text: checks.map(([txt, ok]) => `${ok === true ? "✓" : ok === false ? "✗" : "·"} ${txt}`).join("\n")
-            + `\n**Entry** on a 1m close ${dir === "bull" ? "above" : "below"} ${r2(dir === "bull" ? pat.bar.high : pat.bar.low)} · **stop** beyond ${r2(stop)} · **target** ${next ?? "—"}`
-            + (c ? `\nContract: ${c}` : ""),
+          grade, score, contract: (ccFinal && ccFinal.c) || undefined, track: { dir, entry: dir === "bull" ? pat.bar.high : pat.bar.low, stop, target: next ?? null, needTrigger: true },
+          title: `${grade === "A+" ? "⭐ A+" : "✅ A"} ${show(sym)} ${dir === "bull" ? "CALLS ▲" : "PUTS ▼"} · ${score}`,
+          text: `**Buy:** ${ccFinal ? ccFinal.text : "no contract quote"}`
+            + `\n**Entry:** 1m close ${dir === "bull" ? "above" : "below"} **${entryPx}** · **Stop:** ${r2(stop)} · **Target:** ${next ?? "—"}`
+            + `\n${pat.name} at ${at.name} ${r2(at.v)} (3m) · expires in 9 min`
+            + `\n✓ ${yes.join(" · ") || "—"}`
+            + (no.length ? `\n✗ ${no.join(" · ")}` : ""),
         });
       }
       // market context of every signal from this ticker (the learning run compares winners and losers by it)
@@ -550,9 +627,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     }
     sent.push(alert);
     if (!dry) {
-      const r = await post(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · paper-test signal` } })
+      const r = await post(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot` } })
         .catch((e) => ({ ok: false, status: e.message }));
       if (!r.ok) errors.push("discord post: " + r.status);
+      else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }
     }
   }
   // finished signals go to the bot scorecard (journal: Bot view)
@@ -567,7 +645,16 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   st.updatedAt = now;
   if (!dry) await writeJSON(env, key, st);
   const planOf = (s) => plans[s] && plans[s].plan;
-  const paper = { candidates,
+  // "Event: CPI 8:30" / "Event: FOMC 2:00pm" lines in today's plan posts (no am/pm: hours 1-7 are afternoon)
+  const events = [];
+  for (const p of posts) for (const m of String(p.raw || "").replace(/\*/g, "").matchAll(/\bevents?\s*[:\-]\s*([^\n]*?)\b(\d{1,2}):(\d{2})\s*(am|pm)?/gi)) {
+    let h = +m[2];
+    const ap = (m[4] || "").toLowerCase();
+    if (ap === "pm" && h < 12) h += 12; else if (!ap && h < 8) h += 12;
+    events.push({ name: m[1].replace(/\s*(?:at|@)?\s*$/i, "").trim() || "event", min: h * 60 + +m[3] });
+  }
+  const paper = { candidates, events, kl: st.kl || {},
+    tf10: Object.fromEntries(Object.entries(st.tf10 || {}).map(([s, v]) => [s, v && v.rib ? v.rib.state : null])),
     plan: { call: (planOf("SPY") || {}).spxCall || (planOf("$SPX") || {}).spxCall || null, put: (planOf("SPY") || {}).spxPut || (planOf("$SPX") || {}).spxPut || null } };
   return { group, plans: Object.keys(plans), sent, errors, found: found.length, paper };
 }

@@ -117,10 +117,10 @@ so flow is built from volume changes between checks.
 
 ## **NEW** Event days
 
-You list scheduled events in the journal (FOMC, CPI, jobs report, big earnings like NVDA).
+Add a line to your morning plan post: `Event: FOMC 2:00` or `Event: CPI 8:30` (several lines are fine; without am/pm, 1:00-7:59 means afternoon).
 
-- 2:00 PM events (FOMC): no new entries 1:45-2:30; an open position is closed at 1:55.
-- 8:30 AM events (CPI, jobs): normal rules, but the opening range counts only after 9:33 as usual.
+- Events during the session (e.g. FOMC 2:00): no new paper entries from 15 minutes before to 15 minutes after; an open position is closed 5 minutes before.
+- Events before the open (e.g. CPI 8:30): only A+ setups until 9:45.
 
 ## Session
 
@@ -248,7 +248,10 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
   All other signals are bought right away at the ask of the quote the signal was built from.
 - **Exits:** the profit ladder above, plus the signal's own stop level on the ticker and its target level (counts as target 1).
 - One position at a time, so the first valid signal of the moment gets the trade; the rest are logged as skipped.
-- Not modeled yet: the "ribbon flips against the trade" and "rejection at a level" exits (an opposite signal closes the trade instead).
+- Also exits on: **rejected at a level** (the ticker reached a key level beyond the entry, then gave back half the move while the option is green),
+  **10m Saty cloud flipped** against the trade since the entry, and an opposite signal on SPX/SPY.
+- **Contracts follow price:** when a signal uses your posted contract and price has moved so far that its delta is outside 0.30-0.65,
+  the post switches to the same-expiry strike nearest delta 0.45 (marked ↪️ Adjusted) and the paper trade buys that one.
 - Every decision is in the journal's Bot view (Paper trading) and every entry/exit is posted to #signals as 📄 PAPER.
 
 ## **NEW** Self-training (src/learn.js, every day 4:10-4:30 PM)
@@ -290,6 +293,22 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 - After a takeover, SPX "Contract idea" lines in #signals use the champion's delta, so the posts and the paper trades stay the same.
 - Every style keeps the hard limits: 15% max loss per trade, −30% stop at most, daily loss limit and lockouts, one position, 3:59 close.
 - Live mode: a new style is never applied to real money without your approval.
+
+## **NEW** More ways the bot learns
+
+| Source | How |
+|---|---|
+| **Replay** (`node scripts/replay.mjs <bot url> 45` on your computer) | Runs the SPX signal rules over the last ~45 sessions of 1-minute data and scores each signal like the live scorecard. Learning uses them at half weight. No past options flow, LB, VIX, gamma or plans, and no option prices (results are in R on SPX). Re-run it every few weeks. |
+| **Your #spx-training posts with a result** | "Result: +65%" = +65 ÷ 30 = +2.2R (win = +1R, loss = −1R, BE = 0). Counted at 1.5× weight; the market snapshot from when you posted adds context (only if posted within 15 minutes of the trade). |
+| **Your reactions on #signals** | ✅ 👍 🔥 = good call, ❌ 👎 = bad. Each setup type gets up to ±0.3R from your votes. Needs the bot's **Read Message History** permission in #signals. |
+
+## **NEW** Posts and alerts
+
+- **A/A+ cards** read top-down: what to buy · entry / stop / target · the candle and level · ✓ what agrees · ✗ what doesn't.
+- **🏁 LB shakeout watch:** a top-5 leaderboard contract 20%+ above its VWAP, with the level stack to watch and step-by-step notes. It's a heads-up, not an entry (not paper traded).
+- **🎯 LB max pain** (3:50) now says which side to favor and to stay flat against the pull.
+- **🗓️ Daily recap** (about 4:10 PM): paper trades, best challenger, signals scored by type, your plan review, your reactions, what was learned.
+- **Phone alerts** (free ntfy app): paper buys/exits, 🏆 style takeovers, recaps, Schwab/bot warnings. Set up with `node scripts/keys.cjs ntfy`.
 
 ## **NEW** Live mode (only after paper; switched on by you)
 
