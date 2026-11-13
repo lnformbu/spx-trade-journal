@@ -111,6 +111,7 @@ export function resolveTracks(st, sym, rth, now, t) {
       if (bull ? c.high >= target : c.low <= target) { res = { outcome: "target", R: Math.abs(target - tr.entry) / risk }; break; }
     }
     const last = rth[rth.length - 1];
+    if (entered && !tr.enteredAt) tr.enteredAt = entered;
     if (!res && entered && last && (now - tr.at > 60 * 60000 || t.min >= CLOSE - 5)) res = { outcome: "time", R: ((bull ? 1 : -1) * (last.close - tr.entry)) / risk };
     if (!res && !entered && now - tr.at > 10 * 60000) res = { outcome: "not triggered", R: null };
     if (res) {
@@ -242,7 +243,20 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const L = { pdh: D.pdh, pdl: D.pdl, pdc: D.pdc, atr: D.atr, atrLevels: lv, ...intra };
       const c0 = rth.length ? rth[rth.length - 1].close : price;
       const c3 = rth.length ? rth[Math.max(0, rth.length - 4)].close : price;
-      if (!dry) resolved.push(...resolveTracks(st, sym, rth, now, t));
+      if (!dry) {
+        // option side of the scorecard: the signal's contract at the ask when it triggers, at the bid when it's scored
+        const res = resolveTracks(st, sym, rth, now, t);
+        const needEntry = (st.track || []).filter((x) => x.sym === sym && x.contract && x.enteredAt && x.optEntry == null);
+        const needExit = res.filter((x) => x.contract && x.R != null);
+        const osyms = [...new Set([...needEntry, ...needExit].map((x) => x.contract.symbol))];
+        if (osyms.length) {
+          const oq = await schwab(token, "/marketdata/v1/quotes?fields=quote&symbols=" + osyms.map(encodeURIComponent).join(",")).catch(() => ({}));
+          const Qo = (s) => oq[s] && oq[s].quote;
+          for (const x of needEntry) { const o = Qo(x.contract.symbol); if (o && o.askPrice > 0) x.optEntry = o.askPrice; }
+          for (const x of needExit) { const o = Qo(x.contract.symbol); if (o && o.bidPrice != null) x.optExit = o.bidPrice; }
+        }
+        resolved.push(...res);
+      }
 
       // ---- large moves ----
       for (const [k, name] of [["+1", "+1 ATR"], ["-1", "−1 ATR"], ["+2", "+2 ATR"], ["-2", "−2 ATR"]]) {
@@ -618,7 +632,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     const alert = { at: now, et: hhmm(t.min), kind: a.kind, sym: a.sym, title: a.title, text: a.text };
     st.alerts.push(alert);
     if (!dry && a.track && a.track.entry != null && a.track.stop != null && a.track.entry !== a.track.stop) {
-      (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, at: now, et: hhmm(t.min) });
+      (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, at: now, et: hhmm(t.min),
+        contract: a.contract && a.contract.symbol ? { symbol: a.contract.symbol, label: a.contract.label } : null,
+        // signals that enter right away are priced now; "entry on a 1m close" ones when they trigger
+        optEntry: !a.track.needTrigger && a.contract && a.contract.ask > 0 ? a.contract.ask : null });
     }
     // every signal posted with a contract is a paper-trade candidate: that contract, that entry, that stop (in the signal's own ticker)
     if (!dry && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
@@ -637,7 +654,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   if (resolved.length) {
     const stats = (await readJSON(env, "bot:stats")) || { items: [] };
     for (const r of resolved) stats.items.push({ date: t.date, sym: r.sym, kind: r.kind, grade: r.grade, title: r.title, dir: r.dir, et: r.et, at: r.at,
-      entry: r2(r.entry), stop: r2(r.stop), target: r2(r.target), outcome: r.outcome, R: r.R, mfeR: r.mfeR, maeR: r.maeR, key: r.key, fam: famOf(r.key), score: r.score ?? null, ctx: r.ctx || null });
+      entry: r2(r.entry), stop: r2(r.stop), target: r2(r.target), outcome: r.outcome, R: r.R, mfeR: r.mfeR, maeR: r.maeR, key: r.key, fam: famOf(r.key), score: r.score ?? null, ctx: r.ctx || null,
+      contract: r.contract ? r.contract.label : null, optEntry: r.optEntry ?? null, optExit: r.optExit ?? null,
+      optPct: r.optEntry > 0 && r.optExit != null ? Math.round((r.optExit / r.optEntry - 1) * 100) : null });
     stats.items = stats.items.slice(-3000);
     await writeJSON(env, "bot:stats", stats);
   }

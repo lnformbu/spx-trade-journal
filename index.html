@@ -571,7 +571,7 @@
         <section class="bd-box"><h3>Your plan scorecard <small>from the daily plan reviews</small></h3><div id="bsPlan"></div></section>
         <section class="bd-box"><h3>Training posts <small>Setup: / Idea: / Lesson: in #spx-plan</small></h3><div id="bsLib"></div></section>
       </div>
-      <section class="bd-box"><h3>Recent signal outcomes</h3><div class="bs-scroll"><table class="bs-t" id="bsRecent"></table></div></section>
+      <section class="bd-box"><h3>Recent signal outcomes <small>option bought at the ask when the signal triggers, sold at the bid when it's scored (up to ~2 min late); hover a signal for its SPX levels</small></h3><div class="bs-scroll"><table class="bs-t" id="bsRecent"></table></div></section>
     </div>
   </section>
 
@@ -1183,7 +1183,7 @@
       kpi("Signals scored",s.n,`${s.nt} didn't trigger`),
       kpi("Win rate",pct(s.win),`${s.wins} reached target or closed green`),
       kpi("Avg per signal",rr(s.avg),"R = result ÷ risk",s.avg>0?"pos":s.avg<0?"neg":""),
-      kpi("Total",rr(s.total),"sum of R",s.total>0?"pos":s.total<0?"neg":""),
+      (()=>{ const op=items.filter(x=>x.optPct!=null), a=op.length?op.reduce((t,x)=>t+x.optPct,0)/op.length:null; return kpi("Avg option move",a==null?"—":(a>=0?"+":"")+Math.round(a)+"%",`${op.length} signals with option prices`,a>0?"pos":a<0?"neg":""); })(),
       kpi("Profit factor",s.pf==null?"—":s.pf===Infinity?"∞":s.pf.toFixed(2),"winning R ÷ losing R"),
     ].join("");
     const group=(f)=>{ const m=new Map(); items.forEach(x=>{ const k=f(x); if(k==null) return; (m.get(k)||m.set(k,[]).get(k)).push(x); }); return [...m.entries()].map(([k,v])=>[k,summarize(v)]).sort((a,b)=>b[1].n-a[1].n); };
@@ -1195,7 +1195,9 @@
     table("#bsByTime",group(win).sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0])),"Window");
     // recent outcomes
     const rec=[...items].sort((a,b)=>b.at-a.at).slice(0,40);
-    $("#bsRecent").innerHTML=`<tr><th>When</th><th>Signal</th><th>Entry</th><th>Stop</th><th>Target</th><th>Outcome</th><th>R</th><th>Best</th></tr>`+(rec.map(x=>`<tr><td>${x.date.slice(5)} ${esc(x.et)}</td><td style="text-align:left">${esc(x.title)}</td><td>${f2(x.entry)}</td><td>${f2(x.stop)}</td><td>${f2(x.target)}</td><td>${esc(x.outcome)}</td><td class="${x.R>0?"up":x.R<0?"dn":""}">${x.R==null?"—":rr(x.R)}</td><td>${x.mfeR==null?"—":"+"+x.mfeR.toFixed(1)+"R"}</td></tr>`).join("")||`<tr><td colspan="8" class="hint">Signals are scored from the next market session (9:30–4:00 ET).</td></tr>`);
+    const pc=x=>x.optPct==null?"—":(x.optPct>=0?"+":"")+x.optPct+"%", oc=x=>x.optPct==null?"":x.optPct>=0?"up":"dn";
+    const OUT={target:"✅ target",stop:"❌ stop",time:"⏱ 60 min","not triggered":"· no trigger"};
+    $("#bsRecent").innerHTML=`<tr><th>When</th><th>Signal</th><th>Contract</th><th>Bought</th><th>Sold</th><th>Option</th><th>Result</th><th title="Score on SPX: result ÷ risk">R</th></tr>`+(rec.map(x=>`<tr><td>${x.date.slice(5)} ${esc(x.et)}</td><td style="text-align:left" title="${esc(`SPX levels: entry ${f2(x.entry)} · stop ${f2(x.stop)} · target ${f2(x.target)}`)}">${esc(x.title)}</td><td>${esc(x.contract||"—")}</td><td>${x.optEntry==null?"—":"$"+f2(x.optEntry)}</td><td>${x.optExit==null?"—":"$"+f2(x.optExit)}</td><td class="${oc(x)}">${pc(x)}</td><td>${esc(OUT[x.outcome]||x.outcome)}</td><td class="${x.R>0?"up":x.R<0?"dn":""}">${x.R==null?"—":rr(x.R)}</td></tr>`).join("")||`<tr><td colspan="8" class="hint">Signals are scored from the next market session (9:30–4:00 ET).</td></tr>`);
     // your plan scorecard (from the daily plan reviews)
     const days=Object.entries(bsData.reviews||{}).filter(([d])=>!cut||d>=cut);
     if(!days.length) $("#bsPlan").innerHTML=`<p class="hint">Fills in after each market close.</p>`;

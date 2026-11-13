@@ -304,6 +304,7 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 
 ## **NEW** Posts and alerts
 
+- **Scorecard (journal):** each signal shows its contract, the option price when it triggered (ask) and when it was scored (bid, up to ~2 min late) and the option %; the score (R) stays on SPX so signals are comparable whatever strike was used.
 - **A/A+ cards** read top-down: what to buy · entry / stop / target · the candle and level · ✓ what agrees · ✗ what doesn't.
 - **🏁 LB shakeout watch:** a top-5 leaderboard contract 20%+ above its VWAP, with the level stack to watch and step-by-step notes. It's a heads-up, not an entry (not paper traded).
 - **🎯 LB max pain** (3:50) now says which side to favor and to stay flat against the pull.
