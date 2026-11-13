@@ -10,7 +10,7 @@
 // Hard limits every style keeps: max loss 15% of the account per trade, −30% stop at most, daily limits, one position, 3:59 close.
 import { hhmm } from "./levels.js";
 import { post } from "./signals.js";
-import { decide, learn, famOf, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES } from "./learn.js";
+import { decide, learn, famOf, kindFam, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES } from "./learn.js";
 
 const FEE = 0.65;            // Schwab, per contract per side
 const START = 2000;
@@ -434,16 +434,16 @@ export async function runLearning(env, deps, { force = false, report = false, qu
 
 // Your ✅ / ❌ (also 👍 🔥 / 👎) on the last 5 days' signal posts -> "bot:feedback" (reactions by the bot itself don't count)
 async function collectFeedback(env, readJSON, writeJSON, t) {
-  const byMid = {};
+  const byMid = {}, noMid = [];   // older posts (before message ids were saved) are matched by title and time
   for (let i = 0; i < 5; i++) {
     const d = new Date(Date.parse(t.date + "T12:00:00Z") - i * 864e5).toISOString().slice(0, 10);
     const s = await readJSON(env, "sig:day:" + d);
-    for (const a of (s && s.alerts) || []) if (a.mid) byMid[a.mid] = { ...a, date: d };
+    for (const a of (s && s.alerts) || []) { const x = { ...a, date: d }; if (a.mid) byMid[a.mid] = x; else noMid.push(x); }
   }
   const fb = (await readJSON(env, "bot:feedback")) || { items: [] };
-  if (!Object.keys(byMid).length || !env.DISCORD_BOT_TOKEN) return { added: 0, items: fb.items };
+  if ((!Object.keys(byMid).length && !noMid.length) || !env.DISCORD_BOT_TOKEN) return { added: 0, items: fb.items };
   let before = null, added = 0, err = null;
-  const oldest = Math.min(...Object.values(byMid).map((a) => a.at));
+  const oldest = Math.min(...[...Object.values(byMid), ...noMid].map((a) => a.at));
   for (let page = 0; page < 5; page++) {
     const r = await fetch(`https://discord.com/api/v10/channels/${env.SIGNALS_CHANNEL_ID}/messages?limit=100${before ? "&before=" + before : ""}`,
       { headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)" } });
@@ -451,14 +451,16 @@ async function collectFeedback(env, readJSON, writeJSON, t) {
     const msgs = await r.json();
     if (!Array.isArray(msgs) || !msgs.length) break;
     for (const m of msgs) {
-      const a = byMid[m.id];
+      const title = m.embeds && m.embeds[0] && m.embeds[0].title, ts = Date.parse(m.timestamp);
+      const a = byMid[m.id] || noMid.find((x) => x.title === title && Math.abs(x.at - ts) < 3 * 60000);
       if (!a || !m.reactions) continue;
       const cnt = (names) => m.reactions.filter((x) => names.includes(x.emoji && x.emoji.name)).reduce((s, x) => s + x.count - (x.me ? 1 : 0), 0);
       const up = cnt(["✅", "👍", "🔥"]), down = cnt(["❌", "👎"]);
       const v = up > down ? 1 : down > up ? -1 : 0;
       const i = fb.items.findIndex((x) => x.mid === m.id);
       if (!v) { if (i >= 0) fb.items.splice(i, 1); continue; }
-      const rec = { mid: m.id, date: a.date, key: a.key, fam: famOf(a.key || ""), v, title: a.title };
+      const fam = a.key ? famOf(a.key) : /EYE OF SAURON/.test(a.title) ? "eye" : /max pain/i.test(a.title) ? "maxpain" : /LB SHAKEOUT/.test(a.title) ? "lbshake" : kindFam(a);
+      const rec = { mid: m.id, date: a.date, key: a.key || null, fam, v, title: a.title };
       if (i >= 0) fb.items[i] = rec; else { fb.items.push(rec); added++; }
     }
     before = msgs[msgs.length - 1].id;

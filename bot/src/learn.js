@@ -40,7 +40,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 export const FAM_NAMES = {
   star: "A/A+ setups", mom: "Momentum", flip: "Phase flip", squeeze: "Squeeze", box: "10m compression breakout",
   div1m: "1m divergence", div3m: "3m divergence", cbox1m: "1m compression breakout", cbox3m: "3m compression breakout",
-  "plan-trigger": "Your plan triggers", you: "Your training setups",
+  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch",
 };
 export const famOf = (key) => {
   const [p, a, b] = String(key).split(":");
@@ -214,7 +214,7 @@ function trainingSample(x) {
     ctx: fresh ? { chop: c.choppy ?? null, gex: c.gamma ? (c.gamma.aboveFlip ? "positive" : "negative") : null, vix: vixAgree,
       plan: c.planSide && dir ? (c.planSide === "range" ? "between" : (c.planSide === "calls") === (dir === "bull") ? "with" : "against") : null } : {} };
 }
-function kindFam(x) {
+export function kindFam(x) {
   if (x.kind === "star") return "star";
   if (x.kind === "momentum") return "mom";
   if (x.kind === "phase") return /SQUEEZE/.test(x.title) ? "squeeze" : /COMPRESSION/.test(x.title) ? "box" : "flip";
