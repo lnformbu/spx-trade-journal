@@ -95,7 +95,10 @@ async function schwabState(env) {
   try { return JSON.parse((await readBlob(env, "schwab")) || "{}"); } catch (e) { return {}; }
 }
 const saveSchwab = (env, s) => writeBlob(env, "schwab", JSON.stringify(s));
-const callbackUrl = (url) => url.origin + "/schwab/callback";
+// Every deploy also gets its own address (<hash>.<site>.pages.dev); Schwab only accepts the
+// callback registered on the app, so the connection always runs on the main address.
+const mainOrigin = (url) => url.origin.replace(/^https:\/\/[0-9a-f]{8}\.(?=[^.]+\.pages\.dev$)/, "https://");
+const callbackUrl = (url) => mainOrigin(url) + "/schwab/callback";
 
 async function schwabToken(env, params) {
   const r = await fetch(SCHWAB + "/v1/oauth/token", {
@@ -227,6 +230,7 @@ async function handle(req, env) {
   // ---- Schwab account connection ----
   if (url.pathname === "/schwab/login") {
     if (!schwabReady(env)) return new Response("Schwab isn't set up yet: run  npm run schwab:keys  (in the cloud folder).", { status: 503 });
+    if (mainOrigin(url) !== url.origin) return Response.redirect(mainOrigin(url) + "/schwab/login", 302);
     const s = await schwabState(env);
     s.pending = { state: crypto.randomUUID(), at: Date.now() };
     await saveSchwab(env, s);
