@@ -324,6 +324,22 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 - Paper trades (📄 buys, target 1, exits), 🏆 takeovers, 🧠 learning, 🗓️ recaps and warnings all post to #signals; turn on Discord notifications for that channel on your phone.
 - **Optional** extra phone push (free ntfy app), off unless set up with `node scripts/keys.cjs ntfy`.
 
+## **NEW** From the Saty training notes (SPX, 3-minute focus)
+
+| Piece | What the bot does | Replay (last ~20 sessions, R on SPX) |
+|---|---|---|
+| **3m first** (you scalp the 3m) | 1m divergence / compression signals only when the 3m ribbon agrees | 1m divergence +0.06R → **+0.43R**; 1m compression +0.08R → **+0.18R** |
+| **Trend mode** | 10m ribbon (2 pts), 3m ribbon, holding beyond the ORB, beyond the call/put trigger, through the Golden Gate, 1h cloud, VIX trending the other way, 50%+ of ATR used (max 9). 6+ with the 10m ribbon and the trigger on that side, not choppy, from 9:45. Lasts 60 minutes unless re-confirmed. | Right 72-79% over the **next 30-60 min**, only ~50% to the close, so it is a trend *window*, not a whole-day call. Signals with it +0.11R, against it +0.06R. |
+| **Never fight trend mode** | Signals against an active trend mode are posted but not paper traded (except a confirmed Vomy) | |
+| **🎯 21 EMA pullback** | Stacked 3m ribbon, price came from beyond the 8, a 3m bar dips into the 21 / 8-13 zone without losing the 48 and closes back past the 13. Entry: 1m close past that bar; stop: half a 3m ATR beyond the 21 zone; target: Golden Fib if the Gate was crossed, else the next ATR level. **The 1h cloud must agree.** Confluence shown: trend mode, stacked 21s (10m / 1h / daily), quiet pullback (SPY volume), VIX, Golden Gate. | Without the 1h filter −0.04R; **with it +0.06R, 57% wins**. The quiet-pullback (low volume) read did *not* help (shown, not required). |
+| **🤮 Vomy / 🐬 iVomy** | Stacked 3m ribbon for 6+ bars, then 2 closes through the 48 EMA. Entry on a 1m break, stop at the 13. | −0.08R so far: learning will switch it off if it keeps losing |
+| **🌉 Golden Gate** | Heads-up when SPX crosses ±38.2% ATR (about 60% reach ±61.8%); pullback entries then target the Golden Fib | |
+| **🌅 Opening read** (9:40) | Open vs the trigger box (at the call trigger → often back to PDC, sometimes the put trigger), auto VIX pivot (Day ATR level nearest VIX, rounded to 0.5: VIX above = bearish SPX), trend check | |
+| **🗡️ Highlander** (3:45) | Top 2 leaderboard contracts: under 100k volume they usually die into the close → favor the side that kills them; 100k+ often finish in the money | |
+| **Key levels** | 3m, 10m, 1h and daily 21 EMAs added (A/A+ cards can fire at them) | |
+
+Not built (from the notes): TTM Squeeze (Bollinger inside Keltner) as a separate indicator: the Phase Oscillator compression already plays that role; the Monday-buy/Thursday-sell calendar test was run separately (not a bot strategy).
+
 ## **NEW** Live mode (only after paper; switched on by you)
 
 - Entries use limit orders at or just through the ask, raised in small steps a limited number of times, then cancelled.

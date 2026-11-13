@@ -10,6 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
+import { trendScore, pullback21, vomy, marketPivot, pbConfluence } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -195,7 +196,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const q = quotes[sym] && quotes[sym].quote;
       if (!q) continue;
       const price = q.lastPrice;
-      if (!st.daily[sym]) {
+      if (!st.daily[sym] || st.daily[sym].ema21d === undefined) {
         const d = await history(token, { symbol: sym, periodType: "year", period: "1", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
         const dl = dayLevels(d, t.date);
         const mo = await history(token, { symbol: sym, periodType: "year", period: "5", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
@@ -203,6 +204,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           ...dl,
           cloudD: cloud2021(d.filter((c) => dailyDate(c) < t.date)),
           swing: modeLevels(mo.filter((c) => dailyDate(c).slice(0, 7) < t.date.slice(0, 7))),
+          // daily 21 EMA (swing pullback zone)
+          ema21d: (() => { const cl = d.filter((c) => dailyDate(c) < t.date).map((c) => c.close); return cl.length > 21 ? Math.round(ema(cl, 21).at(-1) * 100) / 100 : null; })(),
         };
       }
       const D = st.daily[sym];
@@ -244,7 +247,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const net30 = flow.filter((f) => now - f.at < 30 * 60000).reduce((s, f) => s + (f.dir === "bull" ? f.prem : -f.prem), 0);
 
       // ---- 1-minute bars today ----
-      const m1 = await history(token, { symbol: sym, frequencyType: "minute", frequency: "1", startDate: String(now - (t.min + 1) * 60000), endDate: String(now) });
+      const m1 = await history(token, { symbol: sym, frequencyType: "minute", frequency: "1", startDate: String(now - (t.min + 1) * 60000 - (sym === "$SPX" ? 4 * 864e5 : 0)), endDate: String(now) });
       const done = m1.filter((c) => c.datetime + 60000 <= now);
       const rows = done.map((c) => ({ ...c, t: et(c.datetime) })).filter((c) => c.t.date === t.date);
       const rth = rows.filter((c) => c.t.min >= OPEN && c.t.min < CLOSE);
@@ -286,8 +289,11 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
 
       // ---- shared context: Saty cloud (8/13/21/200) on 3m (scalp, ETH) and 10m (day, ETH), Phase Oscillator, VWAP, volume ----
       const side = (r) => (r && r.state === "bullish" ? "bull" : r && r.state === "bearish" ? "bear" : null);
-      const b3 = aggregate(rows, 3).filter((b) => b.datetime + 180000 <= now);
+      // 3m bars (SPX: the last few days too, so the 3m EMAs are settled at the open)
+      const b3 = aggregate(done, 3).filter((b) => b.datetime + 180000 <= now);
       const rib3 = b3.length >= 21 ? ribbon(b3) : null;
+      // SPY 3m volume for the quiet-pullback read on SPX (SPX has no volume)
+      if (sym === "SPY") st.spyVol3 = b3.slice(-12).map((b) => b.volume);
       const osc3 = phaseOsc(b3);
       const box3 = osc3 ? compressionBox(b3, osc3._track) : null;
       // 10m: from 5-minute bars over 5 days, refreshed every 10 minutes
@@ -304,6 +310,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           lastClose: b10.length ? b10[b10.length - 1].close : null, prevClose: b10.length > 1 ? b10[b10.length - 2].close : null,
           avwap: anchor ? avwap(m5, anchor) : null,
           cloudH: cloud2021(aggregate(m5, 60).filter((b) => b.datetime + 3600000 <= now)),
+          ema21h: (() => { const r = ribbon(aggregate(m5, 60).filter((b) => b.datetime + 3600000 <= now)); return r ? r.ema[21] : null; })(),
           chop: chop(b10),
         };
       }
@@ -338,6 +345,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         ...Object.entries(lv).filter(([k]) => Math.abs(+k) <= 2).map(([k, v]) => [LEVEL_NAMES[k] || `ATR ${k[0] === "+" ? "+" : "−"}${(+k.slice(1) * 100).toFixed(1)}%`, v]),
         ...(AV ? [["anchored VWAP", AV.vwap], ["AVWAP +1σ", AV.up1], ["AVWAP −1σ", AV.dn1], ["AVWAP +2σ", AV.up2], ["AVWAP −2σ", AV.dn2]] : []),
         ...(SW ? [["Swing call trigger", SW.atrLevels["+0.236"]], ["Swing put trigger", SW.atrLevels["-0.236"]]] : []),
+        // 21 EMAs on the scalp (3m), day (10m), multiday (1h) and daily charts: pullback zones
+        ["3m EMA 21", rib3 && rib3.ema[21]], ["10m EMA 21", T10.rib && T10.rib.ema[21]], ["1h EMA 21", T10.ema21h], ["daily EMA 21", D.ema21d],
       ];
       // SPX gamma levels (call wall, put wall, flip, Eye of Sauron, biggest nodes); SPY gets them divided by the SPX/SPY ratio
       const gconv = sym === "$SPX" ? 1 : sym === "SPY" && ratio ? 1 / ratio : null;
@@ -349,6 +358,121 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       }
       // key levels for the paper trader's "rejected at a level" exit
       if (big(sym)) (st.kl = st.kl || {})[sym] = keyLevels.filter(([, v]) => v != null && isFinite(v)).map(([n, v]) => [n, r2(v)]);
+
+      // ---- SPX: trend day, Golden Gate, 21 EMA pullbacks, Vomy, opening read (Saty training notes) ----
+      if (sym === "$SPX" && rth.length >= 3) {
+        const vs = vixState();
+        const b3rth = aggregate(rth, 3).filter((b) => b.datetime + 180000 <= now);
+        const TS = trendScore({ closes3: b3rth.map((b) => b.close), orbh: intra.orbh, orbl: intra.orbl, lv, rib3, rib10, cloudH: T10.cloudH, vix: vs, choppy, dtr });
+        st.trendDay = st.trendDay || {};
+        const td = st.trendDay[sym];
+        st.trendNow = TS && { dir: TS.dir, score: TS.score, max: TS.max, bits: TS.bits, trend: TS.trend, at: now };
+        if (td && td.active && TS && TS.trend && td.dir === TS.dir) td.lastOk = now;
+        if (TS && TS.trend && t.min >= 585 && (!td || !td.active || td.dir !== TS.dir)) {
+          st.trendDay[sym] = { active: true, dir: TS.dir, since: hhmm(t.min), at: now, lastOk: now };
+          const up = TS.dir === "bull";
+          found.push({
+            kind: "trend", sym, key: `trend:${t.date}:${TS.dir}:${Math.floor(now / 1800000)}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            title: `${up ? "📈" : "📉"} TREND MODE ${up ? "UP" : "DOWN"} · SPX ${r2(c0)} (${TS.score}/${TS.max})`,
+            text: TS.bits.map((b) => "✓ " + b).join("\n")
+              + `\nIn the replay this read was right 72-79% of the time over the next 30-60 minutes (it is not a call on the whole day).`
+              + `\n**How to trade it:** ${up ? "calls" : "puts"} only, don't chase. Buy pullbacks to the 3m 21 EMA / 8-13 (the bot posts 🎯 21 EMA PULLBACK when one holds).`
+              + `\nTargets: Golden Fib ${up ? "+" : "−"}61.8% ${r2(lv[up ? "+0.618" : "-0.618"])}, then ${up ? "+1" : "−1"} ATR ${r2(lv[up ? "+1" : "-1"])}. Don't fade it while the 10m ribbon stays ${up ? "green" : "red"}.`,
+          });
+        } else if (td && td.active && TS && (TS.score <= 3 || now - (td.lastOk || td.at) > 60 * 60000 || (rib10 && rib10.state === (td.dir === "bull" ? "bearish" : "bullish")))) {
+          td.active = false; td.ended = hhmm(t.min);
+          found.push({
+            kind: "trend", sym, key: `trendend:${t.date}:${td.dir}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
+            title: `⚠️ Trend mode ${td.dir === "bull" ? "up" : "down"} ended · SPX ${r2(c0)}`,
+            text: `10m ribbon ${rib10 ? rib10.state : "—"}, trend score ${TS.score}/${TS.max}. Stop adding ${td.dir === "bull" ? "calls" : "puts"}; protect runners.`,
+          });
+        }
+        // Golden Gate: crossing ±38.2% → ~60% odds of reaching ±61.8% (Golden Fib)
+        for (const [k, fib, up] of [["+0.382", "+0.618", true], ["-0.382", "-0.618", false]]) {
+          const g = lv[k];
+          if (g == null || !(up ? c3 < g && c0 >= g : c3 > g && c0 <= g)) continue;
+          found.push({
+            kind: "gg", sym, key: `gg:${t.date}:${k}`, once: true, color: COLORS.star,
+            title: `🌉 GOLDEN GATE ${up ? "+" : "−"}38.2% crossed · SPX ${r2(c0)}`,
+            text: `SPX crossed ${r2(g)}. About 60% of the time it goes on to the Golden Fib ${up ? "+" : "−"}61.8% **${r2(lv[fib])}**.`
+              + `\n**How to trade it:** works best with the ribbon stacked ${up ? "up" : "down"} (3m ${rib3 ? rib3.state : "—"}, 10m ${rib10 ? rib10.state : "—"}). Don't chase the cross: take the pullback to the 3m ribbon, target ${r2(lv[fib])}.`,
+          });
+        }
+        // 21 EMA pullback (scalp entry) in the trend-day direction, or wherever the 10m and 3m ribbons agree
+        const tdNow = st.trendDay[sym] && st.trendDay[sym].active ? st.trendDay[sym].dir : null;
+        const pbDir = tdNow || (!choppy && side(rib10) && side(rib10) === side(rib3) ? side(rib10) : null);
+        let pb = pbDir ? pullback21(b3, pbDir) : null;
+        // regime filter (replay: +0.05R with the 1h cloud agreeing, −0.08R against): the 1h 20/21 cloud must agree
+        if (pb && T10.cloudH !== (pb.dir === "bull" ? "up" : "down")) pb = null;
+        if (pb) {
+          const up = pb.dir === "bull";
+          const ggCrossed = rth.some((c) => (up ? c.high >= lv["+0.382"] : c.low <= lv["-0.382"]));
+          const fib = lv[up ? "+0.618" : "-0.618"], fibHit = up ? intra.hod >= fib : intra.lod <= fib;
+          const next = Object.values(lv).filter((v) => (up ? v > pb.entry : v < pb.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+          const target = ggCrossed && !fibHit ? fib : next;
+          const stack = [["10m", T10.rib && T10.rib.ema[21]], ["1h", T10.ema21h], ["daily", D.ema21d]]
+            .filter(([, v]) => v != null && Math.abs(v - pb.ema21) <= D.atr * 0.08).map(([n, v]) => `${n} 21 EMA ${r2(v)}`);
+          const cf = pbConfluence({ dir: pb.dir, trendOn: tdNow === pb.dir, stack, spyVol3: st.spyVol3, ggCrossed, cloudH: T10.cloudH, vix: vs });
+          found.push({
+            kind: "setup", sym, key: `pb21:${pb.bar.datetime}:${pb.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: pb.dir, entry: pb.entry, stop: pb.stop, target: target ?? null, needTrigger: true },
+            title: `🎯 SPX 21 EMA PULLBACK ${up ? "CALLS ▲" : "PUTS ▼"}${tdNow ? " · trend mode" : ""}${stack.length ? " · stacked 21s" : ""}`,
+            text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(pb.entry)}** · **Stop:** ${r2(pb.stop)} · **Target:** ${target != null ? r2(target) : "—"}${ggCrossed && !fibHit ? " (Golden Fib)" : ""} · expires in 9 min`
+              + `\n3m bar pulled into the 21 EMA ${pb.ema21} (8 ${pb.ema8} / 13 ${pb.ema13}) and closed back ${up ? "above" : "below"} the 13`
+              + `\nConfluence ${cf.score}/6: ${cf.bits.join(" · ")}`,
+          });
+        }
+        // Vomy / iVomy (3m): stacked ribbon breaks and holds the 48 EMA
+        const vm = vomy(b3);
+        if (vm) {
+          const up = vm.dir === "bull";
+          const next = Object.values(lv).filter((v) => (up ? v > vm.entry : v < vm.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+          found.push({
+            kind: "setup", sym, key: `vomy:${vm.bar.datetime}:${vm.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: vm.dir, entry: vm.entry, stop: vm.stop, target: next ?? null, needTrigger: true },
+            title: `${up ? "🐬 iVOMY" : "🤮 VOMY"} SPX ${up ? "CALLS ▲" : "PUTS ▼"} (3m)`,
+            text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(vm.entry)}** · **Stop:** ${r2(vm.stop)} (13 EMA side) · **Target:** ${next != null ? r2(next) : "—"} · expires in 9 min`
+              + `\nThe 3m ribbon was stacked ${up ? "down" : "up"}, then SPX broke and held ${up ? "above" : "below"} the 48 EMA ${vm.ema48} for 2 closes: ${up ? "inverse Vomy" : "Vomy"} confirmed.`,
+          });
+        }
+        // opening read at 9:40: where SPX opened vs the trigger box, the VIX pivot, the trend-day check
+        if (t.min >= 580 && t.min <= 592 && !st.openRead) {
+          st.openRead = t.date;
+          let vp = null;
+          try {
+            const vd = await history(token, { symbol: "$VIX", periodType: "year", period: "1", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
+            const vl = dayLevels(vd, t.date);
+            vp = vl && st.vix10 ? marketPivot(st.vix10.last, vl.atrLevels, 0.5) : null;
+          } catch (e) {}
+          st.vixPivot = vp;
+          const op = intra.open, near = (v) => op != null && v != null && Math.abs(op - v) <= D.atr * 0.06;
+          const ct = r2(lv["+0.236"]), pt = r2(lv["-0.236"]);
+          const read = near(lv["+0.236"]) ? `Opened at the **call trigger** ${ct}. If it can't hold above, it often goes back to the previous close ${D.pdc}, sometimes all the way to the put trigger ${pt}. Holding above = calls toward the Golden Gate ${r2(lv["+0.382"])}.`
+            : near(lv["-0.236"]) ? `Opened at the **put trigger** ${pt}. If it can't hold below, it often goes back to the previous close ${D.pdc}, sometimes all the way to the call trigger ${ct}. Holding below = puts toward the Golden Gate ${r2(lv["-0.382"])}.`
+            : op > lv["-0.236"] && op < lv["+0.236"] ? `Opened inside the trigger box (${pt}–${ct}): expect chop until a trigger breaks; a clean break often runs to the Golden Gate.`
+            : op > lv["+0.236"] ? `Opened above the call trigger ${ct}: bullish while it holds; pullbacks to the trigger or the 3m 21 EMA are the entries.`
+            : `Opened below the put trigger ${pt}: bearish while it holds; pullbacks to the trigger or the 3m 21 EMA are the entries.`;
+          found.push({
+            kind: "open", sym, key: `open:${t.date}`, once: true, color: COLORS.plan,
+            title: `🌅 SPX opening read · ${r2(op)} (previous close ${D.pdc})`,
+            text: read
+              + `\nVIX ${st.vix10 ? st.vix10.last : "—"}${vp ? ` · pivot **${vp}**: VIX above it = bearish SPX, below = bullish` : ""}`
+              + `\nTrend-day check: ${TS ? `${TS.score}/${TS.max} ${TS.dir === "bull" ? "up" : "down"}${TS.bits.length ? " (" + TS.bits.join(", ") + ")" : ""}` : "—"}`,
+          });
+        }
+        // Highlander (3:45): the top leaderboard contracts usually die into the close unless they have 100k+ volume
+        if (GX && GX.lb && GX.lb.top && GX.lb.top.length && t.min >= 945 && t.min <= 952) {
+          const top = GX.lb.top.slice(0, 2);
+          found.push({
+            kind: "setup", sym, key: `highlander:${t.date}`, once: true, color: COLORS.star,
+            title: `🗡️ HIGHLANDER (3:45) · top of the LB: SPX ${top[0].label}`,
+            text: top.map((c) => `• **${c.label}** ${Math.round(c.vol / 1000)}k volume, ${c.itm ? "in" : "out of"} the money: `
+                + (c.vol >= 100000 ? "100k+ volume, these often finish in the money; don't fight it" : `under 100k, usually "killed" into the close → favor SPX finishing ${c.type === "C" ? "below" : "above"} ${c.strike}`)).join("\n")
+              + `\nMax pain zone ${GX.lb.maxPainZone ? `${GX.lb.maxPainZone.low}–${GX.lb.maxPainZone.high}` : "—"} · SPX ${r2(c0)}`
+              + `\n**How to trade it:** wait for a reversal at a key level (Phase Oscillator divergence, 1m/3m squeeze) in the direction that kills the top contract; ITM/ATM 0DTE; take profit at the next ATR level; watch for a last 1-2 minute reversal. The paper account closes everything at 3:59.`,
+          });
+        }
+      }
 
       // ---- momentum (not on choppy days) ----
       if (rth.length >= 10 && !choppy) {
@@ -417,7 +541,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         for (const [tf, bars, o] of [["1m", b1, o1], ["3m", b3, o3]]) {
           if (!o) continue;
           const dv = divergence(bars, o._osc);
-          if (dv) found.push({
+          if (dv && (tf !== "1m" || side(rib3) === dv.dir)) found.push({
             kind: "setup", sym, key: `div:${tf}:${dv.at}`, once: true, color: COLORS[dv.dir],
             track: { dir: dv.dir, entry: c0, stop: dv.dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: null },
             title: `📐 SPX ${tf} ${dv.dir === "bull" ? "BULLISH" : "BEARISH"} DIVERGENCE`,
@@ -425,7 +549,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           });
           const bx = compressionBox(bars, o._track);
           const lc = bars.at(-1), pc = bars.at(-2);
-          if (bx && lc && pc && ((pc.close <= bx.high && lc.close > bx.high) || (pc.close >= bx.low && lc.close < bx.low))) {
+          if (bx && lc && pc && ((pc.close <= bx.high && lc.close > bx.high) || (pc.close >= bx.low && lc.close < bx.low)) && (tf !== "1m" || side(rib3) === (lc.close > bx.high ? "bull" : "bear"))) {
             const up = lc.close > bx.high;
             found.push({
               kind: "setup", sym, key: `cbox:${tf}:${bx.from}:${up}`, once: true, color: up ? COLORS.bull : COLORS.bear,
@@ -623,12 +747,14 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
+        trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",
       };
       // SPX focus: SPY only gauges SPX (its own setups would duplicate SPX's); your plan alerts on SPY prices still post
       if (sym === "SPY") for (const f of found) if (f.sym === sym && f.kind !== "plan") f.drop = "SPY duplicates SPX";
       // VIX must not fight the trade (VIX is the inverse of SPX), and every trade signal says why in plain words
       if (sym === "$SPX" || sym === "SPY") {
         const vs = vixState(), V = st.vix10;
+        const TDs = st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active ? st.trendDay.$SPX.dir : null;
         for (const f of found) {
           if (f.sym !== sym || !f.track || f.drop || f.why) continue;
           const dir = f.track.dir, bull = dir === "bull";
@@ -639,6 +765,8 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           if (strong && f.kind !== "plan") { f.drop = "VIX trending against"; continue; }
           if (strong) f.vixAgainst = true;
           const fam = famOf(f.key) || "";
+          // never play against a trend day (except a confirmed Vomy, the reversal setup); your plan alerts still post
+          if (TDs && TDs !== dir && fam !== "vomy") f.noTrade = "against trend mode";
           const what = fam.startsWith("div") ? (bull ? "SPX made a lower low but momentum (Phase Oscillator) made a higher low: sellers are running out of steam" : "SPX made a higher high but momentum (Phase Oscillator) made a lower high: buyers are running out of steam")
             : fam.startsWith("cbox") ? `SPX broke ${bull ? "up" : "down"} out of a tight ${fam.slice(4)} compression range; tight ranges usually lead to a bigger move`
             : fam === "box" ? `the 10m chart broke ${bull ? "up" : "down"} out of its compression box; that often starts a bigger move`
@@ -647,12 +775,16 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             : fam === "mom" ? "SPX broke a key level with VWAP and the 3m cloud agreeing"
             : fam === "plan-trigger" ? `SPX crossed your posted ${bull ? "call" : "put"} trigger`
             : fam === "star" ? `a ${bull ? "bullish" : "bearish"} reversal candle formed at a key level and most checks agree`
+            : fam === "pb21" ? `SPX pulled back into the 3m 21 EMA in a ${bull ? "rising" : "falling"} ribbon and held: the wait-for-the-pullback entry (no chasing)`
+            : fam === "vomy" ? `the ${bull ? "falling" : "rising"} 3m ribbon broke and held the 48 EMA: a multi-EMA crossover reversal (${bull ? "inverse Vomy" : "Vomy"})`
             : "setup triggered";
           const ctxBits = [
             vs ? `VIX ${V ? V.last + " " : ""}${vs}${(bull && vs === "falling") || (!bull && vs === "rising") ? " ✓ confirms " + (bull ? "calls" : "puts") : vs === "mixed" ? " (not confirming yet)" : strong ? " ✗ trending against" : " ⚠ ticking against (no trend yet)"}` : null,
             rib10 ? `10m cloud ${rib10.state}${side(rib10) === dir ? " ✓" : side(rib10) ? " ✗" : ""}` : null,
             choppy ? "choppy market ⚠" : "trending market ✓",
             P ? (planSide === dir ? "with your plan ✓" : planSide ? "against your plan ✗" : "between your plan triggers") : null,
+            V && st.vixPivot ? `VIX ${V.last > st.vixPivot ? "above" : "below"} its pivot ${st.vixPivot}${(V.last < st.vixPivot) === bull ? " ✓" : " ✗"}` : null,
+            TDs ? (TDs === dir ? "with trend mode ✓" : "against trend mode ✗ (not paper traded)") : null,
           ].filter(Boolean);
           f.why = true;
           f.text += `\n**Why:** ${what}.\n${ctxBits.join(" · ")}`;
@@ -682,7 +814,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         optEntry: !a.track.needTrigger && a.contract && a.contract.ask > 0 ? a.contract.ask : null });
     }
     // every signal posted with a contract is a paper-trade candidate: that contract, that entry, that stop (in the signal's own ticker)
-    if (!dry && !a.vixAgainst && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
+    if (!dry && !a.vixAgainst && !a.noTrade && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
       candidates.push({ key: a.key, fam: famOf(a.key), kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, et: hhmm(t.min), sym: a.sym,
         contract: a.contract, dir: a.track.dir, uEntry: a.track.entry, uStop: a.track.stop, uTarget: a.track.target, needTrigger: !!a.track.needTrigger,
         why: (String(a.text).split("**Why:** ")[1] || "").trim() });

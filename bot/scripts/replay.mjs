@@ -15,6 +15,8 @@ import { patterns, atLevel } from "../src/patterns.js";
 import { resolveTracks } from "../src/signals.js";
 import { famOf } from "../src/learn.js";
 import { LEVEL_NAMES } from "../src/plan.js";
+import { trendScore, pullback21, vomy, pbConfluence } from "../src/setups.js";
+import { ema } from "../src/levels.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const BOT = (process.argv[2] || "").replace(/\/$/, "");
@@ -36,6 +38,10 @@ for (let end = now; end > now - DAYS * 864e5; end -= 9 * 864e5) {
   const part = await get({ symbol: "$SPX", frequencyType: "minute", frequency: "1", startDate: String(end - 9 * 864e5), endDate: String(end), needExtendedHoursData: "false" });
   m1.push(...part);
 }
+// SPY 1m (volume for the "quiet pullback" check; SPX has no volume)
+let spy = [];
+for (let end = now; end > now - DAYS * 864e5; end -= 9 * 864e5) spy.push(...await get({ symbol: "SPY", frequencyType: "minute", frequency: "1", startDate: String(end - 9 * 864e5), endDate: String(end), needExtendedHoursData: "false" }));
+spy = [...new Map(spy.map((c) => [c.datetime, c])).values()].sort((a, b) => a.datetime - b.datetime);
 m1 = [...new Map(m1.map((c) => [c.datetime, c])).values()].sort((a, b) => a.datetime - b.datetime).map((c) => ({ ...c, t: et(c.datetime) }));
 const today = et(now).date;
 const days = [...new Set(m1.map((c) => c.t.date))].filter((d) => d < today);
@@ -47,11 +53,13 @@ for (const date of days) {
   const D = dayLevels(daily, date);
   if (!D) continue;
   const lv = D.atrLevels;
+  const dCloses = daily.filter((c) => new Date(c.datetime + 12 * 3600e3).toISOString().slice(0, 10) < date).map((c) => c.close);
+  const ema21d = dCloses.length > 21 ? ema(dCloses, 21).at(-1) : null;
   const rows = m1.filter((c) => c.t.date === date);
   const before = m1.filter((c) => c.t.date < date).slice(-40 * 390);
   const fired = new Set();
   const found = [];
-  let T10 = null;
+  let T10 = null, trendDir = null, trendOk = 0;
   for (let min = OPEN + 3; min < CLOSE - 5; min++) {
     const nowMs = rows.find((c) => c.t.min === min)?.datetime;
     if (!nowMs) continue;
@@ -68,7 +76,8 @@ for (const date of days) {
       const b10x = aggregate(all, 10).filter((b) => b.datetime + 600000 <= nowMs).slice(-600);
       const o = phaseOsc(b10x);
       T10 = { b10: b10x, rib10: ribbon(b10x), osc10: o, box10: o ? compressionBox(b10x, o._track) : null, ch: chop(b10x),
-        cloudH: cloud2021(aggregate(all, 60).filter((b) => b.datetime + 3600000 <= nowMs)) };
+        cloudH: cloud2021(aggregate(all, 60).filter((b) => b.datetime + 3600000 <= nowMs)),
+        ema21h: (() => { const r = ribbon(aggregate(all, 60).filter((b) => b.datetime + 3600000 <= nowMs)); return r ? r.ema[21] : null; })() };
     }
     const { b10, rib10, osc10, box10, cloudH } = T10;
     const ch = T10.ch, crosses = rth.length > 20 ? vwapCrosses(rth, 60) : 0;
@@ -77,7 +86,39 @@ for (const date of days) {
     const keyLevels = [["ORB high", intra.orbh], ["ORB low", intra.orbl], ["yesterday's high", D.pdh], ["yesterday's low", D.pdl], ["PDC", D.pdc], ["VWAP", vwap],
       ...Object.entries(lv).filter(([k]) => Math.abs(+k) <= 2).map(([k, v]) => [LEVEL_NAMES[k] || `ATR ${k}`, v])];
     const et0 = `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
-    const add = (key, kind, track, extra = {}) => { if (fired.has(key)) return; fired.add(key); found.push({ key, kind, track: { ...track, at: nowMs }, et: et0, ctx: { chop: choppy, gex: null, vix: null, plan: "none" }, ...extra }); };
+    // 3m bars including earlier days (settled EMAs), trend day state
+    const b3all = aggregate([...before.slice(-1170), ...done], 3).filter((b) => b.datetime + 180000 <= nowMs);
+    const rib3a = b3all.length >= 21 ? ribbon(b3all) : null;
+    const ts = trendScore({ closes3: aggregate(rth, 3).filter((b) => b.datetime + 180000 <= nowMs).map((b) => b.close), orbh: intra.orbh, orbl: intra.orbl, lv, rib3: rib3a, rib10, cloudH, vix: null, choppy, dtr });
+    if (ts && ts.trend && min >= 585) { trendDir = ts.dir; trendOk = nowMs; }
+    else if (trendDir && ts && (ts.score <= 3 || nowMs - trendOk > 60 * 60000 || (rib10 && rib10.state === (trendDir === "bull" ? "bearish" : "bullish")))) trendDir = null;
+    const add = (key, kind, track, extra = {}) => {
+      if (fired.has(key)) return; fired.add(key);
+      const trend = trendDir ? (trendDir === track.dir ? "with" : "against") : "none";
+      found.push({ key, kind, track: { ...track, at: nowMs }, et: et0, ctx: { chop: choppy, gex: null, vix: null, plan: "none", trend }, ...extra });
+    };
+    // 21 EMA pullback and Vomy (src/setups.js, same as live)
+    {
+      const pbDir = trendDir || (!choppy && side(rib10) && side(rib10) === side(rib3a) ? side(rib10) : null);
+      let pb = pbDir ? pullback21(b3all, pbDir) : null;
+      if (pb && cloudH !== (pb.dir === "bull" ? "up" : "down")) pb = null; // 1h cloud must agree (as live)
+      if (pb) {
+        const up = pb.dir === "bull";
+        const ggCrossed = rth.some((c) => (up ? c.high >= lv["+0.382"] : c.low <= lv["-0.382"]));
+        const fib = lv[up ? "+0.618" : "-0.618"], fibHit = up ? intra.hod >= fib : intra.lod <= fib;
+        const next = Object.values(lv).filter((v) => (up ? v > pb.entry : v < pb.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+        const stack = [["10m", rib10 && rib10.ema[21]], ["1h", T10.ema21h], ["daily", ema21d]].filter(([, v]) => v != null && Math.abs(v - pb.ema21) <= D.atr * 0.08).map(([n]) => n);
+        const spyVol3 = aggregate(spy.filter((c) => c.datetime >= nowMs - 60 * 60000 && c.datetime < nowMs), 3).map((b) => b.volume);
+        const cf = pbConfluence({ dir: pb.dir, trendOn: !!trendDir && trendDir === pb.dir, stack, spyVol3, ggCrossed, cloudH, vix: null });
+        add(`pb21:${pb.bar.datetime}:${pb.dir}`, "setup", { dir: pb.dir, entry: pb.entry, stop: pb.stop, target: (ggCrossed && !fibHit ? fib : next) ?? null, needTrigger: true }, { conf: cf.bits.map((b) => b.split(" (")[0]) });
+      }
+      const vm = vomy(b3all);
+      if (vm) {
+        const up = vm.dir === "bull";
+        const next = Object.values(lv).filter((v) => (up ? v > vm.entry : v < vm.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+        add(`vomy:${vm.bar.datetime}:${vm.dir}`, "setup", { dir: vm.dir, entry: vm.entry, stop: vm.stop, target: next ?? null, needTrigger: true });
+      }
+    }
 
     // momentum (not on choppy days)
     if (!choppy) for (const [name, lvl, dir] of [["ORB high", intra.orbh, "bull"], ["ORB low", intra.orbl, "bear"], ["yesterday's high", D.pdh, "bull"], ["yesterday's low", D.pdl, "bear"],
@@ -103,9 +144,9 @@ for (const date of days) {
     for (const [tf, bars, o] of [["1m", b1, phaseOsc(b1)], ["3m", b3, osc3]]) {
       if (!o) continue;
       const dv = divergence(bars, o._osc);
-      if (dv) add(`div:${tf}:${dv.at}`, "setup", { dir: dv.dir, entry: c0, stop: dv.dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: null });
+      if (dv && (tf !== "1m" || side(rib3a) === dv.dir)) add(`div:${tf}:${dv.at}`, "setup", { dir: dv.dir, entry: c0, stop: dv.dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: null });
       const bx = compressionBox(bars, o._track), lc = bars.at(-1), pc = bars.at(-2);
-      if (bx && lc && pc && ((pc.close <= bx.high && lc.close > bx.high) || (pc.close >= bx.low && lc.close < bx.low))) {
+      if (bx && lc && pc && ((pc.close <= bx.high && lc.close > bx.high) || (pc.close >= bx.low && lc.close < bx.low)) && (tf !== "1m" || side(rib3a) === (lc.close > bx.high ? "bull" : "bear"))) {
         const up = lc.close > bx.high;
         add(`cbox:${tf}:${bx.from}:${up}`, "setup", { dir: up ? "bull" : "bear", entry: lc.close, stop: bx.mid, target: null });
       }
@@ -136,7 +177,7 @@ for (const date of days) {
     const slice = rthAll.filter((c) => c.datetime < end);
     const res = resolveTracks({ track: [{ ...f.track, sym: "$SPX" }] }, "$SPX", slice, end + 60 * 60000 + 1, { min: et(end).min })[0];
     if (!res || res.R == null) continue;
-    out.push({ date, sym: "$SPX", kind: f.kind, key: f.key, fam: famOf(f.key), grade: f.grade || null, score: f.score ?? null, et: f.et, dir: f.track.dir, ctx: f.ctx, R: res.R, outcome: res.outcome, replay: true });
+    out.push({ conf: f.conf, date, sym: "$SPX", kind: f.kind, key: f.key, fam: famOf(f.key), grade: f.grade || null, score: f.score ?? null, et: f.et, dir: f.track.dir, ctx: f.ctx, R: res.R, outcome: res.outcome, replay: true });
   }
   process.stdout.write(`${date}: ${found.length} signals\n`);
 }
@@ -145,9 +186,16 @@ const byFam = {};
 for (const x of out) { const f = (byFam[x.fam] = byFam[x.fam] || { n: 0, R: 0, w: 0 }); f.n++; f.R += x.R; if (x.R > 0) f.w++; }
 console.log("\nfamily        results  win%   avg R");
 for (const [k, f] of Object.entries(byFam).sort((a, b) => b[1].R / b[1].n - a[1].R / a[1].n)) console.log(k.padEnd(14), String(f.n).padStart(6), String(Math.round((f.w / f.n) * 100)).padStart(5) + "%", (f.R / f.n).toFixed(2).padStart(7));
+const byTrend = {};
+for (const x of out) { const k = x.ctx.trend; const f = (byTrend[k] = byTrend[k] || { n: 0, R: 0, w: 0 }); f.n++; f.R += x.R; if (x.R > 0) f.w++; }
+console.log("\nvs trend day   results  win%   avg R");
+for (const [k, f] of Object.entries(byTrend)) console.log(k.padEnd(14), String(f.n).padStart(6), String(Math.round((f.w / f.n) * 100)).padStart(5) + "%", (f.R / f.n).toFixed(2).padStart(7));
+const trendDays = new Set(out.filter((x) => x.ctx.trend !== "none").map((x) => x.date)).size;
+console.log(`trend days detected: ${trendDays} of ${days.length}`);
 // keep a local copy (git-ignored), then upload with retries
 const body = JSON.stringify({ from: days[0], to: days[days.length - 1], items: out });
 fs.writeFileSync(path.join(here, "..", ".replay.json"), body);
+if (process.env.NO_SAVE) process.exit(0);
 for (let i = 1; i <= 4; i++) {
   try {
     const r = await fetch(BOT + "/replay/save", { method: "POST", headers: { "x-bot-key": KEY, "Content-Type": "application/json" }, body });
