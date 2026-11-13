@@ -20,3 +20,4 @@ cloud/verses.sql
 bot/.admin-key
 bot/.wrangler/
 bot/.dev.vars
+bot/.replay.json

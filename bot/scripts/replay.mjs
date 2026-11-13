@@ -145,5 +145,16 @@ const byFam = {};
 for (const x of out) { const f = (byFam[x.fam] = byFam[x.fam] || { n: 0, R: 0, w: 0 }); f.n++; f.R += x.R; if (x.R > 0) f.w++; }
 console.log("\nfamily        results  win%   avg R");
 for (const [k, f] of Object.entries(byFam).sort((a, b) => b[1].R / b[1].n - a[1].R / a[1].n)) console.log(k.padEnd(14), String(f.n).padStart(6), String(Math.round((f.w / f.n) * 100)).padStart(5) + "%", (f.R / f.n).toFixed(2).padStart(7));
-const r = await fetch(BOT + "/replay/save", { method: "POST", headers: { "x-bot-key": KEY, "Content-Type": "application/json" }, body: JSON.stringify({ from: days[0], to: days[days.length - 1], items: out }) });
-console.log("\nsaved:", await r.text());
+// keep a local copy (git-ignored), then upload with retries
+const body = JSON.stringify({ from: days[0], to: days[days.length - 1], items: out });
+fs.writeFileSync(path.join(here, "..", ".replay.json"), body);
+for (let i = 1; i <= 4; i++) {
+  try {
+    const r = await fetch(BOT + "/replay/save", { method: "POST", headers: { "x-bot-key": KEY, "Content-Type": "application/json" }, body });
+    console.log("\nsaved:", await r.text());
+    break;
+  } catch (e) {
+    console.log(`upload try ${i} failed (${e.message}); retrying`);
+    await new Promise((res) => setTimeout(res, 3000 * i));
+  }
+}
