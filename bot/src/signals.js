@@ -43,13 +43,18 @@ function contracts(chain) {
 }
 const fmtC = (o) => `${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)} ~ $${r2(o.mark)}`;
 // contract idea: nearest expiry, delta closest to 0.40 in the trade's direction
-function idea(list, dir) {
+function ideaO(list, dir) {
   const side = list.filter((o) => o.putCall === (dir === "bull" ? "CALL" : "PUT") && o.mark > 0 && o.delta != null);
   if (!side.length) return null;
   const exp = side.map((o) => o.exp).sort()[0];
-  const best = side.filter((o) => o.exp === exp).sort((a, b) => Math.abs(Math.abs(a.delta) - 0.4) - Math.abs(Math.abs(b.delta) - 0.4))[0];
+  return side.filter((o) => o.exp === exp).sort((a, b) => Math.abs(Math.abs(a.delta) - 0.4) - Math.abs(Math.abs(b.delta) - 0.4))[0] || null;
+}
+function idea(list, dir) {
+  const best = ideaO(list, dir);
   return best ? `${fmtC(best)} (Δ ${Math.abs(best.delta).toFixed(2)})` : null;
 }
+// the contract a signal shows, in a form the paper trader can buy
+const cobj = (o, sym) => (o ? { symbol: o.symbol, label: `${show(sym)} ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)}`, bid: o.bid, ask: o.ask, mark: o.mark, delta: o.delta } : null);
 // your posted contract (nearest expiry with that strike)
 function posted(list, strike, type) {
   return list.filter((o) => o.putCall === type && Math.abs(o.strikePrice - strike) < 0.01).sort((a, b) => (a.exp < b.exp ? -1 : 1))[0] || null;
@@ -59,7 +64,8 @@ async function spxContract(schwab, token, date, strike, type) {
   const sym = `SPXW  ${date.slice(2).replace(/-/g, "")}${type === "CALL" ? "C" : "P"}${String(Math.round(strike * 1000)).padStart(8, "0")}`;
   const q = await schwab(token, "/marketdata/v1/quotes?fields=quote&symbols=" + encodeURIComponent(sym)).catch(() => ({}));
   const x = q[sym] && q[sym].quote;
-  return x ? `SPX ${strike}${type === "CALL" ? "c" : "p"} 0DTE ~ $${r2(x.mark ?? x.lastPrice)}` : `SPX ${strike}${type === "CALL" ? "c" : "p"}`;
+  const label = `SPX ${strike}${type === "CALL" ? "c" : "p"} 0DTE`;
+  return x ? { text: `${label} ~ ${r2(x.mark ?? x.lastPrice)}`, c: { symbol: sym, label, bid: x.bidPrice, ask: x.askPrice, mark: x.mark ?? x.lastPrice, delta: x.delta } } : { text: label, c: null };
 }
 
 // A signal wins when price reaches its target before its stop (no target = 2R). A bar touching both counts as the stop.
@@ -396,7 +402,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         const contract = async (dir) => {
           if (spxPlan) return spxContract(schwab, token, t.date, dir === "bull" ? P.spxCall : P.spxPut, dir === "bull" ? "CALL" : "PUT");
           const o = posted(list, dir === "bull" ? P.callTrigger : P.putTrigger, dir === "bull" ? "CALL" : "PUT");
-          return o ? `${name} ${fmtC(o)}` : null;
+          return o ? { text: `${name} ${fmtC(o)}`, c: cobj(o, sym) } : null;
         };
         planSide = P.callTrigger != null && c0 > P.callTrigger ? "bull" : P.putTrigger != null && c0 < P.putTrigger ? "bear" : null;
         for (const [dir, trig] of [["bull", P.callTrigger], ["bear", P.putTrigger]]) {
@@ -404,9 +410,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           const crossed = dir === "bull" ? c3 <= trig && c0 > trig : c3 >= trig && c0 < trig;
           if (crossed && !ps[dir]) {
             ps[dir] = { at: now, trig };
-            const c = await contract(dir);
+            const cc = await contract(dir), c = cc && cc.text;
             found.push({
-              kind: "plan", sym, key: `plan:${sym}:${dir}`, once: true, color: COLORS[dir],
+              kind: "plan", sym, key: `plan:${sym}:${dir}`, once: true, color: COLORS[dir], contract: (cc && cc.c) || undefined,
               track: { dir, entry: c0, stop: dir === "bull" ? trig * 0.9985 : trig * 1.0015, target: null },
               title: `🗺️ ${name} crossed your ${dir === "bull" ? "CALL" : "PUT"} trigger ${trig}${asSpx(trig)}`,
               text: `${show(sym)} ${r2(c0)}, ${dir === "bull" ? "above" : "below"} your trigger. VWAP ${vwap ?? "—"}, 3m cloud ${rib3 ? rib3.state : "—"}, 10m cloud ${rib10 ? rib10.state : "—"}, options flow ${money(net30)} net ${net30 >= 0 ? "bullish" : "bearish"} (30 min).${c ? `\nYour contract: ${c}` : ""}`,
@@ -484,13 +490,16 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         if (!grade) continue;
         const stop = dir === "bull" ? pat.bar.low : pat.bar.high;
         const next = Object.values(lv).filter((v) => (dir === "bull" ? v > c0 : v < c0)).sort((x, y) => (dir === "bull" ? x - y : y - x))[0];
-        const c = P && (dir === "bull" ? P.callTrigger : P.putTrigger) != null
-          ? (sym === "SPY" && (P.spxCall || P.spxPut) ? await spxContract(schwab, token, t.date, dir === "bull" ? P.spxCall : P.spxPut, dir === "bull" ? "CALL" : "PUT")
-            : (posted(list, dir === "bull" ? P.callTrigger : P.putTrigger, dir === "bull" ? "CALL" : "PUT") && `${show(sym)} ${fmtC(posted(list, dir === "bull" ? P.callTrigger : P.putTrigger, dir === "bull" ? "CALL" : "PUT"))}`))
-          : (idea(list, dir) && `${show(sym)} ${idea(list, dir)}`);
+        const type = dir === "bull" ? "CALL" : "PUT";
+        const po = P && (dir === "bull" ? P.callTrigger : P.putTrigger) != null && !(sym === "SPY" && (P.spxCall || P.spxPut)) ? posted(list, dir === "bull" ? P.callTrigger : P.putTrigger, type) : null;
+        const cc = P && (dir === "bull" ? P.callTrigger : P.putTrigger) != null
+          ? (sym === "SPY" && (P.spxCall || P.spxPut) ? await spxContract(schwab, token, t.date, dir === "bull" ? P.spxCall : P.spxPut, type)
+            : po ? { text: `${show(sym)} ${fmtC(po)}`, c: cobj(po, sym) } : null)
+          : ideaO(list, dir) ? { text: `${show(sym)} ${idea(list, dir)}`, c: cobj(ideaO(list, dir), sym) } : null;
+        const c = cc && cc.text;
         found.push({
           kind: "star", sym, key: `star:${sym}:${pat.bar.datetime}:${dir}`, once: true, color: grade === "A+" ? COLORS.star : COLORS[dir],
-          grade, score, track: { dir, entry: dir === "bull" ? pat.bar.high : pat.bar.low, stop, target: next ?? null, needTrigger: true },
+          grade, score, contract: (cc && cc.c) || undefined, track: { dir, entry: dir === "bull" ? pat.bar.high : pat.bar.low, stop, target: next ?? null, needTrigger: true },
           title: `${grade === "A+" ? "⭐ A+" : "✅ A"} ${show(sym)} ${dir === "bull" ? "CALLS" : "PUTS"} · score ${score}`,
           text: checks.map(([txt, ok]) => `${ok === true ? "✓" : ok === false ? "✗" : "·"} ${txt}`).join("\n")
             + `\n**Entry** on a 1m close ${dir === "bull" ? "above" : "below"} ${r2(dir === "bull" ? pat.bar.high : pat.bar.low)} · **stop** beyond ${r2(stop)} · **target** ${next ?? "—"}`
@@ -499,6 +508,12 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       }
       // market context of every signal from this ticker (the learning run compares winners and losers by it)
       const gexSide = GX && GX.flip != null && (sym === "$SPX" || (sym === "SPY" && ratio)) ? ((sym === "SPY" ? c0 * ratio : c0) >= GX.flip ? "positive" : "negative") : null;
+      for (const f of found) if (f.sym === sym && f.track && f.contract === undefined) {
+        const o = ideaO(list, f.track.dir);
+        f.contract = cobj(o, sym);
+        if (o && !/ontract/.test(f.text)) f.text += `
+Contract idea: ${show(sym)} ${idea(list, f.track.dir)}`;
+      }
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
@@ -522,11 +537,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (!dry && a.track && a.track.entry != null && a.track.stop != null && a.track.entry !== a.track.stop) {
       (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, at: now, et: hhmm(t.min) });
     }
-    // SPX/SPY signals with a stop are paper-trade candidates (SPY prices converted to SPX)
-    if (!dry && a.track && a.track.stop != null && (a.sym === "$SPX" || (a.sym === "SPY" && ratio))) {
-      const k = a.sym === "SPY" ? ratio : 1, cv = (v) => (v == null ? null : Math.round(v * k * 100) / 100);
+    // every signal posted with a contract is a paper-trade candidate: that contract, that entry, that stop (in the signal's own ticker)
+    if (!dry && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
       candidates.push({ key: a.key, fam: famOf(a.key), kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, et: hhmm(t.min), sym: a.sym,
-        dir: a.track.dir, uEntry: cv(a.track.entry), uStop: cv(a.track.stop), uTarget: cv(a.track.target), needTrigger: !!a.track.needTrigger });
+        contract: a.contract, dir: a.track.dir, uEntry: a.track.entry, uStop: a.track.stop, uTarget: a.track.target, needTrigger: !!a.track.needTrigger });
     }
     sent.push(alert);
     if (!dry) {
@@ -547,7 +561,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   st.updatedAt = now;
   if (!dry) await writeJSON(env, key, st);
   const planOf = (s) => plans[s] && plans[s].plan;
-  const paper = { candidates, spx: quotes.$SPX && quotes.$SPX.quote ? quotes.$SPX.quote.lastPrice : null,
+  const paper = { candidates,
     plan: { call: (planOf("SPY") || {}).spxCall || (planOf("$SPX") || {}).spxCall || null, put: (planOf("SPY") || {}).spxPut || (planOf("$SPX") || {}).spxPut || null } };
   return { group, plans: Object.keys(plans), sent, errors, found: found.length, paper };
 }

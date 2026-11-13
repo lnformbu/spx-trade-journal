@@ -1,8 +1,10 @@
-// Paper trading (RULES.md: Money, Instrument, Session, Exits, Profit ladder, Protecting the day, Paper mode).
+// Paper trading (RULES.md: Money, Session, Exits, Profit ladder, Protecting the day, Paper mode).
 // Runs every minute right after the signal scan. No orders are ever sent: fills are simulated on live Schwab quotes.
 //
-//   signal (SPX or SPY) -> queued -> next minute's check: still valid? learning says yes? -> buy at the ASK
-//   open position: profit ladder, structure stop, time stop, runner trail, 3:45 close -> sell at the BID
+//   It trades exactly what #signals posted: the signal's CONTRACT, the signal's ENTRY, the signal's stop and target.
+//   - signals with an entry level ("Entry on a 1m close above X", the A/A+ cards): bought when the ticker trades through X (within 9 minutes)
+//   - all other signals: bought right away, at the ask of the contract quote the signal was built from
+//   open position: profit ladder, the signal's stop (structure), time stop, runner trail, 3:45 close -> sold at the BID
 //   every decision (taken, skipped and why) is logged; closed trades feed the nightly learning run (learn.js)
 import { hhmm } from "./levels.js";
 import { post } from "./signals.js";
@@ -14,6 +16,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
 const TRADED = new Set(["star", "mom", "flip", "squeeze", "box", "div1m", "div3m", "cbox1m", "cbox3m", "plan-trigger"]);
+const group = (sym) => (sym === "SPY" || sym === "$SPX" ? "SPX" : sym);   // SPY and SPX count as one market
 
 function freshDay(acct, t) {
   acct.day = { date: t.date, startBal: acct.balance, pnl: 0, best: 0, trades: 0, consecLoss: 0, lastLossAt: 0, stopOuts: [], done: null };
@@ -36,7 +39,7 @@ function gate(acct, cand, t, now) {
   if (d.trades >= 4) return "4 trades today";
   if (d.consecLoss >= 2) return (d.done = "2 losses in a row");
   if (now - d.lastLossAt < 15 * 60000) return "15-minute cooldown after a loss";
-  if (d.stopOuts.some((s) => s.dir === cand.dir && Math.abs(s.level - cand.uEntry) <= cand.uEntry * 0.0008)) return "already stopped out at this level in this direction";
+  if (d.stopOuts.some((s) => s.sym === group(cand.sym) && s.dir === cand.dir && Math.abs(s.level - cand.uEntry) <= Math.abs(cand.uEntry) * 0.0008)) return "already stopped out at this level in this direction";
   return null;
 }
 
@@ -46,32 +49,13 @@ async function quotes(schwab, token, syms) {
   const out = {};
   for (const s of syms) {
     const x = q[s] && q[s].quote;
-    if (x) out[s] = { bid: x.bidPrice, ask: x.askPrice, mark: x.mark ?? x.lastPrice, delta: x.delta };
+    if (x) out[s] = { bid: x.bidPrice, ask: x.askPrice, last: x.lastPrice, mark: x.mark ?? x.lastPrice };
   }
   return out;
 }
-const spxSymbol = (date, type, strike) => `SPXW  ${date.slice(2).replace(/-/g, "")}${type === "CALL" ? "C" : "P"}${String(Math.round(strike * 1000)).padStart(8, "0")}`;
 
-// your posted contract first; otherwise SPX 0DTE with delta 0.45-0.60 and a spread of at most 5% of mid
-async function pickContract(schwab, token, date, dir, planStrike) {
-  const type = dir === "bull" ? "CALL" : "PUT";
-  if (planStrike) {
-    const sym = spxSymbol(date, type, planStrike);
-    const q = (await quotes(schwab, token, [sym]))[sym];
-    if (q && q.ask > 0 && q.bid > 0) return { symbol: sym, strike: planStrike, type, ...q, posted: true };
-  }
-  const chain = await schwab(token, `/marketdata/v1/chains?symbol=%24SPX&contractType=${type}&strikeCount=24&fromDate=${date}&toDate=${date}`).catch(() => ({}));
-  const list = [];
-  for (const exp in chain[type === "CALL" ? "callExpDateMap" : "putExpDateMap"] || {}) for (const k in chain[type === "CALL" ? "callExpDateMap" : "putExpDateMap"][exp]) for (const o of chain[type === "CALL" ? "callExpDateMap" : "putExpDateMap"][exp][k]) list.push(o);
-  const ok = list.filter((o) => o.ask > 0 && o.bid > 0 && o.delta != null && (o.ask - o.bid) / ((o.ask + o.bid) / 2) <= 0.05);
-  const inBand = ok.filter((o) => Math.abs(o.delta) >= 0.45 && Math.abs(o.delta) <= 0.6);
-  const o = (inBand.length ? inBand : ok.filter((o) => Math.abs(o.delta) >= 0.35 && Math.abs(o.delta) <= 0.7))
-    .sort((a, b) => Math.abs(Math.abs(a.delta) - 0.5) - Math.abs(Math.abs(b.delta) - 0.5))[0];
-  return o ? { symbol: o.symbol, strike: o.strikePrice, type, bid: o.bid, ask: o.ask, mark: o.mark, delta: o.delta, posted: false } : null;
-}
-
-// candidates = this minute's new SPX/SPY signals from runSignals; spx = live SPX
-export async function runPaper(env, deps, { candidates = [], spx, plan = {}, now = Date.now(), t }) {
+// candidates = this minute's new signals that were posted with a contract (from runSignals)
+export async function runPaper(env, deps, { candidates = [], now = Date.now(), t }) {
   const { schwabToken, schwab, readJSON, writeJSON } = deps;
   const acct = (await readJSON(env, "paper:acct")) || { start: START, balance: START, open: null, pending: [], shadow: [], log: [] };
   const model = (await readJSON(env, "paper:model")) || DEFAULT_MODEL;
@@ -82,9 +66,15 @@ export async function runPaper(env, deps, { candidates = [], spx, plan = {}, now
   const closed = [];
   const messages = [];
 
-  // one quote call for the open position and the "after the exit" shadows
-  const syms = [...new Set([...(acct.open ? [acct.open.symbol] : []), ...acct.shadow.map((s) => s.symbol)])];
+  // one quote call: open contract, its ticker, waiting signals' tickers and contracts, and the "after the exit" shadows
+  const o0 = acct.open;
+  const syms = [...new Set([
+    ...(o0 ? [o0.symbol, o0.under] : []),
+    ...acct.pending.flatMap((p) => [p.sym, p.contract.symbol]),
+    ...acct.shadow.map((s) => s.symbol),
+  ])];
   const Q = await quotes(schwab, token, syms);
+  const px = (sym) => (Q[sym] ? Q[sym].last ?? Q[sym].mark : null);
 
   // shadows: keep recording the option for 30 minutes after an exit (learning replays other exit settings on it)
   if (acct.shadow.length) {
@@ -98,55 +88,17 @@ export async function runPaper(env, deps, { candidates = [], spx, plan = {}, now
     await writeJSON(env, "paper:trades", tr);
   }
 
-  // ---- manage the open position ----
-  const pos = acct.open;
-  if (pos && pos.date !== t.date) {
-    sell(pos, pos.qtyOpen, pos.lastBid || 0, "carried past the session (closed at last price)", now, t);
-  } else if (pos) {
-    const q = Q[pos.symbol];
-    if (!q || !(q.bid >= 0)) pos.missed = (pos.missed || 0) + 1;
-    else {
-      const bid = q.bid, E = pos.entry, bull = pos.dir === "bull";
-      pos.lastBid = bid; pos.missed = 0;
-      pos.path.push(r3(bid / E - 1));
-      if (bid > pos.bestBid) { pos.bestBid = bid; pos.bestAt = now; }
-      const pct = bid / E - 1, bestPct = pos.bestBid / E - 1;
-      // profit ladder (stops only move up)
-      if (bestPct >= P.bePct) pos.stop = Math.max(pos.stop, E);
-      if (bestPct >= P.lockPct) pos.stop = Math.max(pos.stop, E * (1 + P.lockTo));
-      const uHit = pos.uTarget != null && spx != null && (bull ? spx >= pos.uTarget : spx <= pos.uTarget);
-      if (!pos.t1 && (pct >= P.t1Pct || (uHit && pct >= 0.15))) {
-        pos.t1 = now;
-        if (pos.qtyOpen >= 2) {
-          sell(pos, Math.floor(pos.qtyOpen / 2), bid, uHit && pct < P.t1Pct ? "target 1 (SPX level)" : `target 1 (+${Math.round(P.t1Pct * 100)}%)`, now, t);
-          pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop2));
-        } else pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop1));
-        messages.push({ title: `📄 PAPER target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
-      }
-      if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
-      const opp = candidates.find((c) => c.dir !== pos.dir && decide(model, c).ok);
-      let why = null;
-      if (bid <= pos.stop) why = pos.stop > E ? (pos.t1 ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
-      else if (spx != null && pos.uStop != null && (bull ? spx <= pos.uStop : spx >= pos.uStop)) why = `structure stop (SPX ${r2(spx)} through ${r2(pos.uStop)})`;
-      else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain) why = `time stop (no +${Math.round(P.timeStopGain * 100)}% in ${P.timeStopMin} min)`;
-      else if (pos.t1 && now - pos.bestAt >= P.stallMin * 60000) why = `runner stalled ${P.stallMin} min`;
-      else if (opp) why = "opposite signal: " + opp.title;
-      else if (t.min >= 945) why = "3:45 close";
-      if (why) sell(pos, pos.qtyOpen, bid, why, now, t);
-    }
-    if (pos.missed >= 5) log(acct, t, "warning", pos.label, "no option quote for 5 minutes");
-  }
-  function sell(p, qty, px, why, now, t) {
+  function sell(p, qty, price, why) {
     if (qty <= 0) return;
-    p.realized += qty * (px - p.entry) * 100 - qty * FEE;
+    p.realized += qty * (price - p.entry) * 100 - qty * FEE;
     p.qtyOpen -= qty;
-    p.exits.push({ et: hhmm(t.min), at: now, qty, px, why });
+    p.exits.push({ et: hhmm(t.min), at: now, qty, px: price, why });
     if (p.qtyOpen > 0) return;
     const pnl = r2(p.realized - p.qty * FEE);
     const d = acct.day;
     acct.balance = r2(acct.balance + pnl);
     d.pnl = r2(d.pnl + pnl); d.best = Math.max(d.best, d.pnl);
-    if (pnl < 0) { d.consecLoss++; d.lastLossAt = now; if (/stop/.test(why)) d.stopOuts.push({ dir: p.dir, level: p.uEntry }); } else d.consecLoss = 0;
+    if (pnl < 0) { d.consecLoss++; d.lastLossAt = now; if (/stop/.test(why)) d.stopOuts.push({ sym: group(p.under), dir: p.dir, level: p.uEntry }); } else d.consecLoss = 0;
     const avgExit = p.exits.reduce((s, e) => s + e.qty * e.px, 0) / p.qty;
     const trade = { ...p, pnl, R: r2(pnl / p.risk), avgExit: r2(avgExit), exitWhy: why, closedAt: now, closedET: hhmm(t.min), balance: acct.balance };
     delete trade.qtyOpen; delete trade.missed; delete trade.lastBid;
@@ -161,64 +113,106 @@ export async function runPaper(env, deps, { candidates = [], spx, plan = {}, now
     });
   }
 
-  // ---- pending entries from earlier minutes: fill now (the delay a real order would have) ----
+  // buy the signal's own contract at `ask`
+  function enter(p, ask, bid, underPx, how) {
+    const cost1 = ask * 100, riskPer = cost1 * P.stopPct + 2 * FEE, c = p.contract;
+    let qty = Math.floor((0.5 * acct.balance) / cost1);
+    if (qty < 1) { log(acct, t, "skipped", p.title, `one ${c.label} costs ${usd(cost1)}, more than 50% of the account`); return false; }
+    qty = Math.min(qty, Math.floor((0.15 * acct.balance) / riskPer), Math.floor((acct.day.pnl + 0.15 * acct.day.startBal) / riskPer));
+    if (qty < 1) { log(acct, t, "skipped", p.title, "one contract would risk more than the 15% limit left today"); return false; }
+    acct.open = {
+      id: now + ":" + c.symbol, date: t.date, symbol: c.symbol, label: c.label, under: p.sym, delta: c.delta, dir: p.dir,
+      qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
+      at: now, et: hhmm(t.min), stop: r2(ask * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,
+      uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer),
+      fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est,
+      exits: [], realized: 0, path: [r3((bid || ask) / ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct },
+    };
+    acct.day.trades++;
+    const bull = p.dir === "bull", tk = p.sym.replace("$", "");
+    log(acct, t, "bought", p.title, `${qty} × ${c.label} @ ${usd(ask)} (${how})`);
+    messages.push({
+      title: `📄 PAPER BUY ${qty} × ${c.label} @ ${usd(ask)}`,
+      text: `From: ${p.title} (${p.et} ET) · ${how}\nStop ${usd(acct.open.stop)} (−${Math.round(P.stopPct * 100)}%) or ${tk} ${bull ? "below" : "above"} ${r2(p.uStop)} · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(ask * (1 + P.t1Pct))})${p.uTarget != null ? ` or ${tk} ${r2(p.uTarget)}` : ""}\nRisk ${usd(acct.open.risk)} of ${usd(acct.balance)}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
+      color: bull ? 0x2ec26b : 0xf0556b,
+    });
+    return true;
+  }
+
+  // ---- manage the open position ----
+  const pos = acct.open;
+  if (pos && pos.date !== t.date) {
+    sell(pos, pos.qtyOpen, pos.lastBid || 0, "carried past the session (closed at last price)");
+  } else if (pos) {
+    const q = Q[pos.symbol], u = px(pos.under);
+    if (!q || !(q.bid >= 0)) pos.missed = (pos.missed || 0) + 1;
+    else {
+      const bid = q.bid, E = pos.entry, bull = pos.dir === "bull";
+      pos.lastBid = bid; pos.missed = 0;
+      pos.path.push(r3(bid / E - 1));
+      if (bid > pos.bestBid) { pos.bestBid = bid; pos.bestAt = now; }
+      const pct = bid / E - 1, bestPct = pos.bestBid / E - 1;
+      // profit ladder (stops only move up)
+      if (bestPct >= P.bePct) pos.stop = Math.max(pos.stop, E);
+      if (bestPct >= P.lockPct) pos.stop = Math.max(pos.stop, E * (1 + P.lockTo));
+      const uHit = pos.uTarget != null && u != null && (bull ? u >= pos.uTarget : u <= pos.uTarget);
+      if (!pos.t1 && (pct >= P.t1Pct || (uHit && pct >= 0.15))) {
+        pos.t1 = now;
+        if (pos.qtyOpen >= 2) {
+          sell(pos, Math.floor(pos.qtyOpen / 2), bid, uHit && pct < P.t1Pct ? "target 1 (signal's target level)" : `target 1 (+${Math.round(P.t1Pct * 100)}%)`);
+          pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop2));
+        } else pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop1));
+        messages.push({ title: `📄 PAPER target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
+      }
+      if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
+      const opp = candidates.find((c) => group(c.sym) === group(pos.under) && c.dir !== pos.dir && decide(model, c).ok);
+      let why = null;
+      if (bid <= pos.stop) why = pos.stop > E ? (pos.t1 ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
+      else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
+      else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain) why = `time stop (no +${Math.round(P.timeStopGain * 100)}% in ${P.timeStopMin} min)`;
+      else if (pos.t1 && now - pos.bestAt >= P.stallMin * 60000) why = `runner stalled ${P.stallMin} min`;
+      else if (opp) why = "opposite signal: " + opp.title;
+      else if (t.min >= 945) why = "3:45 close";
+      if (why) sell(pos, pos.qtyOpen, bid, why);
+    }
+    if (acct.open && acct.open.missed >= 5) log(acct, t, "warning", acct.open.label, "no option quote for 5 minutes");
+  }
+
+  // ---- signals waiting for their entry level (A/A+: "Entry on a 1m close above/below X") ----
   if (!acct.open) {
     for (const p of acct.pending) {
-      if (p.done) continue;
-      const age = now - p.at, bull = p.dir === "bull";
+      if (p.done || acct.open) continue;
+      const bull = p.dir === "bull", u = px(p.sym), q = Q[p.contract.symbol];
       const g = gate(acct, p, t, now);
       if (g) { p.done = true; log(acct, t, "skipped", p.title, g); continue; }
-      if (spx == null) continue;
-      if (bull ? spx <= p.uStop : spx >= p.uStop) { p.done = true; log(acct, t, "dropped", p.title, "price went through the stop before entry"); continue; }
-      if (p.needTrigger) {
-        const hit = bull ? spx >= p.uEntry : spx <= p.uEntry;
-        if (!hit) { if (age > 9 * 60000) { p.done = true; log(acct, t, "dropped", p.title, "not triggered within 9 minutes"); } continue; }
-      } else if (age < 40000) continue;
-      if (age > 12 * 60000) { p.done = true; log(acct, t, "dropped", p.title, "too old"); continue; }
-      if (p.uTarget != null && Math.abs(spx - p.uEntry) > Math.abs(p.uTarget - p.uEntry) / 2 && (bull ? spx > p.uEntry : spx < p.uEntry)) { p.done = true; log(acct, t, "dropped", p.title, "don't chase: over half way to the target"); continue; }
+      if (now - p.at > 9 * 60000) { p.done = true; log(acct, t, "dropped", p.title, `entry ${r2(p.uEntry)} not reached within 9 minutes`); continue; }
+      if (u == null) continue;
+      if (bull ? u <= p.uStop : u >= p.uStop) { p.done = true; log(acct, t, "dropped", p.title, "price hit the stop before the entry"); continue; }
+      if (!(bull ? u >= p.uEntry : u <= p.uEntry)) continue;
       p.done = true;
-      const planStrike = bull ? plan.call : plan.put;
-      const c = await pickContract(schwab, token, t.date, p.dir, planStrike);
-      if (!c) { log(acct, t, "skipped", p.title, "no SPX 0DTE contract with delta 0.45-0.60 and a tight spread"); continue; }
-      const cost1 = c.ask * 100, riskPer = cost1 * P.stopPct + 2 * FEE;
-      let qty = Math.floor((0.5 * acct.balance) / cost1);
-      if (qty < 1) { log(acct, t, "skipped", p.title, `one ${c.strike}${c.type[0].toLowerCase()} costs ${usd(cost1)}, more than 50% of the account`); continue; }
-      qty = Math.min(qty, Math.floor((0.15 * acct.balance) / riskPer));
-      const room = acct.day.pnl + 0.15 * acct.day.startBal;
-      qty = Math.min(qty, Math.floor(room / riskPer));
-      if (qty < 1) { log(acct, t, "skipped", p.title, "one contract would risk more than the 15% limit left today"); continue; }
-      const label = `SPX ${c.strike}${c.type === "CALL" ? "c" : "p"}`;
-      acct.open = {
-        id: now + ":" + c.symbol, date: t.date, symbol: c.symbol, label, posted: c.posted, delta: c.delta, dir: p.dir,
-        qty, qtyOpen: qty, entry: c.ask, spreadPct: r3((c.ask - c.bid) / ((c.ask + c.bid) / 2)),
-        at: now, et: hhmm(t.min), stop: r2(c.ask * (1 - P.stopPct)), bestBid: c.bid, bestAt: now, t1: null,
-        uEntry: r2(spx), uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer),
-        fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est,
-        exits: [], realized: 0, path: [r3(c.bid / c.ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct },
-      };
-      acct.day.trades++;
-      log(acct, t, "bought", p.title, `${qty} × ${label} @ ${usd(c.ask)}${c.posted ? " (your posted contract)" : ` (Δ ${Math.abs(c.delta).toFixed(2)})`}`);
-      messages.push({
-        title: `📄 PAPER BUY ${qty} × ${label} 0DTE @ ${usd(c.ask)}`,
-        text: `From: ${p.title} (${p.et} ET)\nStop ${usd(acct.open.stop)} (−${Math.round(P.stopPct * 100)}%) · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(c.ask * (1 + P.t1Pct))}) · SPX invalid ${bull ? "below" : "above"} ${r2(p.uStop)}\nRisk ${usd(acct.open.risk)} of ${usd(acct.balance)}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
-        color: bull ? 0x2ec26b : 0xf0556b,
-      });
-      break; // one position at a time
+      if (!q || !(q.ask > 0)) { log(acct, t, "skipped", p.title, "no quote for " + p.contract.label); continue; }
+      enter(p, q.ask, q.bid, u, `${p.sym.replace("$", "")} ${r2(u)} through the entry ${r2(p.uEntry)}`);
     }
   }
-  acct.pending = acct.pending.filter((p) => !p.done && now - p.at < 12 * 60000);
+  acct.pending = acct.pending.filter((p) => !p.done && now - p.at < 10 * 60000);
 
-  // ---- this minute's new signals: check the rules and the learned model, then queue for the next check ----
+  // ---- this minute's new signals ----
   for (const c of candidates) {
     if (!TRADED.has(c.fam)) continue;
     const g = gate(acct, c, t, now);
     if (g) { log(acct, t, "skipped", c.title, g); continue; }
     if (acct.open) { log(acct, t, "skipped", c.title, "a position is already open"); continue; }
-    if (acct.pending.some((p) => p.dir === c.dir)) continue;
     const d = decide(model, c);
     if (!d.ok) { log(acct, t, "skipped", c.title, d.why); continue; }
-    acct.pending.push({ ...c, at: now, est: d.est });
-    log(acct, t, "queued", c.title, `fills at the next check${c.needTrigger ? " once SPX " + (c.dir === "bull" ? "breaks above " : "breaks below ") + r2(c.uEntry) : ""}${d.why ? " · " + d.why : ""}`);
+    if (c.needTrigger) {
+      if (acct.pending.some((p) => group(p.sym) === group(c.sym) && p.dir === c.dir)) continue;
+      acct.pending.push({ ...c, at: now, est: d.est });
+      log(acct, t, "waiting", c.title, `buys ${c.contract.label} when ${c.sym.replace("$", "")} ${c.dir === "bull" ? "breaks above" : "breaks below"} ${r2(c.uEntry)}${d.why ? " · " + d.why : ""}`);
+    } else {
+      const k = c.contract;
+      if (!(k.ask > 0)) { log(acct, t, "skipped", c.title, "no ask price for " + k.label); continue; }
+      if (enter({ ...c, est: d.est }, k.ask, k.bid, c.uEntry, `signal entry, ${c.sym.replace("$", "")} ${r2(c.uEntry)}`)) acct.pending = acct.pending.filter((p) => group(p.sym) !== group(c.sym));
+    }
   }
 
   acct.updatedAt = now;

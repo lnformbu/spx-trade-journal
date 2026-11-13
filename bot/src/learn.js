@@ -1,7 +1,7 @@
 // Self-training: after every close the bot re-scores what worked and adjusts what it trades and how it exits.
 //
 // Data it learns from:
-//   - the scorecard ("bot:stats"): every SPX/SPY signal, graded in R on the underlying, whether traded or not
+//   - the scorecard ("bot:stats"): every signal, graded in R on the underlying, whether traded or not
 //     (so a setup that was switched off keeps being measured and can be switched back on)
 //   - paper trades ("paper:trades"): real option results (counted double), plus each trade's option price path,
 //     followed for 30 minutes after the exit so other exit settings can be replayed
@@ -110,7 +110,7 @@ export function learn(prev, statsItems, trades, today) {
   m.params = { ...DEFAULT_PARAMS, ...m.params };
   const changes = [];
   // samples: SPX/SPY signals graded in R (last 1500), paper trades in R of their dollar risk (counted twice)
-  const sig = (statsItems || []).filter((x) => x.R != null && (x.sym === "SPY" || x.sym === "$SPX")).slice(-1500)
+  const sig = (statsItems || []).filter((x) => x.R != null).slice(-1500)
     .map((x) => ({ date: x.date, fam: x.fam || famOf(x.key || "") || kindFam(x), kind: x.kind, grade: x.grade, score: x.score, et: x.et, ctx: x.ctx, R: Math.max(-1.5, Math.min(4, x.R)), w: 1 }));
   const pt = (trades || []).filter((x) => x.R != null).map((x) => ({ ...x, R: Math.max(-1.5, Math.min(4, x.R)), w: 2 }));
   const all = [...sig, ...pt].filter((x) => x.fam);

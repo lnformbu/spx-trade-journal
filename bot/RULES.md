@@ -239,11 +239,13 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 
 ### How paper trading is built (src/paper.js)
 
-- **What it trades:** the bot's own SPX and SPY signals (A/A+ setups, your plan triggers, 1m/3m divergence and compression breakouts,
-  10m compression breakouts, phase flips, squeezes, momentum). SPY signals are converted to SPX with the live SPX/SPY ratio.
-- **Contract:** your posted SPX contract for that side if today's plan has one, otherwise SPX 0DTE with delta 0.45-0.60 and a spread of at most 5% of mid.
-- **Flow:** signal → hard rules (window, limits, cooldown) → learned model → queued → filled at the next minute's ask
-  (A/A+ only after SPX breaks the signal candle, within 9 minutes) → managed every minute with the profit ladder and exits above → sold at the bid.
+- **It trades exactly what #signals posts:** every signal posted with a contract (any ticker), using that signal's contract,
+  entry, stop and target. Signals that had no contract line (divergences, compression breakouts, squeezes) now show a "Contract idea"
+  (nearest expiry, delta about 0.40; your posted contract when your plan has one), and that is what gets bought.
+- **Entry:** A/A+ cards ("Entry on a 1m close above/below X") are bought when the ticker trades through X within 9 minutes, at that minute's ask.
+  All other signals are bought right away at the ask of the quote the signal was built from.
+- **Exits:** the profit ladder above, plus the signal's own stop level on the ticker and its target level (counts as target 1).
+- One position at a time, so the first valid signal of the moment gets the trade; the rest are logged as skipped.
 - Not modeled yet: the "ribbon flips against the trade" and "rejection at a level" exits (an opposite signal closes the trade instead).
 - Every decision is in the journal's Bot view (Paper trading) and every entry/exit is posted to #signals as 📄 PAPER.
 
@@ -251,7 +253,7 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 
 | What it learns from | |
 |---|---|
-| Every scored SPX/SPY signal | traded or not, so a switched-off setup keeps being measured and can come back |
+| Every scored signal | traded or not, so a switched-off setup keeps being measured and can come back |
 | Paper trades | real option results, counted double |
 | Each paper trade's option price path | followed for 30 minutes after the exit, so other exit settings can be replayed |
 
