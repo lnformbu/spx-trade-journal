@@ -365,6 +365,22 @@ stop = a daily close below the 21 EMA; time exit after 20 trading days; contract
 | Daily squeeze fire near the 21 EMA | 34 trades, +0.51%, PF 1.92 (weaker in recent years) |
 | Any put swing | all lost (PF 0.2-0.6): not used |
 
+## **NEW** PDF 6 (Vomy): chart study and what was built
+
+Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" into resistance (double top); (2) the 8 curls into the 13, the 13 flattens;
+(3) first entry = the **13 EMA retest** holding as resistance (risk: a close back above it); (4) the 48 acts as support first; (5) consolidation in the ribbon,
+8-13 tests also work; (6) **break and hold of the 48 confirms**; (7) exits at ATR levels, puts also gain from VIX rising. "Ultimate scenario": squeeze, momentum turning, RSI extreme.
+
+| Tested | Result |
+|---|---|
+| Entry versions | 3m only −0.08R · 10m only −0.03R · 3m 13-retest +0.01R · **10m confirm + 3m 13-retest +0.72R** (live) |
+| + momentum turning with the trade (Phase Oscillator) | helps in both samples (retests +0.02 vs −0.12R; live version +0.82 vs +0.32R) → **required** |
+| + squeeze in the last 15 bars | mild plus (+0.02 vs −0.05R) → shown as confluence |
+| + RSI overbought / oversold | no help (−0.04 vs +0.03R) → not used |
+| + fins at a key level | **hurt** (−0.08 vs +0.10R) → not used |
+
+Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
+
 ## **NEW** Live mode (only after paper; switched on by you)
 
 - Entries use limit orders at or just through the ask, raised in small steps a limited number of times, then cancelled.

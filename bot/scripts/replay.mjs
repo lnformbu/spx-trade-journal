@@ -121,9 +121,19 @@ for (const date of days) {
         }
         const rt = vomyRetest13(b3all);
         if (rt) {
-          add(`vomyC:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true });
+          // PDF 6 "ultimate scenario" confluence tags
+          const bear = rt.dir === "bear", cl = b3all.map((b) => b.close), o3 = phaseOsc(b3all.slice(-300));
+          const rsi = (() => { const out = []; let g = 0, l = 0; for (let k = 1; k < cl.length; k++) { const ch = cl[k] - cl[k - 1]; const up = Math.max(ch, 0), dn = Math.max(-ch, 0); if (k <= 14) { g += up / 14; l += dn / 14; } else { g = (g * 13 + up) / 14; l = (l * 13 + dn) / 14; } out.push(l ? 100 - 100 / (1 + g / l) : 100); } return out; })();
+          const conf = [];
+          if (o3 && o3._track.slice(-15).includes(1)) conf.push("squeeze");
+          if (o3 && (bear ? o3.value < o3.prev : o3.value > o3.prev)) conf.push("momentum");
+          if (bear ? Math.max(...rsi.slice(-20)) >= 70 : Math.min(...rsi.slice(-20)) <= 30) conf.push("rsi extreme");
+          const ext = bear ? Math.max(...b3all.slice(-30).map((b) => b.high)) : Math.min(...b3all.slice(-30).map((b) => b.low));
+          if ([lv["+0.236"], lv["-0.236"], lv["+0.382"], lv["-0.382"], lv["+0.618"], lv["-0.618"], lv["+1"], lv["-1"], D.pdc, intra.pmh, intra.pml].some((v) => v != null && Math.abs(ext - v) <= D.atr * 0.08)) conf.push("fins at a level");
+          if (trendDir) conf.push(trendDir === rt.dir ? "with trend mode" : "against trend mode");
+          add(`vomyC:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true }, { conf });
           if (vomy10 && vomy10.dir === rt.dir && nowMs - vomy10.at <= 40 * 60000)
-            add(`vomyD:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true });
+            add(`vomyD:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true }, { conf });
         }
       }
       // PDF 5: ATR level break-and-retest, and the 8 EMA ride
@@ -149,7 +159,8 @@ for (const date of days) {
       }
       if (min % 10 === 0 && !process.env.VOMY_TEST) { const v10 = vomy(T10.b10); if (v10) vomy10 = { dir: v10.dir, at: nowMs }; }
       const rtD = vomy10 && nowMs - vomy10.at <= 40 * 60000 && !process.env.VOMY_TEST ? vomyRetest13(b3all) : null;
-      if (rtD && rtD.dir === vomy10.dir) { const up = rtD.dir === "bull"; const nx = Object.values(lv).filter((v) => (up ? v > rtD.entry : v < rtD.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+      const o3D = rtD ? phaseOsc(b3all.slice(-300)) : null;
+      if (rtD && rtD.dir === vomy10.dir && o3D && (rtD.dir === "bear" ? o3D.value < o3D.prev : o3D.value > o3D.prev)) { const up = rtD.dir === "bull"; const nx = Object.values(lv).filter((v) => (up ? v > rtD.entry : v < rtD.entry)).sort((x, y) => (up ? x - y : y - x))[0];
         add(`vomy:${rtD.bar.datetime}:${rtD.dir}`, "setup", { dir: rtD.dir, entry: rtD.entry, stop: rtD.stop, target: nx ?? null, needTrigger: true }); }
       const vm = process.env.VOMY_TEST ? vomy(b3all) : null;
       if (vm) {

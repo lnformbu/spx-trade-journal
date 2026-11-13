@@ -467,7 +467,10 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         }
         st.vomy10 = V10 && now - V10.at <= 40 * 60000 ? V10 : st.vomy10 && now - st.vomy10.at <= 40 * 60000 ? st.vomy10 : null;
         const rt = st.vomy10 ? vomyRetest13(b3) : null;
-        if (rt && rt.dir === st.vomy10.dir) {
+        // PDF 6 confluence: momentum must turn with the trade (3m Phase Oscillator); a recent squeeze is shown as a plus
+        const vMom = rt && osc3 && (rt.dir === "bear" ? osc3.value < osc3.prev : osc3.value > osc3.prev);
+        const vSqz = osc3 && osc3._track && osc3._track.slice(-15).includes(1);
+        if (rt && rt.dir === st.vomy10.dir && vMom) {
           const up = rt.dir === "bull";
           const next = Object.values(lv).filter((v) => (up ? v > rt.entry : v < rt.entry)).sort((x, y) => (up ? x - y : y - x))[0];
           found.push({
@@ -475,7 +478,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             track: { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: next ?? null, needTrigger: true },
             title: `${up ? "🐬 iVOMY" : "🤮 VOMY"} SPX ${up ? "CALLS ▲" : "PUTS ▼"} · 10m confirmed, 3m 13 retest`,
             text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(rt.entry)}** · **Stop:** ${r2(rt.stop)} (a close back through the 13) · **Target:** ${next != null ? r2(next) : "—"} · expires in 9 min`
-              + `\n10m ${up ? "inverse Vomy" : "Vomy"} confirmed, then the 3m retested its 13 EMA ${rt.ema13} and was rejected.`,
+              + `\n10m ${up ? "inverse Vomy" : "Vomy"} confirmed, then the 3m retested its 13 EMA ${rt.ema13} and was rejected.`
+              + `\n✓ Phase Oscillator turning ${up ? "up" : "down"} (${osc3.prev} → ${osc3.value})${vSqz ? " · ✓ coming out of a squeeze" : ""}`,
           });
         }
         // opening read at 9:40: where SPX opened vs the trigger box, the VIX pivot, the trend-day check
