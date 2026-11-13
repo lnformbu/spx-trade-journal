@@ -447,7 +447,7 @@ export default {
       return json(await schwab(token, "/marketdata/v1/quotes?fields=quote,reference&symbols=" + encodeURIComponent(url.searchParams.get("symbols") || "SPY")));
     }
     if (url.pathname === "/discord") {
-      const chId = url.searchParams.get("ch") === "training" ? env.TRAINING_CHANNEL_ID : env.DISCORD_CHANNEL_ID;
+      const chId = url.searchParams.get("ch") === "training" ? env.TRAINING_CHANNEL_ID : url.searchParams.get("ch") === "signals" ? env.SIGNALS_CHANNEL_ID : env.DISCORD_CHANNEL_ID;
       const r = await fetch(`https://discord.com/api/v10/channels/${chId}/messages?limit=10`, {
         headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)" },
       });

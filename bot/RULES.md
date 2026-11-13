@@ -308,7 +308,8 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 - **🏁 LB shakeout watch:** a top-5 leaderboard contract 20%+ above its VWAP, with the level stack to watch and step-by-step notes. It's a heads-up, not an entry (not paper traded).
 - **🎯 LB max pain** (3:50) now says which side to favor and to stay flat against the pull.
 - **🗓️ Daily recap** (about 4:10 PM): paper trades, best challenger, signals scored by type, your plan review, your reactions, what was learned.
-- **Phone alerts** (free ntfy app): paper buys/exits, 🏆 style takeovers, recaps, Schwab/bot warnings. Set up with `node scripts/keys.cjs ntfy`.
+- Paper trades (📄 buys, target 1, exits), 🏆 takeovers, 🧠 learning, 🗓️ recaps and warnings all post to #signals; turn on Discord notifications for that channel on your phone.
+- **Optional** extra phone push (free ntfy app), off unless set up with `node scripts/keys.cjs ntfy`.
 
 ## **NEW** Live mode (only after paper; switched on by you)
 
