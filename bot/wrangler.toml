@@ -1,0 +1,32 @@
+# SPY bot (phase 1: levels + plan reading, no trading). Runs every minute on weekdays, 8:00-22:59 UTC;
+# the code itself only works 4:00-16:20 New York time.
+name = "spx-bot"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[triggers]
+# bot: 4:00-16:20 ET work; signals: 9:30-16:00 ET
+# greeks board: every 5 minutes 9:30-16:00 ET
+crons = ["* 8-22 * * 1-5", "* 13-21 * * 1-5", "*/5 13-21 * * 1-5"]
+
+[vars]
+# Your Discord channel IDs (Developer Mode -> right-click a channel -> Copy Channel ID)
+# plan channel (morning plans)
+DISCORD_CHANNEL_ID = "000000000000000000"
+# Discord channel #spx-training (Setup: / Idea: / Lesson: posts + Result: replies)
+TRAINING_CHANNEL_ID = "000000000000000000"
+# Discord channel #signals (alerts)
+SIGNALS_CHANNEL_ID = "000000000000000000"
+# Anchored VWAP start (New York time), as in your thinkorswim study
+AVWAP_ANCHOR = "2026-10-27 09:30"
+
+# Cloudflare's built-in AI (free daily allowance): reads chart screenshots
+[ai]
+binding = "AI"
+
+# same database as the journal (copy database_id from ../cloud/wrangler.toml)
+[[d1_databases]]
+binding = "DB"
+database_name = "spx-journal"
+database_id = "00000000-0000-0000-0000-000000000000"

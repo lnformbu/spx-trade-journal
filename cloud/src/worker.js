@@ -269,6 +269,37 @@ async function handle(req, env) {
     return json({ ok: true });
   }
 
+  // ---- bot panel: the bot worker (../bot) writes bot:day:<date>; the journal only reads it ----
+  if (url.pathname === "/api/bot" && req.method === "GET") {
+    const date = url.searchParams.get("date") || (await readBlob(env, "bot:latest"));
+    const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };
+    const state = date ? await get("bot:day:" + date) : null;
+    const greeks = await get("greeks:spx");
+    const sig = date ? await get("sig:day:" + date) : null;
+    return json({
+      ok: true, state, greeks,
+      signals: sig ? (sig.alerts || []).slice(-25).reverse() : [],
+      planStatus: sig ? sig.planSt || {} : {},
+    });
+  }
+  // the bot's scorecard: scored signals, daily plan reviews, training posts
+  if (url.pathname === "/api/bot/stats" && req.method === "GET") {
+    const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };
+    const stats = await get("bot:stats"), reviews = await get("bot:reviews"), lib = await get("lib:setups");
+    return json({
+      ok: true, items: stats ? stats.items : [], reviews: reviews ? reviews.days : {},
+      library: lib ? lib.items.map(({ context, raw, images, ...x }) => ({ ...x, text: String(raw || "").slice(0, 200) })) : [],
+    });
+  }
+  // today's plan pasted in the journal (used instead of the Discord post)
+  if (url.pathname === "/api/bot/plan" && req.method === "POST") {
+    const { text } = await req.json().catch(() => ({}));
+    if (!text || !String(text).trim()) return json({ ok: false, error: "empty" }, 400);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+    await writeBlob(env, "bot:plan-raw:" + today, JSON.stringify({ text: String(text).slice(0, 8000), at: Date.now() }));
+    return json({ ok: true });
+  }
+
   if (url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 });
   return env.ASSETS.fetch(req);
 }

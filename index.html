@@ -328,6 +328,117 @@
   .schbar .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:none;}
   .schbar.on .dot{background:var(--win);} .schbar.warn .dot{background:var(--accent);}
   .schbar.warn .sch-st{color:var(--accent);}
+  .bot{margin-bottom:14px;}
+  .bot>summary{cursor:pointer;list-style:none;} .bot>summary::-webkit-details-marker{display:none;}
+  .bot:not([open])>summary{border-bottom:none;}
+  .bdesk{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;padding:14px 18px 16px;}
+  @media(max-width:1100px){.bdesk{grid-template-columns:minmax(0,1fr);}}
+  @media(max-width:640px){.bdesk{padding:12px 14px;}}
+  .bd-main,.bd-side{display:flex;flex-direction:column;gap:12px;min-width:0;}
+  .bd-box{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0;}
+  .bd-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px;}
+  .bot h3{margin:0;font-size:13px;font-weight:650;color:var(--ink);} .bot h3 small{font-weight:500;color:var(--ink-3);font-size:11.5px;}
+  .bd-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
+  @media(max-width:760px){.bd-row{grid-template-columns:minmax(0,1fr);}}
+  /* status chips */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{display:flex;flex-direction:column;gap:1px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;min-width:96px;font-variant-numeric:tabular-nums;}
+  .chip .l{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;}
+  .chip .v{font-size:17px;font-weight:700;color:var(--ink);} .chip .s{font-size:11.5px;color:var(--ink-2);}
+  .chip.big .v{font-size:22px;}
+  .chip.good{border-color:rgba(var(--win-rgb),.45);background:rgba(var(--win-rgb),.08);} .chip.bad{border-color:rgba(var(--loss-rgb),.45);background:rgba(var(--loss-rgb),.08);}
+  .chip.warn{border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.08);}
+  .meter{height:6px;border-radius:99px;background:var(--panel-3);overflow:hidden;margin-top:4px;width:110px;} .meter i{display:block;height:100%;border-radius:99px;}
+  /* timeframe cards */
+  .tfs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  @media(max-width:760px){.tfs{grid-template-columns:minmax(0,1fr);}}
+  .tf{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12px;color:var(--ink-2);}
+  .tf .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;}
+  .tf .name{font-weight:650;color:var(--ink);font-size:12.5px;} .tf .name small{color:var(--ink-3);font-weight:500;}
+  .pill{font-size:11px;font-weight:650;padding:2px 8px;border-radius:99px;background:var(--panel-3);color:var(--ink-2);}
+  .pill.bull{background:rgba(var(--win-rgb),.16);color:var(--win);} .pill.bear{background:rgba(var(--loss-rgb),.16);color:var(--loss);}
+  .pill.amber{background:rgba(var(--accent-rgb),.16);color:var(--accent);}
+  .gauge{position:relative;height:10px;border-radius:99px;margin:8px 0 3px;background:linear-gradient(90deg,rgba(var(--loss-rgb),.35) 0%,rgba(var(--loss-rgb),.12) 20%,var(--panel-3) 42%,var(--panel-3) 58%,rgba(var(--win-rgb),.12) 80%,rgba(var(--win-rgb),.35) 100%);}
+  .gauge .tick{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--line);}
+  .gauge .mk{position:absolute;top:-4px;width:4px;height:18px;margin-left:-2px;border-radius:2px;background:var(--ink);box-shadow:0 0 0 2px var(--panel-2);}
+  .gauge-l{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-3);}
+  .tf .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+  /* levels */
+  .lvl2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;}
+  @media(max-width:480px){.lvl2{grid-template-columns:minmax(0,1fr);}}
+  .lvl2 h4{margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600;}
+  .lrow{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);font-size:12px;font-variant-numeric:tabular-nums;}
+  .lrow .n{color:var(--ink-2);line-height:1.25;overflow-wrap:anywhere;} .lrow .p{text-align:right;color:var(--ink);font-weight:600;}
+  .lrow .p small{display:block;font-weight:500;color:var(--ink-3);font-size:10.5px;}
+  .d{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-3);}
+  .d.atr{background:#5b9cf5;} .d.mine{background:var(--accent);} .d.gex{background:#b07cf7;} .d.day{background:#9aa3b5;} .d.vw{background:#38c9c2;}
+  .bd-legend{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:11px;color:var(--ink-3);margin:8px 0 0;} .bd-legend .d{margin-right:4px;}
+  .lv{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;margin-top:8px;}
+  .lv td{padding:3px 6px;border-bottom:1px solid var(--line);} .lv td.p{text-align:right;color:var(--ink);font-weight:550;} .lv td.d2{text-align:right;color:var(--ink-3);}
+  .lv tr.now td{border-bottom:2px solid var(--accent);color:var(--accent);font-weight:600;}
+  /* plan */
+  .bot-plan-k{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+  .trig{display:flex;flex-direction:column;gap:2px;flex:1;min-width:130px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);font-size:12px;font-variant-numeric:tabular-nums;}
+  .trig b{font-size:14px;color:var(--ink);} .trig.call{border-left:3px solid var(--win);} .trig.put{border-left:3px solid var(--loss);}
+  .st-tag{font-size:11px;font-weight:600;} .st-tag.ok{color:var(--win);} .st-tag.bad{color:var(--accent);} .st-tag.wait{color:var(--ink-3);}
+  .scn{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:12.5px;}
+  .scn .dir{font-weight:650;} .scn .dir.bull{color:var(--win);} .scn .dir.bear{color:var(--loss);}
+  .scn .tg{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;} .tgt{font-size:11.5px;padding:2px 7px;border-radius:99px;background:var(--panel-3);color:var(--ink-2);font-variant-numeric:tabular-nums;}
+  .tgt.hit{background:rgba(var(--win-rgb),.16);color:var(--win);}
+  .scn .raw{color:var(--ink-3);font-size:11.5px;margin-top:4px;}
+  .bot-tag{font-size:11px;padding:2px 8px;border-radius:99px;background:rgba(var(--accent-rgb),.15);color:var(--accent);}
+  .bot-paste{margin:8px 0 0;font-size:12px;color:var(--ink-3);} .bot-paste summary{cursor:pointer;} .bot-paste textarea{margin:6px 0;width:100%;}
+  .bot p.hint{font-size:12px;color:var(--ink-3);margin:4px 0;}
+  /* signals feed */
+  .feed{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto;}
+  .feed li{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;}
+  .feed .t{color:var(--ink-3);font-variant-numeric:tabular-nums;} .feed .ti{color:var(--ink);font-weight:600;}
+  .feed details summary{cursor:pointer;list-style:none;} .feed details summary::-webkit-details-marker{display:none;}
+  .feed .tx{white-space:pre-line;color:var(--ink-2);font-size:12px;margin-top:4px;}
+  /* review */
+  .rv{list-style:none;padding:0;margin:6px 0 0;font-size:12.5px;} .rv li{padding:5px 0 5px 22px;position:relative;border-bottom:1px solid var(--line);}
+  .rv li::before{position:absolute;left:2px;top:5px;content:"•";color:var(--ink-3);} .rv li.ok::before{content:"✓";color:var(--win);} .rv li.no::before{content:"✗";color:var(--loss);}
+  /* greek board */
+  .gx-tabs{margin-bottom:8px;}
+  .gx-sum{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11.5px;color:var(--ink-3);margin-bottom:8px;font-variant-numeric:tabular-nums;}
+  .gx-sum b{color:var(--ink);font-weight:600;}
+  .gx-ladder{display:flex;flex-direction:column;gap:3px;max-height:520px;overflow:auto;padding-right:2px;}
+  .gr{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;align-items:center;font-variant-numeric:tabular-nums;}
+  .gr .k{font-size:12.5px;color:var(--ink-2);text-align:right;} .gr .k.spot{color:var(--ink);font-weight:700;}
+  .gr .bar{position:relative;height:24px;border-radius:5px;background:var(--panel-3);overflow:hidden;}
+  .gr .bar i{position:absolute;top:0;bottom:0;left:0;border-radius:5px;}
+  .gr .bar span{position:absolute;right:8px;top:0;bottom:0;display:flex;align-items:center;font-size:12px;font-weight:600;color:var(--ink);}
+  .gr .tagx{position:absolute;left:6px;top:0;bottom:0;display:flex;align-items:center;font-size:10px;font-weight:700;letter-spacing:.04em;color:#0a0d13;}
+  .gx-spot{height:0;border-top:2px solid #38bdf8;margin:2px 0;position:relative;}
+  .gx-spot span{position:absolute;right:0;top:-9px;font-size:10.5px;font-weight:700;color:#38bdf8;background:var(--panel-2);padding:0 4px;}
+  .gx-src{margin-top:8px !important;}
+  /* leaderboard */
+  .lb{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;}
+  .lb th{font-weight:550;color:var(--ink-3);font-size:11px;text-align:right;padding:3px 4px;border-bottom:1px solid var(--line);} .lb th:first-child,.lb td:first-child{text-align:left;}
+  .lb td{padding:4px;text-align:right;border-bottom:1px solid var(--line);color:var(--ink-2);} .lb td.c{color:var(--ink);font-weight:600;}
+  .lb .up{color:var(--win);} .lb .dn{color:var(--loss);}
+  .lb .shk{display:block;font-size:10.5px;color:var(--accent);font-weight:600;}
+  .lb-mp{margin-top:8px;font-size:12px;color:var(--ink-2);} .lb-mp b{color:var(--accent);}
+  .viewsw{display:flex;justify-content:flex-start;margin:0 0 14px;} .viewsw .seg{min-width:260px;}
+  .bstats{display:none;margin-bottom:14px;}
+  body.view-bot .bstats{display:block;} body.view-bot .mine{display:none !important;}
+  .bs-body{padding:14px 18px 16px;display:flex;flex-direction:column;gap:12px;}
+  @media(max-width:640px){.bs-body{padding:12px 14px;}}
+  .bs-period{align-self:flex-start;max-width:100%;overflow-x:auto;} .bs-period label{flex:0 0 auto;} .bs-period span{min-height:32px;padding:0 12px;font-size:12.5px;white-space:nowrap;}
+  .bstats .kpis{margin-bottom:0;}
+  .bs-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+  .bs-grid.two{grid-template-columns:repeat(2,minmax(0,1fr));}
+  @media(max-width:1100px){.bs-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:640px){.bs-grid,.bs-grid.two{grid-template-columns:minmax(0,1fr);}}
+  .bstats h3{margin:0 0 8px;font-size:13px;font-weight:650;color:var(--ink);} .bstats h3 small{font-weight:500;color:var(--ink-3);font-size:11.5px;}
+  .bs-t{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;}
+  .bs-t th{font-weight:550;color:var(--ink-3);font-size:11px;text-align:right;padding:3px 5px;border-bottom:1px solid var(--line);}
+  .bs-t td{padding:4px 5px;text-align:right;border-bottom:1px solid var(--line);color:var(--ink-2);}
+  .bs-t th:first-child,.bs-t td:first-child{text-align:left;color:var(--ink);}
+  .bs-t .up{color:var(--win);} .bs-t .dn{color:var(--loss);}
+  .bs-scroll{max-height:360px;overflow:auto;}
+  .bs-line{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+  .bs-line b{color:var(--ink);}
   .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;pointer-events:none;background:#1b2130;border:1px solid #3a4358;border-radius:10px;padding:10px 14px;font-size:13.5px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 30px rgba(0,0,0,.5);transition:opacity .2s,transform .2s;z-index:60;max-width:calc(100vw - 32px);}
   .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
   .toast button{background:none;border:none;color:var(--accent);font-weight:700;cursor:pointer;padding:2px 4px;}
@@ -362,7 +473,89 @@
     <button class="btn" id="cbToggle" aria-pressed="false" title="Use a blue / red palette that's easier to tell apart with red-green colorblindness">Colorblind colors</button>
   </header>
 
-  <section class="filters" aria-label="Filter the stats">
+  <div class="viewsw" id="viewSw" hidden>
+    <div class="seg" role="radiogroup" aria-label="Whose stats">
+      <label><input type="radio" name="view" value="me" checked><span>My journal</span></label>
+      <label><input type="radio" name="view" value="bot"><span>Bot</span></label>
+    </div>
+  </div>
+
+  <details class="card bot" id="botCard" hidden open>
+    <summary class="card-head"><h2 id="botH">Bot desk</h2><span class="hint" id="botSt"></span></summary>
+    <div class="bdesk">
+      <div class="bd-main">
+        <div class="chips" id="bdChips" aria-live="polite"></div>
+        <div class="tfs" id="bdTfs"></div>
+        <div class="bd-row">
+          <section class="bd-box">
+            <div class="bd-h"><h3>Key levels</h3><button class="linkbtn" id="bdAllLv" type="button" aria-expanded="false">Show all</button></div>
+            <div class="lvl2" id="bdLevels"></div>
+            <table class="lv" id="botLevels" hidden aria-describedby="botH"></table>
+            <p class="bd-legend"><i class="d atr"></i>ATR <i class="d mine"></i>Your plan <i class="d gex"></i>Gamma <i class="d day"></i>Prior day / premarket <i class="d vw"></i>VWAP / EMA</p>
+          </section>
+          <section class="bd-box">
+            <div class="bd-h"><h3>Your plan <small id="botPlanSrc"></small></h3></div>
+            <div id="botPlan"></div>
+            <details class="bot-paste">
+              <summary>Paste today's plan instead</summary>
+              <textarea class="inp" id="botPlanText" rows="6" placeholder="Paste your morning post (Upside: … | Downside: … | VIX key level: … | If …)"></textarea>
+              <button class="btn" id="botPlanSave" type="button">Use this plan</button>
+            </details>
+          </section>
+        </div>
+        <section class="bd-box">
+          <div class="bd-h"><h3>Today's signals</h3><span class="hint">also posted to #signals</span></div>
+          <ol class="feed" id="bdFeed"></ol>
+        </section>
+        <div id="botReview"></div>
+      </div>
+      <aside class="bd-side" aria-labelledby="gxH">
+        <section class="bd-box gx">
+          <div class="bd-h"><h3 id="gxH">SPX greek exposure</h3><span class="hint" id="gxAt"></span></div>
+          <div class="seg gx-tabs" role="radiogroup" aria-label="Greek">
+            <label><input type="radio" name="gxTab" value="gex" checked><span>GEX</span></label>
+            <label><input type="radio" name="gxTab" value="dex"><span>DEX</span></label>
+            <label><input type="radio" name="gxTab" value="vanna"><span>Vanna</span></label>
+            <label><input type="radio" name="gxTab" value="charm"><span>Charm</span></label>
+          </div>
+          <div class="gx-sum" id="gxSum"></div>
+          <div class="gx-ladder" id="gxLadder"></div>
+          <p class="hint gx-src" id="gxSrc"></p>
+        </section>
+        <section class="bd-box">
+          <div class="bd-h"><h3>Leaderboard <small>SPX 0DTE · top volume</small></h3></div>
+          <div id="lbBox"></div>
+        </section>
+      </aside>
+    </div>
+  </details>
+
+  <section class="card bstats" id="botStats" aria-labelledby="bsH">
+    <div class="card-head"><h2 id="bsH">Bot scorecard</h2><span class="hint">Each signal is scored by whether price reached its target before its stop. R = result ÷ risk (−1R = stopped out).</span></div>
+    <div class="bs-body">
+      <div class="seg bs-period" role="radiogroup" aria-label="Period">
+        <label><input type="radio" name="bsPeriod" value="all" checked><span>All time</span></label>
+        <label><input type="radio" name="bsPeriod" value="30"><span>30 days</span></label>
+        <label><input type="radio" name="bsPeriod" value="7"><span>7 days</span></label>
+        <label><input type="radio" name="bsPeriod" value="1"><span>Today</span></label>
+      </div>
+      <div class="kpis" id="bsKpis"></div>
+      <div class="bs-grid">
+        <section class="bd-box"><h3>By signal type</h3><table class="bs-t" id="bsByKind"></table></section>
+        <section class="bd-box"><h3>By grade (A / A+ setups)</h3><table class="bs-t" id="bsByGrade"></table></section>
+        <section class="bd-box"><h3>By ticker</h3><table class="bs-t" id="bsBySym"></table></section>
+        <section class="bd-box"><h3>By time of day</h3><table class="bs-t" id="bsByTime"></table></section>
+      </div>
+      <div class="bs-grid two">
+        <section class="bd-box"><h3>Your plan scorecard <small>from the daily plan reviews</small></h3><div id="bsPlan"></div></section>
+        <section class="bd-box"><h3>Training posts <small>Setup: / Idea: / Lesson: in #spx-plan</small></h3><div id="bsLib"></div></section>
+      </div>
+      <section class="bd-box"><h3>Recent signal outcomes</h3><div class="bs-scroll"><table class="bs-t" id="bsRecent"></table></div></section>
+      <p class="hint">Paper trades (the bot trading your posted contracts with the profit ladder) will appear here in phase 2.</p>
+    </div>
+  </section>
+
+  <section class="filters mine" aria-label="Filter the stats">
     <div class="seg" role="radiogroup" aria-label="Period">
       <label><input type="radio" name="period" value="all" checked><span>All time</span></label>
       <label><input type="radio" name="period" value="year"><span>This year</span></label>
@@ -375,9 +568,9 @@
     <span class="fnote" id="fNote" aria-live="polite"></span>
   </section>
 
-  <section class="kpis" id="kpis" aria-label="Performance summary"></section>
+  <section class="kpis mine" id="kpis" aria-label="Performance summary"></section>
 
-  <section class="card streaks" aria-labelledby="stH">
+  <section class="card streaks mine" aria-labelledby="stH">
     <div class="card-head">
       <h2 id="stH">Streaks</h2>
       <span class="hint">A green day = day P/L above $0. A red day = below $0. A flat day breaks either streak.</span>
@@ -397,7 +590,7 @@
     </div>
   </section>
 
-  <div class="insights">
+  <div class="insights mine">
     <section class="card" aria-labelledby="eqH">
       <div class="card-head"><h2 id="eqH">Equity curve</h2><span class="hint">Running total of P/L, one point per trading day</span></div>
       <div class="eq-stats" id="eqStats"></div>
@@ -409,7 +602,7 @@
     </section>
   </div>
 
-  <section class="card bd" aria-labelledby="bdH">
+  <section class="card bd mine" aria-labelledby="bdH">
     <div class="card-head">
       <h2 id="bdH">Breakdown</h2>
       <div class="seg" role="radiogroup" aria-label="Group trades by">
@@ -422,7 +615,7 @@
     <div class="card-body scroll" id="bd"></div>
   </section>
 
-  <div class="grid">
+  <div class="grid mine">
     <section class="card" aria-labelledby="calH">
       <div class="card-head">
         <h2 id="calH">Trade calendar</h2>
@@ -694,6 +887,7 @@
   }
   // pick up trades imported in the background whenever you come back to the tab
   document.addEventListener("visibilitychange",async()=>{
+    if(document.visibilityState==="visible"&&botTimer) botLoad();
     if(document.visibilityState==="visible"&&loaded&&rev!==undefined){ await load(); refresh(); schwabAuto(); }
   });
 
@@ -753,6 +947,214 @@
   }
   function schwabAuto(){
     if(sch&&sch.connected&&(!sch.lastSync||Date.now()-sch.lastSync>10*60000)) schwabSync(true);
+  }
+
+  // ---- Bot desk (online journal only): written by the bot worker every minute; greeks + leaderboard every 5 minutes ----
+  const f2=v=>v==null||!isFinite(v)?"—":(+v).toFixed(2);
+  const big=x=>{ if(x==null||!isFinite(x)) return "—"; const a=Math.abs(x), s=x<0?"−":""; return s+(a>=1e9?(a/1e9).toFixed(1)+"B":a>=1e6?(a/1e6).toFixed(1)+"M":a>=1e3?(a/1e3).toFixed(1)+"K":Math.round(a)); };
+  const etTime=ms=>ms?new Date(ms).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"}):"";
+  let botTimer=null, botRes=null, gxTab="gex", showAllLv=false;
+  async function botLoad(){
+    let res=null;
+    try{ const r=await fetch("/api/bot"); res=r.ok?await r.json():null; }catch(e){}
+    const card=$("#botCard"); card.hidden=!res; $("#viewSw").hidden=!res; if(!res) return;
+    if(!botRes){ let v="me"; try{ v=localStorage.getItem("journalView")||"me"; }catch(e){} if(v==="bot"){ document.querySelector('input[name="view"][value="bot"]').checked=true; setView("bot"); } }
+    botRes=res; renderBot();
+    if(!botTimer) botTimer=setInterval(()=>{ if(document.visibilityState==="visible") botLoad(); },60000);
+  }
+  function renderBot(){
+    const {state:st, greeks:g, signals=[], planStatus={}}=botRes;
+    renderGreeks(g);
+    if(!st){ $("#botSt").textContent="Waiting for the bot's first run (weekdays from 4:00 AM ET)"; return; }
+    const q=st.quote||{}, L=st.levels||{}, S=st.levelsSPX||{}, R=st.ratio, price=q.spy, spx=q.spx;
+    const err=(st.errors||[]).map(e=>e.where==="schwab-login"?"Schwab login expired: reconnect Schwab below.":e.where+": "+e.msg);
+    $("#botSt").textContent=`${st.date} · updated ${st.updatedET||"—"} ET`+(err.length?" · ⚠ "+err[0]:"");
+    const P=st.plan&&st.plan.parsed, ps=planStatus.SPY||{};
+
+    // ---- status chips ----
+    const pdc=st.spxDay&&st.spxDay.pdc, ch=spx!=null&&pdc?spx-pdc:null;
+    const vx=st.vix10;
+    const dtr=st.dtr, dtrCol=dtr==null?"var(--ink-3)":dtr>=90?"var(--loss)":dtr>70?"var(--accent)":"var(--win)";
+    const side=P&&price!=null?(P.callTrigger!=null&&price>P.callTrigger?"bull":P.putTrigger!=null&&price<P.putTrigger?"bear":"range"):null;
+    $("#bdChips").innerHTML=[
+      `<div class="chip big ${ch==null?"":ch>=0?"good":"bad"}"><span class="l">SPX</span><span class="v">${f2(spx)}</span><span class="s">${ch==null?"":(ch>=0?"+":"")+ch.toFixed(2)+" ("+(ch/pdc*100).toFixed(2)+"%)"}</span></div>`,
+      `<div class="chip"><span class="l">SPY</span><span class="v">${f2(price)}</span><span class="s">ratio ${R??"—"}</span></div>`,
+      vx?`<div class="chip ${vx.last<vx.prev?"good":"bad"}"><span class="l">VIX 10m</span><span class="v">${vx.last} ${vx.last<vx.prev?"▼":"▲"}</span><span class="s">${vx.last<vx.prev?"falling: supports calls":"rising: supports puts"}</span></div>`:"",
+      st.chop10!=null?`<div class="chip ${st.choppy?"warn":"good"}"><span class="l">Market</span><span class="v">${st.choppy?"Choppy":"Trending"}</span><span class="s">${st.choppy?"A+ setups only":"CHOP "+st.chop10}</span></div>`:"",
+      dtr!=null?`<div class="chip"><span class="l">ATR used today</span><span class="v">${dtr}%</span><div class="meter" role="img" aria-label="${dtr}% of the daily ATR used"><i style="width:${Math.min(dtr,100)}%;background:${dtrCol}"></i></div></div>`:"",
+      side?`<div class="chip ${side==="bull"?"good":side==="bear"?"bad":""}"><span class="l">Your plan</span><span class="v">${side==="bull"?"Calls side":side==="bear"?"Puts side":"In range"}</span><span class="s">${side==="range"?"between your triggers":"trigger "+(side==="bull"?"SPX "+(P.spxCall??P.callTrigger):"SPX "+(P.spxPut??P.putTrigger))+" active"}</span></div>`:"",
+    ].join("");
+
+    // ---- timeframe cards ----
+    const pillCls=s=>s==="bullish"?"bull":s==="bearish"?"bear":"";
+    const gauge=o=>{ if(!o) return ""; const pct=v=>Math.max(0,Math.min(100,(v+150)/3));
+      return `<div class="gauge" role="img" aria-label="Phase Oscillator ${o.value}, ${o.zone}">${[-100,-61.8,-23.6,23.6,61.8,100].map(t=>`<i class="tick" style="left:${pct(t)}%"></i>`).join("")}<i class="mk" style="left:${pct(o.value)}%"></i></div>
+        <div class="gauge-l"><span>oversold</span><span>phase <b style="color:var(--ink)">${o.value}</b> · ${o.zone}</span><span>overbought</span></div>`; };
+    $("#bdTfs").innerHTML=[["Scalp","3m · ETH",st.r3,st.osc3],["Day","10m · ETH",st.r10,st.osc10],["Swing","1h · RTH",st.r1h,st.osc1h]].map(([n,tf,r,o])=>{
+      const tags=[o&&o.compression?'<span class="pill amber">compression</span>':"", o&&o.cross?`<span class="pill ${o.flip&&o.flip.startsWith("oversold")?"bull":"bear"}">${o.cross}</span>`:"",
+        r&&r.conviction?`<span class="pill ${r.conviction.startsWith("bull")?"bull":"bear"}">${r.conviction}</span>`:"", r&&r.flips>=2?'<span class="pill amber">folding</span>':r&&r.expanding?'<span class="pill">expanding</span>':"",
+        r?`<span class="pill">200: ${r.longTerm}</span>`:""].join("");
+      return `<div class="tf"><div class="top"><span class="name">${n} <small>${tf}</small></span><span class="pill ${pillCls(r&&r.state)}">${r?r.state:"—"}</span></div>
+        <div>EMA 21 ${f2(r&&r.ema[21])} · 48 ${f2(r&&r.ema[48])}</div>${gauge(o)}<div class="tags">${tags}</div></div>`;
+    }).join("");
+
+    // ---- levels: nearest resistance above / support below ----
+    const lv=[], add=(name,v,type,sx)=>{ if(v!=null&&isFinite(v)) lv.push({name,v:+v,type,sx:sx??(R?v*R:null)}); };
+    const al=L.atrLevels||{}, sal=S.atrLevels||{};
+    const fib={"0.236":"trigger","0.382":"38.2%","0.5":"50%","0.618":"midrange","0.786":"78.6%","1":"1 ATR","1.236":"123.6%","1.618":"161.8%","2":"2 ATR"};
+    Object.entries(al).forEach(([k,v])=>{ if(fib[k.slice(1)]) add(`ATR ${k[0]==="+"?"+":"−"}${fib[k.slice(1)]}`,v,"atr",sal[k]); });
+    add("PDC (pivot)",L.pdc,"day",S.pdc); add("Yesterday high",L.pdh,"day",S.pdh); add("Yesterday low",L.pdl,"day",S.pdl);
+    add("Premarket high",L.pmh,"day"); add("Premarket low",L.pml,"day"); add("Overnight high",L.onh,"day"); add("Overnight low",L.onl,"day");
+    add("ORB high",L.orbh,"day"); add("ORB low",L.orbl,"day"); add("High of day",L.hod,"day"); add("Low of day",L.lod,"day");
+    add("VWAP",L.vwap,"vw"); add("Anchored VWAP",L.avwap,"vw"); add("AVWAP +1σ",L.avwapUp1,"vw"); add("AVWAP −1σ",L.avwapDn1,"vw");
+    add("10m EMA 21",L.ema10m21,"vw"); add("10m EMA 200",L.ema10m200,"vw"); add("1h EMA 200",L.ema1h200,"vw");
+    const sw=st.swing&&st.swing.atrLevels; if(sw){ add("Swing call trigger",sw["+0.236"],"atr"); add("Swing put trigger",sw["-0.236"],"atr"); }
+    if(P){ add("Your call trigger",P.callTrigger,"mine",P.spxCall); add("Your put trigger",P.putTrigger,"mine",P.spxPut); }
+    if(g&&R&&g.date===st.date){ const gs=x=>x/R; add("GEX call wall",gs(g.callWall),"gex",g.callWall); add("GEX put wall",gs(g.putWall),"gex",g.putWall); add("Gamma flip",g.flip&&gs(g.flip),"gex",g.flip); if(g.eye) add("Eye of Sauron 👁",gs(g.eye.strike),"gex",g.eye.strike); }
+    const row=l=>`<div class="lrow"><i class="d ${l.type}"></i><span class="n" title="${esc(l.name)}">${esc(l.name)}</span><span class="p">${f2(l.sx)}<small>SPY ${f2(l.v)}${spx!=null&&l.sx!=null?" · "+(l.sx>=spx?"+":"")+(l.sx-spx).toFixed(1):""}</small></span></div>`;
+    if(price!=null){
+      // sides by SPX (after hours SPY keeps trading while SPX is closed, so SPY alone can put a level on the wrong side)
+      const key=l=>spx!=null&&l.sx!=null?l.sx-spx:l.v-price;
+      const up=lv.filter(l=>key(l)>0).sort((a,b)=>key(a)-key(b)).slice(0,7), dn=lv.filter(l=>key(l)<=0).sort((a,b)=>key(b)-key(a)).slice(0,7);
+      $("#bdLevels").innerHTML=`<div><h4>Resistance above</h4>${up.map(row).join("")||'<p class="hint">none</p>'}</div><div><h4>Support below</h4>${dn.map(row).join("")||'<p class="hint">none</p>'}</div>`;
+    }
+    const all=[...lv].sort((a,b)=>b.v-a.v);
+    $("#botLevels").innerHTML=`<tr><td></td><td class="p">SPX</td><td class="p">SPY</td><td class="d2">Δ SPX</td></tr>`+all.map(l=>`<tr><td><i class="d ${l.type}"></i> ${esc(l.name)}</td><td class="p">${f2(l.sx)}</td><td class="p">${f2(l.v)}</td><td class="d2">${spx!=null&&l.sx!=null?(l.sx>=spx?"+":"")+(l.sx-spx).toFixed(1):""}</td></tr>`).join("");
+    $("#botLevels").hidden=!showAllLv;
+
+    // ---- your plan, with live status from the signals scanner ----
+    if(!P){
+      $("#botPlanSrc").textContent="";
+      $("#botPlan").innerHTML=`<p class="hint">No plan yet today. The bot reads #spx-plan (every minute 9:15–9:45, then every 5 minutes), or paste it below.</p>`;
+    }else{
+      $("#botPlanSrc").textContent=`from ${st.plan.source==="discord"?"Discord":"the journal"}, ${etTime(st.plan.at)}`;
+      const tstat=d=>{ const x=ps[d]; return !x?'<span class="st-tag wait">waiting</span>':x.failed?`<span class="st-tag bad">⚠ crossed ${etTime(x.at)}, failed ${etTime(x.failed)}</span>`:`<span class="st-tag ok">✓ crossed ${etTime(x.at)}</span>`; };
+      const vk=P.vixKey;
+      let h=`<div class="bot-plan-k">
+        <div class="trig call"><span>Calls above</span><b>SPX ${P.spxCall??"—"}c</b><span>SPY ${P.callTrigger??"—"}</span>${tstat("bull")}</div>
+        <div class="trig put"><span>Puts below</span><b>SPX ${P.spxPut??"—"}p</b><span>SPY ${P.putTrigger??"—"}</span>${tstat("bear")}</div></div>
+        <p class="hint">${vk!=null?`VIX key <b>${vk}</b>${vx?` · now ${vx.last} (${vx.last<vk?"below: supports calls":"above: supports puts"})`:""}`:""}${P.patience?' · <span class="bot-tag">patience day: A-grade only</span>':""}</p>`;
+      (P.scenarios||[]).forEach((s,i)=>{
+        const x=ps["scn"+i], dir=s.dir==="bull"?"▲ Bull":s.dir==="bear"?"▼ Bear":"? Unclear";
+        const cond=s.level!=null?` above/below`.replace(" above/below",s.dir==="bear"?" below":" above")+` <b>SPX ~${R?f2(s.level*R):"—"}</b> <small>(SPY ${f2(s.level)})</small>`:" (no level found)";
+        const tg=(s.targets||[]).map((t,j)=>`<span class="tgt ${x&&x.hit&&x.hit.includes(j)?"hit":""}">${x&&x.hit&&x.hit.includes(j)?"✓ ":""}${esc(t.label)} ${t.price!=null&&R?f2(t.price*R):"?"}</span>`).join("");
+        h+=`<div class="scn"><span class="dir ${s.dir||""}">${dir}</span>${cond} · ${x?`<span class="st-tag ok">set up ${etTime(x.at)}</span>`:'<span class="st-tag wait">waiting</span>'}${tg?`<div class="tg">${tg}</div>`:""}<div class="raw">${esc(s.text)}</div></div>`;
+      });
+      $("#botPlan").innerHTML=h;
+    }
+
+    // ---- signals feed ----
+    $("#bdFeed").innerHTML=signals.length?signals.map(a=>`<li><span class="t">${esc(a.et)}</span><details><summary class="ti">${esc(a.title)}</summary><div class="tx">${esc(a.text)}</div></details></li>`).join(""):`<li><span></span><span class="hint">No signals yet today (9:30–4:00 ET).</span></li>`;
+
+    // ---- after the close ----
+    const rv=st.review;
+    $("#botReview").innerHTML=rv?`<section class="bd-box"><div class="bd-h"><h3>Plan review</h3></div><ul class="rv">${rv.checks.map(c=>`<li class="${c.ok===true?"ok":c.ok===false?"no":""}">${esc(c.text)}</li>`).join("")}</ul></section>`:"";
+  }
+
+  // ---- SPX greek exposure ladder + leaderboard ----
+  function renderGreeks(g){
+    if(!g||!g.strikes){ $("#gxLadder").innerHTML=`<p class="hint">Updates every 5 minutes during market hours.</p>`; $("#lbBox").innerHTML=""; return; }
+    const spot=g.spot, rows=g.strikes.filter(r=>Math.abs(r.strike-spot)<=60).sort((a,b)=>b.strike-a.strike);
+    const max=Math.max(1,...rows.map(r=>Math.abs(r[gxTab])));
+    const tag=k=>[k===g.callWall?"CALL WALL":"",k===g.putWall?"PUT WALL":"",g.eye&&k===g.eye.strike?"👁 EYE":"",g.flip&&Math.abs(k-g.flip)<2.5?"FLIP":""].filter(Boolean).join(" · ");
+    let html="", spotDone=false;
+    rows.forEach(r=>{
+      if(!spotDone&&r.strike<spot){ html+=`<div class="gx-spot" role="separator"><span>SPX ${f2(spot)}</span></div>`; spotDone=true; }
+      const v=r[gxTab], a=Math.abs(v)/max, col=v>=0?`rgba(var(--win-rgb),${(0.25+0.6*a).toFixed(2)})`:`rgba(var(--loss-rgb),${(0.25+0.6*a).toFixed(2)})`;
+      const t=tag(r.strike);
+      html+=`<div class="gr"><span class="k ${Math.abs(r.strike-spot)<2.5?"spot":""}">${r.strike}</span><span class="bar"><i style="width:${Math.max(3,a*100)}%;background:${col}"></i>${t?`<b class="tagx">${t}</b>`:""}<span>${big(v)}</span></span></div>`;
+    });
+    $("#gxLadder").innerHTML=html;
+    const T=g.totals||{};
+    $("#gxSum").innerHTML=`<span>Net GEX <b>${big(T.gex)}</b></span><span>Net DEX <b>${big(T.dex)}</b></span><span>Vanna <b>${big(T.vanna)}</b></span><span>Charm/day <b>${big(T.charm)}</b></span>
+      <span>Call wall <b>${g.callWall??"—"}</b></span><span>Put wall <b>${g.putWall??"—"}</b></span><span>Gamma flip <b>${g.flip?f2(g.flip):"—"}</b></span><span>Eye of Sauron <b>${g.eye?g.eye.strike:"none"}</b></span>`;
+    $("#gxAt").textContent=`${g.date} · ${g.et} ET`;
+    $("#gxSrc").textContent=(g.source||"")+". Open interest is from last night; values re-priced with live spot, IV and time. GEX: calls +, puts −.";
+    const lb=g.lb;
+    $("#lbBox").innerHTML=lb&&lb.top&&lb.top.length?`<table class="lb"><thead><tr><th>Contract</th><th>Vol</th><th>Last</th><th>VWAP</th><th>vs VWAP</th></tr></thead><tbody>${lb.top.map(c=>`<tr><td class="c">${c.label}${c.itm?' <span class="pill">ITM</span>':""}${c.shakeout?`<span class="shk">${c.shakeout}</span>`:""}</td><td>${big(c.vol)}</td><td>${f2(c.last)}</td><td>${f2(c.vwap)}</td><td class="${c.pnlPct>=0?"up":"dn"}">${c.pnlPct>=0?"+":""}${c.pnlPct}%</td></tr>`).join("")}</tbody></table>
+      ${lb.maxPainZone?`<p class="lb-mp">Max pain for ITM holders: <b>${lb.maxPainZone.low}–${lb.maxPainZone.high}</b> (best ${lb.maxPain}) · watch into the last 10 minutes</p>`:""}`
+      :`<p class="hint">Fills from 9:30 ET: the 10 most-traded SPX 0DTE contracts, their VWAP and who's in profit.</p>`;
+  }
+  document.querySelectorAll('input[name="gxTab"]').forEach(r=>r.addEventListener("change",()=>{ gxTab=r.value; if(botRes) renderGreeks(botRes.greeks); }));
+  $("#bdAllLv").onclick=()=>{ showAllLv=!showAllLv; $("#bdAllLv").textContent=showAllLv?"Show nearest":"Show all"; $("#bdAllLv").setAttribute("aria-expanded",showAllLv); $("#botLevels").hidden=!showAllLv; $("#bdLevels").hidden=showAllLv; };
+  $("#botPlanSave").onclick=async()=>{
+    const text=$("#botPlanText").value.trim(); if(!text) return;
+    const r=await fetch("/api/bot/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})}).catch(()=>null);
+    toast(r&&r.ok?"Plan saved. The bot reads it on its next run (within a minute).":"Couldn't save the plan.");
+    if(r&&r.ok){ $("#botPlanText").value=""; $(".bot-paste").open=false; }
+  };
+
+  // ---- My journal | Bot switch + the bot's scorecard (online journal only) ----
+  let bsData=null, bsPeriod="all";
+  const KIND_NAMES={star:"A / A+ setups",momentum:"Momentum breaks",phase:"Phase flips, squeezes, 10m boxes",setup:"SPX 1m/3m divergence & compression",plan:"Your plan triggers"};
+  function setView(v){
+    document.body.classList.toggle("view-bot",v==="bot");
+    try{ localStorage.setItem("journalView",v); }catch(e){}
+    if(v==="bot") bsLoad();
+  }
+  document.querySelectorAll('input[name="view"]').forEach(r=>r.addEventListener("change",()=>setView(r.value)));
+  document.querySelectorAll('input[name="bsPeriod"]').forEach(r=>r.addEventListener("change",()=>{ bsPeriod=r.value; renderBotStats(); }));
+  async function bsLoad(){
+    try{ const r=await fetch("/api/bot/stats"); bsData=r.ok?await r.json():null; }catch(e){ bsData=null; }
+    renderBotStats();
+  }
+  function summarize(list){
+    const scored=list.filter(x=>x.R!=null), wins=scored.filter(x=>x.R>0), losses=scored.filter(x=>x.R<=0);
+    const sumW=wins.reduce((s,x)=>s+x.R,0), sumL=losses.reduce((s,x)=>s+x.R,0);
+    return { n:scored.length, nt:list.length-scored.length, wins:wins.length, win:scored.length?wins.length/scored.length:null,
+      avg:scored.length?(sumW+sumL)/scored.length:null, total:sumW+sumL, pf:sumL<0?sumW/-sumL:(sumW>0?Infinity:null) };
+  }
+  const pct=x=>x==null?"—":Math.round(x*100)+"%", rr=x=>x==null?"—":(x>=0?"+":"")+x.toFixed(2)+"R";
+  function table(el,rows,label){
+    const body=rows.filter(([,s])=>s.n+s.nt>0).map(([k,s])=>`<tr><td>${esc(k)}</td><td>${s.n}</td><td>${pct(s.win)}</td><td class="${s.avg>0?"up":s.avg<0?"dn":""}">${rr(s.avg)}</td><td class="${s.total>0?"up":s.total<0?"dn":""}">${rr(s.total)}</td></tr>`).join("");
+    $(el).innerHTML=`<tr><th>${label}</th><th>Scored</th><th>Win</th><th>Avg</th><th>Total</th></tr>`+(body||`<tr><td colspan="5" class="hint">No scored signals yet</td></tr>`);
+  }
+  function renderBotStats(){
+    if(!bsData){ $("#bsKpis").innerHTML=`<p class="hint">Couldn't load the bot's stats.</p>`; return; }
+    const cut=bsPeriod==="all"?"":bsPeriod==="1"?todayISO:new Date(Date.now()-(+bsPeriod)*864e5).toISOString().slice(0,10);
+    const items=(bsData.items||[]).filter(x=>!cut||x.date>=cut);
+    const s=summarize(items);
+    const kpi=(l,v,sub,cls="")=>`<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div><div class="s">${sub}</div></div>`;
+    $("#bsKpis").innerHTML=[
+      kpi("Signals scored",s.n,`${s.nt} didn't trigger`),
+      kpi("Win rate",pct(s.win),`${s.wins} reached target or closed green`),
+      kpi("Avg per signal",rr(s.avg),"R = result ÷ risk",s.avg>0?"pos":s.avg<0?"neg":""),
+      kpi("Total",rr(s.total),"sum of R",s.total>0?"pos":s.total<0?"neg":""),
+      kpi("Profit factor",s.pf==null?"—":s.pf===Infinity?"∞":s.pf.toFixed(2),"winning R ÷ losing R"),
+    ].join("");
+    const group=(f)=>{ const m=new Map(); items.forEach(x=>{ const k=f(x); if(k==null) return; (m.get(k)||m.set(k,[]).get(k)).push(x); }); return [...m.entries()].map(([k,v])=>[k,summarize(v)]).sort((a,b)=>b[1].n-a[1].n); };
+    table("#bsByKind",group(x=>KIND_NAMES[x.kind]||x.kind),"Type");
+    table("#bsByGrade",group(x=>x.kind==="star"?(x.grade||"A"):null),"Grade");
+    table("#bsBySym",group(x=>x.sym.replace("$","")),"Ticker");
+    const win=x=>{ const [h,m]=String(x.et||"0:0").split(":").map(Number), mm=h*60+m; return mm<600?"9:30–10:00":mm<690?"10:00–11:30":mm<810?"11:30–1:30 (midday)":mm<900?"1:30–3:00":"3:00–4:00 (power hour)"; };
+    const order=["9:30–10:00","10:00–11:30","11:30–1:30 (midday)","1:30–3:00","3:00–4:00 (power hour)"];
+    table("#bsByTime",group(win).sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0])),"Window");
+    // recent outcomes
+    const rec=[...items].sort((a,b)=>b.at-a.at).slice(0,40);
+    $("#bsRecent").innerHTML=`<tr><th>When</th><th>Signal</th><th>Entry</th><th>Stop</th><th>Target</th><th>Outcome</th><th>R</th><th>Best</th></tr>`+(rec.map(x=>`<tr><td>${x.date.slice(5)} ${esc(x.et)}</td><td style="text-align:left">${esc(x.title)}</td><td>${f2(x.entry)}</td><td>${f2(x.stop)}</td><td>${f2(x.target)}</td><td>${esc(x.outcome)}</td><td class="${x.R>0?"up":x.R<0?"dn":""}">${x.R==null?"—":rr(x.R)}</td><td>${x.mfeR==null?"—":"+"+x.mfeR.toFixed(1)+"R"}</td></tr>`).join("")||`<tr><td colspan="8" class="hint">Signals are scored from the next market session (9:30–4:00 ET).</td></tr>`);
+    // your plan scorecard (from the daily plan reviews)
+    const days=Object.entries(bsData.reviews||{}).filter(([d])=>!cut||d>=cut);
+    if(!days.length) $("#bsPlan").innerHTML=`<p class="hint">Fills in after each market close.</p>`;
+    else{
+      const sum=(f)=>days.reduce((s,[,v])=>s+f(v),0);
+      const trig=days.flatMap(([,v])=>[v.call,v.put]).filter(x=>x&&x.hit), held=trig.filter(x=>x.held).length;
+      const scn=days.flatMap(([,v])=>v.scenarios||[]), active=scn.filter(x=>x.active), reached=active.filter(x=>x.reached>0);
+      const ok=sum(v=>v.ok), no=sum(v=>v.no);
+      $("#bsPlan").innerHTML=[
+        ["Days reviewed",days.length],
+        ["Checks right / wrong",`<b>${ok}</b> ✓ · <b>${no}</b> ✗ (${ok+no?Math.round(ok/(ok+no)*100):0}% right)`],
+        ["Triggers that broke and held",`${held} of ${trig.length}`],
+        ["Scenarios that set up",`${active.length} of ${scn.length}`],
+        ["Set-up scenarios that reached a target",`${reached.length} of ${active.length}${active.length?" ("+Math.round(reached.length/active.length*100)+"%)":""}`],
+      ].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join("");
+    }
+    // training posts
+    const lib=(bsData.library||[]).filter(x=>!cut||x.date>=cut);
+    const withRes=lib.filter(x=>x.result);
+    $("#bsLib").innerHTML=lib.length?[
+      `<div class="bs-line"><span>Posts</span><span><b>${lib.length}</b> (${withRes.length} with a result)</span></div>`,
+      ...lib.slice(-6).reverse().map(x=>`<div class="bs-line"><span>${esc(x.date.slice(5))} · ${esc(x.kind)} ${esc(x.ticker||"")} ${esc(x.contract||"")}${x.dir?" · "+(x.dir==="bull"?"▲":"▼"):""}${x.vision&&x.vision.summary?`<br><small style="color:var(--ink-3)">📷 ${esc(x.vision.summary)}</small>`:""}</span><span>${esc(x.result||"no result yet")}</span></div>`),
+    ].join(""):`<p class="hint">Post "Setup: …" in #spx-plan, then reply "Result: +65%". About 15–20 with results are needed before the bot can compare winners and losers.</p>`;
   }
 
   // ---- aggregation ----
@@ -1612,6 +2014,7 @@
     }
     await schwabLoad();
     if(back==="connected") schwabSync(false); else schwabAuto();
+    botLoad();
   })();
 })();
 </script>

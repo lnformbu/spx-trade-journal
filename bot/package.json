@@ -1,0 +1,11 @@
+{
+  "name": "spx-bot",
+  "private": true,
+  "description": "SPY bot worker (phase 1: levels + morning plan, no trading). Wrangler runs via npx.",
+  "scripts": {
+    "deploy": "npx --yes wrangler@4.154.0 deploy",
+    "keys": "node scripts/keys.cjs",
+    "logs": "npx --yes wrangler@4.154.0 tail"
+  },
+  "type": "module"
+}

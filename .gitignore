@@ -15,3 +15,8 @@ cloud/public/
 cloud/.dev.vars
 cloud/seed.sql
 cloud/verses.sql
+
+# bot: private admin key and local state
+bot/.admin-key
+bot/.wrangler/
+bot/.dev.vars
