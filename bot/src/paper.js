@@ -16,6 +16,11 @@ const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
 const TRADED = new Set(["star", "mom", "flip", "squeeze", "box", "div1m", "div3m", "cbox1m", "cbox3m", "plan-trigger"]);
+// which option underlyings get paper traded: wrangler.toml PAPER_TICKERS (default "$SPX"; add e.g. ",TSLA" later)
+const paperTicker = (env, contract) => {
+  const root = String(contract && contract.symbol || "").split(" ")[0].replace(/^SPXW$/, "SPX");
+  return String(env.PAPER_TICKERS || "$SPX").split(",").map((s) => s.trim().replace("$", "")).includes(root);
+};
 const group = (sym) => (sym === "SPY" || sym === "$SPX" ? "SPX" : sym);   // SPY and SPX count as one market
 
 function freshDay(acct, t) {
@@ -196,8 +201,9 @@ export async function runPaper(env, deps, { candidates = [], now = Date.now(), t
   }
   acct.pending = acct.pending.filter((p) => !p.done && now - p.at < 10 * 60000);
 
-  // ---- this minute's new signals ----
+  // ---- this minute's new signals (only contracts on the PAPER_TICKERS underlyings; SPX for now) ----
   for (const c of candidates) {
+    if (!paperTicker(env, c.contract)) continue;
     if (!TRADED.has(c.fam)) continue;
     const g = gate(acct, c, t, now);
     if (g) { log(acct, t, "skipped", c.title, g); continue; }

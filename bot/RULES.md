@@ -239,7 +239,9 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 
 ### How paper trading is built (src/paper.js)
 
-- **It trades exactly what #signals posts:** every signal posted with a contract (any ticker), using that signal's contract,
+- **SPX only for now** (wrangler.toml `PAPER_TICKERS = "$SPX"`): SPX signals, and SPY signals whose contract is your posted SPX contract.
+  Other tickers are added once the SPX results show it works.
+- **It trades exactly what #signals posts:** every signal posted with a contract, using that signal's contract,
   entry, stop and target. Signals that had no contract line (divergences, compression breakouts, squeezes) now show a "Contract idea"
   (nearest expiry, delta about 0.40; your posted contract when your plan has one), and that is what gets bought.
 - **Entry:** A/A+ cards ("Entry on a 1m close above/below X") are bought when the ticker trades through X within 9 minutes, at that minute's ask.

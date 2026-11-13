@@ -20,6 +20,8 @@ TRAINING_CHANNEL_ID = "000000000000000000"
 SIGNALS_CHANNEL_ID = "000000000000000000"
 # Anchored VWAP start (New York time), as in your thinkorswim study
 AVWAP_ANCHOR = "2026-10-27 09:30"
+# option underlyings the paper trader trades (comma-separated). SPX only until the results prove it; then e.g. "$SPX,TSLA"
+PAPER_TICKERS = "$SPX"
 
 # Cloudflare's built-in AI (free daily allowance): reads chart screenshots
 [ai]
