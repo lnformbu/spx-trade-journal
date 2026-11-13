@@ -343,6 +343,28 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 
 Not built (from the notes): TTM Squeeze (Bollinger inside Keltner) as a separate indicator: the Phase Oscillator compression already plays that role; the Monday-buy/Thursday-sell calendar test was run separately (not a bot strategy).
 
+## **NEW** PDF 5 ("Putting it all together"): chart study and what was built
+
+| Chart | Entry / exit and why | Built? (replay) |
+|---|---|---|
+| SPY day mode | Opened at the put trigger → tested the call trigger → back to the previous close (trigger box). Then reclaimed the call trigger with the ribbon stacked; pullbacks only reached the **8/9 EMA**; rode to **+1 ATR**. Entry: the 8 EMA test; exit: full range; stop: losing the ribbon. | **🏄 8 EMA ride** in trend mode: 212 trades, 51% wins, **+0.51R** (+0.10R even without the 3 best days). Built. |
+| NVDA 10m calls | Blasted through the call trigger, **retested it** as support → entry; exit +1 ATR. 10:45 retest of the midrange → second entry; out at +1 ATR, no holding into consolidation. | **Level break-and-retest** as its own trade: 215 trades, **−0.10R** (−0.43R against the trend). Not built. |
+| CAR 10m puts | Lost the put trigger, retested it from below until 10:00 → puts; exit at midrange or −1 ATR (~1.5 h). | Same retest rule: not built. |
+| Swing / Position (daily, weekly) | Ribbon green + price above it + hits the call trigger, often with a squeeze; profit at midrange / +1 ATR; exit at consolidation; re-enter at the next trigger hold. | **🧭 Swing alerts (calls only)**, below. |
+
+### 🧭 Swing alerts (SPY, days to weeks, calls only)
+
+Checked once a day after the close. Entry at the next open; target 1 = monthly midrange (sell half), target 2 = +1 monthly ATR;
+stop = a daily close below the 21 EMA; time exit after 20 trading days; contract idea SPY 30-45 DTE, delta ~0.70.
+
+| Setup | SPY 10-year backtest |
+|---|---|
+| Baseline: buy any day the daily ribbon is stacked | 174 trades, +0.08%, PF 1.10 |
+| Monthly call-trigger break (ribbon stacked) | 63 trades, 54% wins, **+0.32%**, PF 1.43 (both halves positive) |
+| Daily 21 EMA pullback | 63 trades, +0.22%, PF 1.33 (PF 1.52 with VIX < 20) |
+| Daily squeeze fire near the 21 EMA | 34 trades, +0.51%, PF 1.92 (weaker in recent years) |
+| Any put swing | all lost (PF 0.2-0.6): not used |
+
 ## **NEW** Live mode (only after paper; switched on by you)
 
 - Entries use limit orders at or just through the ask, raised in small steps a limited number of times, then cancelled.

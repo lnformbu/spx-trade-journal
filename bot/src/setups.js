@@ -143,6 +143,49 @@ export function orbBreak(bars, orbh, orbl, rib10) {
   return null;
 }
 
+// ATR level break-and-retest (PDF 5: NVDA call-trigger retest, CAR put-trigger retest, midrange retest; SPY 8-EMA ride):
+// within the last 20 3m bars a close went through level L and no close has come back through it since; now a 3m bar
+// tags L (within tol) and closes back on the break side with a body in that direction. Entry: 1m break of that bar;
+// stop: just beyond L; target: the next major level (Golden Gate / midrange / ±1 ATR).
+export function levelRetest(bars, levels, tolAbs) {
+  if (!bars || bars.length < 5) return null;
+  const i = bars.length - 1, b = bars[i];
+  for (const [name, L] of levels) {
+    if (L == null) continue;
+    for (const dir of ["bull", "bear"]) {
+      const up = dir === "bull";
+      const beyond = (c) => (up ? c > L : c < L);
+      // the break: first close through L within the last 20 bars, after a close on the other side
+      let k = -1;
+      for (let j = Math.max(1, i - 20); j < i; j++) if (beyond(bars[j].close) && !beyond(bars[j - 1].close)) k = j;
+      if (k < 0) continue;
+      if (bars.slice(k, i).some((x) => !beyond(x.close))) continue;          // came back through: no retest, it failed
+      if (i - k < 2) continue;                                                 // need at least one bar away first
+      const tagged = up ? b.low <= L + tolAbs : b.high >= L - tolAbs;
+      const held = up ? b.close > L && b.close > b.open : b.close < L && b.close < b.open;
+      if (tagged && held) return { dir, name, level: L, bar: b, entry: up ? b.high : b.low, stop: up ? Math.min(b.low, L) - tolAbs : Math.max(b.high, L) + tolAbs };
+    }
+  }
+  return null;
+}
+
+// 8 EMA ride (PDF 5, chart 1: in a strong trend price tests the top of the ribbon and never reaches the 21)
+export function pullback8(bars, dir) {
+  if (!bars || bars.length < 60) return null;
+  const c = bars.map((b) => b.close);
+  const e8 = ema(c, 8), e13 = ema(c, 13), e21 = ema(c, 21), e48 = ema(c, 48);
+  const i = bars.length - 1, b = bars[i], A = barAtr(bars);
+  if (!A) return null;
+  const tol = A * 0.15, up = dir === "bull";
+  const stacked = up ? e8[i] > e13[i] && e13[i] > e21[i] && e21[i] > e48[i] : e8[i] < e13[i] && e13[i] < e21[i] && e21[i] < e48[i];
+  if (!stacked) return null;
+  const touched = up ? b.low <= e8[i] + tol && b.low > e21[i] : b.high >= e8[i] - tol && b.high < e21[i];
+  const held = up ? b.close > e8[i] && b.close > b.open : b.close < e8[i] && b.close < b.open;
+  const came = bars.slice(-7, -1).some((x, k) => { const j = i - 6 + k; return up ? x.low > e8[j] + tol : x.high < e8[j] - tol; });
+  if (!touched || !held || !came) return null;
+  return { dir, bar: b, entry: up ? b.high : b.low, stop: up ? Math.min(b.low, e13[i]) - tol : Math.max(b.high, e13[i]) + tol, ema8: r2(e8[i]) };
+}
+
 // "Psych" pivot: the Day-mode ATR level nearest to price, rounded to the nearest step (VIX 0.5, SPX 5)
 export function marketPivot(price, atrLevels, step) {
   if (price == null || !atrLevels) return null;

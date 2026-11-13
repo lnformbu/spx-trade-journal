@@ -10,7 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
-import { trendScore, pullback21, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak } from "./setups.js";
+import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -25,7 +25,7 @@ const COLORS = { whale: 0x8b5cf6, big: 0xf0b429, bull: 0x2ec26b, bear: 0xf0556b,
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 // free phone push (ntfy app) for paper trades, style takeovers, recaps and bot health; topic is a Cloudflare secret
-const PUSH = /^(📄|🏆|🔑|⛔|✅ Bot|🗓️)/u;
+const PUSH = /^(📄|🏆|🔑|⛔|✅ Bot|🗓️|🧭)/u;
 async function push(env, embed) {
   if (!env.NTFY_TOPIC || !PUSH.test(embed.title || "")) return;
   await fetch("https://ntfy.sh/", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -424,6 +424,20 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
               + `\nConfluence ${cf.score}/6: ${cf.bits.join(" · ")}`,
           });
         }
+        // 8 EMA ride (PDF 5): in trend mode, a 3m test of the top of the ribbon that holds (replay: 212 trades, +0.51R; +0.10R without the 3 best days)
+        const p8 = tdNow ? pullback8(b3, tdNow) : null;
+        if (p8) {
+          const up = p8.dir === "bull";
+          const tgt = [lv["+0.236"], lv["+0.382"], lv["+0.618"], lv["+1"], lv["-0.236"], lv["-0.382"], lv["-0.618"], lv["-1"], D.pdc]
+            .filter((v) => v != null && (up ? v > p8.entry + D.atr * 0.05 : v < p8.entry - D.atr * 0.05)).sort((x, y) => (up ? x - y : y - x))[0];
+          found.push({
+            kind: "setup", sym, key: `pb8:${p8.bar.datetime}:${p8.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: p8.dir, entry: p8.entry, stop: p8.stop, target: tgt ?? null, needTrigger: true },
+            title: `🏄 SPX 8 EMA RIDE ${up ? "CALLS ▲" : "PUTS ▼"} · trend mode`,
+            text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(p8.entry)}** · **Stop:** ${r2(p8.stop)} · **Target:** ${tgt != null ? r2(tgt) : "—"} · expires in 9 min`
+              + `\nStrong trend: the 3m tested the 8 EMA ${p8.ema8} (top of the ribbon) without reaching the 21 and held. Like Saty's chart that rode the 8 EMA to full range.`,
+          });
+        }
         // ORB break-and-hold (allowed in the opening window): 2 closes beyond the 9:30-9:33 range with the 10m ribbon agreeing
         const ob = t.min < 630 ? orbBreak(b3rth, intra.orbh, intra.orbl, rib10) : null;
         if (ob) {
@@ -807,6 +821,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             : fam === "mom" ? "SPX broke a key level with VWAP and the 3m cloud agreeing"
             : fam === "plan-trigger" ? `SPX crossed your posted ${bull ? "call" : "put"} trigger`
             : fam === "star" ? `a ${bull ? "bullish" : "bearish"} reversal candle formed at a key level and most checks agree`
+            : fam === "pb8" ? `in a strong ${bull ? "up" : "down"}trend SPX tested the 3m 8 EMA (top of the ribbon) and held: ride the trend, don't chase it`
             : fam === "pb21" ? `SPX pulled back into the 3m 21 EMA in a ${bull ? "rising" : "falling"} ribbon and held: the wait-for-the-pullback entry (no chasing)`
             : fam === "vomy" ? `the ${bull ? "falling" : "rising"} 3m ribbon broke and held the 48 EMA: a multi-EMA crossover reversal (${bull ? "inverse Vomy" : "Vomy"})`
             : "setup triggered";

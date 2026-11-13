@@ -15,7 +15,7 @@ import { patterns, atLevel } from "../src/patterns.js";
 import { resolveTracks } from "../src/signals.js";
 import { famOf } from "../src/learn.js";
 import { LEVEL_NAMES } from "../src/plan.js";
-import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak } from "../src/setups.js";
+import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak, levelRetest, pullback8 } from "../src/setups.js";
 import { ema } from "../src/levels.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -124,6 +124,21 @@ for (const date of days) {
           add(`vomyC:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true });
           if (vomy10 && vomy10.dir === rt.dir && nowMs - vomy10.at <= 40 * 60000)
             add(`vomyD:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true });
+        }
+      }
+      // PDF 5: ATR level break-and-retest, and the 8 EMA ride
+      {
+        const b3r = aggregate(rth, 3).filter((b) => b.datetime + 180000 <= nowMs);
+        const majors = [["call trigger", lv["+0.236"]], ["put trigger", lv["-0.236"]], ["+Golden Gate", lv["+0.382"]], ["-Golden Gate", lv["-0.382"]], ["+midrange", lv["+0.618"]], ["-midrange", lv["-0.618"]], ["previous close", D.pdc]];
+        const nextMajor = (up, px) => [lv["+0.236"], lv["+0.382"], lv["+0.618"], lv["+1"], lv["-0.236"], lv["-0.382"], lv["-0.618"], lv["-1"], D.pdc].filter((v) => v != null && (up ? v > px + D.atr * 0.05 : v < px - D.atr * 0.05)).sort((x, y) => (up ? x - y : y - x))[0] ?? null;
+        const rt5 = levelRetest(b3r, majors, D.atr * 0.03);
+        if (rt5) add(`retest:${rt5.bar.datetime}:${rt5.dir}`, "setup", { dir: rt5.dir, entry: rt5.entry, stop: rt5.stop, target: nextMajor(rt5.dir === "bull", rt5.entry), needTrigger: true });
+        for (const d8 of ["bull", "bear"]) {
+          const p8 = pullback8(b3all, d8);
+          if (!p8) continue;
+          const tgt = nextMajor(d8 === "bull", p8.entry);
+          add(`pb8x:${p8.bar.datetime}:${d8}`, "setup", { dir: d8, entry: p8.entry, stop: p8.stop, target: tgt, needTrigger: true });
+          if (trendDir === d8) add(`pb8:${p8.bar.datetime}:${d8}`, "setup", { dir: d8, entry: p8.entry, stop: p8.stop, target: tgt, needTrigger: true });
         }
       }
       // ORB break-and-hold (as live, before 10:30)

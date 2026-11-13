@@ -21,3 +21,5 @@ bot/.admin-key
 bot/.wrangler/
 bot/.dev.vars
 bot/.replay.json
+d_*.json
+swing_*.json

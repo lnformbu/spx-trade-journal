@@ -15,6 +15,7 @@ const oscOut = (o) => (o ? { ...o, _track: undefined, _osc: undefined } : null);
 import { parsePlans, resolvePlan, reviewPlan } from "./plan.js";
 import { runSignals, testWebhook, post } from "./signals.js";
 import { runPaper, runLearning } from "./paper.js";
+import { runSwing } from "./swing.js";
 import { readChart } from "./vision.js";
 
 // ---- keep-alive warnings in #signals: Schwab login about to expire, or the bot stopped ----
@@ -395,6 +396,8 @@ export default {
       // nightly learning run, 4:10-4:30 PM ET (once per day)
       const t = et(Date.now());
       if (t.min >= 970 && t.min <= 990) ctx.waitUntil(runLearning(env, deps, { t }).catch((e) => console.error("learning", e)));
+      // daily swing scan (calls only), after the close
+      if (t.min >= 975 && t.min <= 995) ctx.waitUntil(runSwing(env, deps, { t }).catch((e) => console.error("swing", e)));
     }
   },
   // private: only with the admin key (for checks and testing)
@@ -409,6 +412,7 @@ export default {
     // replay support (scripts/replay.mjs runs on your computer): past candles through the bot's Schwab login, and saving the results
     if (url.pathname === "/history") return json(await history(await schwabToken(env), Object.fromEntries(url.searchParams)));
     if (url.pathname === "/replay/save" && req.method === "POST") { const body = await req.json(); await writeJSON(env, "bot:replay", { at: Date.now(), ...body }); return json({ ok: true, items: (body.items || []).length }); }
+    if (url.pathname === "/swing") return json(url.searchParams.get("run") ? await runSwing(env, deps, { t: et(Date.now()) }) : await readJSON(env, "swing:book"));
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
     if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));

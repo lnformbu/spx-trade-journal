@@ -542,6 +542,7 @@
         <section class="bd-box"><h3>Today's decisions <small>why each signal was taken or skipped</small></h3><div class="bs-scroll" style="max-height:220px"><table class="bs-t" id="ppLog"></table></div></section>
       </div>
       <section class="bd-box"><h3>Paper trades</h3><div class="bs-scroll"><table class="bs-t" id="ppTrades"></table></div></section>
+      <section class="bd-box"><h3>Swing trades <small>calls only, SPY, days to weeks · tracked after each close</small></h3><div class="bs-scroll" style="max-height:240px"><table class="bs-t" id="ppSwing"></table></div></section>
       <details class="more"><summary>How the bot is learning: setups on/off, styles being tested, recent changes</summary>
       <div class="bs-grid two">
         <section class="bd-box"><h3>What it has learned <small id="ppModelV"></small></h3><table class="bs-t" id="ppFams"></table><div id="ppParams" style="margin-top:8px"></div></section>
@@ -1140,7 +1141,7 @@
     const body=rows.filter(([,s])=>s.n+s.nt>0).map(([k,s])=>`<tr><td>${esc(k)}</td><td>${s.n}</td><td>${pct(s.win)}</td><td class="${s.avg>0?"up":s.avg<0?"dn":""}">${rr(s.avg)}</td><td class="${s.total>0?"up":s.total<0?"dn":""}">${rr(s.total)}</td></tr>`).join("");
     $(el).innerHTML=`<tr><th>${label}</th><th>Scored</th><th>Win</th><th>Avg</th><th>Total</th></tr>`+(body||`<tr><td colspan="5" class="hint">No scored signals yet</td></tr>`);
   }
-  const FAM={star:"A/A+ setups",mom:"Momentum",flip:"Phase flip",squeeze:"Squeeze",box:"10m compression breakout",div1m:"1m divergence",div3m:"3m divergence",cbox1m:"1m compression breakout",cbox3m:"3m compression breakout","plan-trigger":"Your plan triggers","plan-scenario":"Plan scenarios",pb21:"21 EMA pullback",vomy:"Vomy / iVomy",orb:"Opening range break",you:"Your training setups"};
+  const FAM={star:"A/A+ setups",mom:"Momentum",flip:"Phase flip",squeeze:"Squeeze",box:"10m compression breakout",div1m:"1m divergence",div3m:"3m divergence",cbox1m:"1m compression breakout",cbox3m:"3m compression breakout","plan-trigger":"Your plan triggers","plan-scenario":"Plan scenarios",pb21:"21 EMA pullback",vomy:"Vomy / iVomy",orb:"Opening range break",pb8:"8 EMA ride",you:"Your training setups"};
   function renderPaper(){
     const P=bsData&&bsData.paper; if(!P) return;
     const A=P.acct||{start:2000,balance:2000,log:[]}, M=P.model||{fams:{},changes:[],params:{}}, T=P.trades||[];
@@ -1173,6 +1174,8 @@
     $("#ppFams").innerHTML=`<tr><th>Setup</th><th>Results</th><th>Win</th><th>Avg</th><th>Status</th></tr>`+(fams.map(([k,f])=>`<tr><td>${esc(FAM[k]||k)}</td><td>${f.n}</td><td>${Math.round(f.win*100)}%</td><td class="${f.r>0?"up":f.r<0?"dn":""}">${f.r>0?"+":""}${f.r}R</td><td>${f.off?"⛔ off":"✅ on"}</td></tr>`).join("")||`<tr><td colspan="5" class="hint">Trains after the first close with scored signals.</td></tr>`);
     const p=M.params||{};
     $("#ppParams").innerHTML=[["Exits now",`stop −${Math.round((p.stopPct||.3)*100)}% · target 1 +${Math.round((p.t1Pct||.6)*100)}% · time stop ${p.timeStopMin||10} min`],["Min A/A+ score",M.minScore||70]].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join("");
+    const SW=bsData.swing;
+    $("#ppSwing").innerHTML=`<tr><th>Alert</th><th>Setup</th><th>Trade</th><th>Entry</th><th>Exit</th><th>Result</th></tr>`+(SW?[...(SW.open||[]).map(s=>({...s,st:"open"})),...(SW.closed||[]).slice().reverse()].slice(0,40).map(s=>`<tr><td>${esc(s.date.slice(5))}</td><td style="text-align:left">${esc(s.setup)}</td><td style="text-align:left"><b class="up">▲ CALL</b> ${esc(s.idea||"SPY")}</td><td>${s.entry!=null?f2(s.entry):"next open"}</td><td>${s.exit!=null?f2(s.exit):"open"}</td><td class="${s.pct>0?"up":s.pct<0?"dn":""}">${s.pct!=null?(s.pct>0?"+":"")+s.pct+"%":esc(s.st||"")}${s.why?`<br><small style="color:var(--ink-3)">${esc(s.why)}</small>`:""}</td></tr>`).join(""):"")+((!SW||!(SW.open||[]).length&&!(SW.closed||[]).length)?`<tr><td colspan="6" class="hint">No swings yet. The scan runs after each close.</td></tr>`:"");
     const C=P.challengers;
     if(C){
       const dates=Object.keys((C.hist||{}).champion||{}).sort();

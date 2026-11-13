@@ -286,8 +286,9 @@ async function handle(req, env) {
   if (url.pathname === "/api/bot/stats" && req.method === "GET") {
     const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };
     const stats = await get("bot:stats"), reviews = await get("bot:reviews"), lib = await get("lib:setups");
-    const pAcct = await get("paper:acct"), pTrades = await get("paper:trades"), pModel = await get("paper:model"), pCh = await get("paper:challengers");
+    const pAcct = await get("paper:acct"), pTrades = await get("paper:trades"), pModel = await get("paper:model"), pCh = await get("paper:challengers"), pSw = await get("swing:book");
     return json({
+      swing: pSw ? { open: pSw.open, closed: (pSw.closed || []).slice(-60) } : null,
       paper: { acct: pAcct, model: pModel,
         challengers: pCh ? { gen: pCh.gen, since: pCh.since, hist: pCh.hist, books: Object.fromEntries(Object.entries(pCh.books).map(([id, x]) => [id, { name: x.cfg.name, balance: x.book.balance, open: x.book.open && x.book.open.label, recent: (x.book.recent || []).slice(0, 5) }])) } : null, trades: pTrades ? pTrades.items.slice(-400).map(({ path, ctx, params, ...x }) => x) : [] },
       ok: true, items: stats ? stats.items : [], reviews: reviews ? reviews.days : {},
