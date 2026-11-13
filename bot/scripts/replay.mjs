@@ -15,7 +15,7 @@ import { patterns, atLevel } from "../src/patterns.js";
 import { resolveTracks } from "../src/signals.js";
 import { famOf } from "../src/learn.js";
 import { LEVEL_NAMES } from "../src/plan.js";
-import { trendScore, pullback21, vomy, pbConfluence } from "../src/setups.js";
+import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak } from "../src/setups.js";
 import { ema } from "../src/levels.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -59,7 +59,7 @@ for (const date of days) {
   const before = m1.filter((c) => c.t.date < date).slice(-40 * 390);
   const fired = new Set();
   const found = [];
-  let T10 = null, trendDir = null, trendOk = 0;
+  let T10 = null, trendDir = null, trendOk = 0, vomy10 = null;
   for (let min = OPEN + 3; min < CLOSE - 5; min++) {
     const nowMs = rows.find((c) => c.t.min === min)?.datetime;
     if (!nowMs) continue;
@@ -112,7 +112,31 @@ for (const date of days) {
         const cf = pbConfluence({ dir: pb.dir, trendOn: !!trendDir && trendDir === pb.dir, stack, spyVol3, ggCrossed, cloudH, vix: null });
         add(`pb21:${pb.bar.datetime}:${pb.dir}`, "setup", { dir: pb.dir, entry: pb.entry, stop: pb.stop, target: (ggCrossed && !fibHit ? fib : next) ?? null, needTrigger: true }, { conf: cf.bits.map((b) => b.split(" (")[0]) });
       }
-      const vm = vomy(b3all);
+      // VOMY_TEST=1: compare B (10m Vomy), C (3m 13-retest), D (10m Vomy then 3m 13-retest); not saved as families otherwise
+      if (process.env.VOMY_TEST) {
+        const nextLv = (up, px) => Object.values(lv).filter((v) => (up ? v > px : v < px)).sort((x, y) => (up ? x - y : y - x))[0] ?? null;
+        if (min % 10 === 0) {
+          const v10 = vomy(T10.b10);
+          if (v10) { vomy10 = { dir: v10.dir, at: nowMs }; add(`vomyB:${v10.bar.datetime}:${v10.dir}`, "setup", { dir: v10.dir, entry: v10.entry, stop: v10.stop, target: nextLv(v10.dir === "bull", v10.entry), needTrigger: true }); }
+        }
+        const rt = vomyRetest13(b3all);
+        if (rt) {
+          add(`vomyC:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true });
+          if (vomy10 && vomy10.dir === rt.dir && nowMs - vomy10.at <= 40 * 60000)
+            add(`vomyD:${rt.bar.datetime}:${rt.dir}`, "setup", { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: nextLv(rt.dir === "bull", rt.entry), needTrigger: true });
+        }
+      }
+      // ORB break-and-hold (as live, before 10:30)
+      if (min < 630) {
+        const ob = orbBreak(aggregate(rth, 3).filter((b) => b.datetime + 180000 <= nowMs), intra.orbh, intra.orbl, rib10);
+        if (ob) { const up = ob.dir === "bull"; const nx = Object.values(lv).filter((v) => (up ? v > ob.entry : v < ob.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+          add(`orb:${date}:${ob.dir}`, "setup", { dir: ob.dir, entry: ob.entry, stop: ob.stop, target: nx ?? null, needTrigger: true }); }
+      }
+      if (min % 10 === 0 && !process.env.VOMY_TEST) { const v10 = vomy(T10.b10); if (v10) vomy10 = { dir: v10.dir, at: nowMs }; }
+      const rtD = vomy10 && nowMs - vomy10.at <= 40 * 60000 && !process.env.VOMY_TEST ? vomyRetest13(b3all) : null;
+      if (rtD && rtD.dir === vomy10.dir) { const up = rtD.dir === "bull"; const nx = Object.values(lv).filter((v) => (up ? v > rtD.entry : v < rtD.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+        add(`vomy:${rtD.bar.datetime}:${rtD.dir}`, "setup", { dir: rtD.dir, entry: rtD.entry, stop: rtD.stop, target: nx ?? null, needTrigger: true }); }
+      const vm = process.env.VOMY_TEST ? vomy(b3all) : null;
       if (vm) {
         const up = vm.dir === "bull";
         const next = Object.values(lv).filter((v) => (up ? v > vm.entry : v < vm.entry)).sort((x, y) => (up ? x - y : y - x))[0];

@@ -17,7 +17,7 @@ const START = 2000;
 const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
-const TRADED = new Set(["star", "mom", "flip", "squeeze", "box", "div1m", "div3m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy"]);
+const TRADED = new Set(["star", "mom", "flip", "squeeze", "box", "div1m", "div3m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy", "orb"]);
 const group = (sym) => (sym === "SPY" || sym === "$SPX" ? "SPX" : sym);   // SPY and SPX count as one market
 const rootOf = (contract) => String((contract && contract.symbol) || "").split(" ")[0].replace(/^SPXW$/, "SPX");
 // which option underlyings get paper traded: wrangler.toml PAPER_TICKERS (default "$SPX"; add e.g. ",TSLA" later)
@@ -64,6 +64,7 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (!TRADED.has(cand.fam)) return "not a tradable setup";
   if (t.min < 573) return "before 9:33 (opening range)";
   if (t.min >= 955) return "no new entries after 3:55";
+  if (t.min < 600 && cand.fam !== "orb" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
   // event days (your plan's "Event:" line): no entries 15 min either side; a pre-market event = A+ only until 9:45
   const ev = events.find((e) => t.min >= e.min - 15 && t.min < e.min + 15);
   if (ev) return `${ev.name} at ${hhmm(ev.min)}: no entries 15 minutes either side`;

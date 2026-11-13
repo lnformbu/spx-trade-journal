@@ -10,7 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
-import { trendScore, pullback21, vomy, marketPivot, pbConfluence } from "./setups.js";
+import { trendScore, pullback21, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -307,6 +307,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         const o10 = phaseOsc(b10);
         st.tf10[sym] = {
           rib: ribbon(b10), osc: o10 && { ...o10, _track: undefined, _osc: undefined }, box: o10 ? compressionBox(b10, o10._track) : null,
+          // 10m Vomy / iVomy (kept until a newer one; the 3m 13-retest entry must come within 40 minutes)
+          vomy10: (() => { const v = vomy(b10); return v ? { dir: v.dir, at: now, bar: v.bar.datetime, ema48: v.ema48 } : (st.tf10[sym] && st.tf10[sym].vomy10) || null; })(),
           lastClose: b10.length ? b10[b10.length - 1].close : null, prevClose: b10.length > 1 ? b10[b10.length - 2].close : null,
           avwap: anchor ? avwap(m5, anchor) : null,
           cloudH: cloud2021(aggregate(m5, 60).filter((b) => b.datetime + 3600000 <= now)),
@@ -422,17 +424,44 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
               + `\nConfluence ${cf.score}/6: ${cf.bits.join(" · ")}`,
           });
         }
-        // Vomy / iVomy (3m): stacked ribbon breaks and holds the 48 EMA
-        const vm = vomy(b3);
-        if (vm) {
-          const up = vm.dir === "bull";
-          const next = Object.values(lv).filter((v) => (up ? v > vm.entry : v < vm.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+        // ORB break-and-hold (allowed in the opening window): 2 closes beyond the 9:30-9:33 range with the 10m ribbon agreeing
+        const ob = t.min < 630 ? orbBreak(b3rth, intra.orbh, intra.orbl, rib10) : null;
+        if (ob) {
+          const up = ob.dir === "bull";
+          const next = Object.values(lv).filter((v) => (up ? v > ob.entry : v < ob.entry)).sort((x, y) => (up ? x - y : y - x))[0];
           found.push({
-            kind: "setup", sym, key: `vomy:${vm.bar.datetime}:${vm.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
-            track: { dir: vm.dir, entry: vm.entry, stop: vm.stop, target: next ?? null, needTrigger: true },
-            title: `${up ? "🐬 iVOMY" : "🤮 VOMY"} SPX ${up ? "CALLS ▲" : "PUTS ▼"} (3m)`,
-            text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(vm.entry)}** · **Stop:** ${r2(vm.stop)} (13 EMA side) · **Target:** ${next != null ? r2(next) : "—"} · expires in 9 min`
-              + `\nThe 3m ribbon was stacked ${up ? "down" : "up"}, then SPX broke and held ${up ? "above" : "below"} the 48 EMA ${vm.ema48} for 2 closes: ${up ? "inverse Vomy" : "Vomy"} confirmed.`,
+            kind: "setup", sym, key: `orb:${t.date}:${ob.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: ob.dir, entry: ob.entry, stop: ob.stop, target: next ?? null, needTrigger: true },
+            title: `🚪 SPX OPENING RANGE BREAK ${up ? "CALLS ▲" : "PUTS ▼"} (holding)`,
+            text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(ob.entry)}** · **Stop:** ${r2(ob.stop)} · **Target:** ${next != null ? r2(next) : "—"} · expires in 9 min`
+              + `\nTwo 3m closes ${up ? "above" : "below"} the opening range ${ob.orbl}–${ob.orbh} with the 10m ribbon ${rib10 ? rib10.state : "—"}.`,
+          });
+        }
+        // Vomy / iVomy (3m): stacked ribbon breaks and holds the 48 EMA
+        // Vomy, Saty's way (replay: 20 trades, 75% wins, +0.72R; 3m-only version −0.08R):
+        // 1) the 10m chart confirms a Vomy / iVomy (stacked ribbon, 2 closes through the 48) → heads-up
+        // 2) within 40 minutes, a 3m bar retests the 13 EMA and is rejected in that direction → the trade
+        const V10 = T10.vomy10;
+        if (V10 && now - V10.at <= 12 * 60000 && !st.fired[`vomy10:${V10.bar}`]) {
+          const up = V10.dir === "bull";
+          found.push({
+            kind: "setup", sym, key: `vomy10:${V10.bar}`, once: true, color: COLORS.big,
+            title: `${up ? "🐬 iVOMY" : "🤮 VOMY"} confirmed on the SPX 10m: watch for the 3m 13 EMA retest`,
+            text: `The 10m ribbon was stacked ${up ? "down" : "up"} and SPX broke and held ${up ? "above" : "below"} the 10m 48 EMA ${V10.ema48}. `
+              + `Next 40 minutes: a 3m pullback to the 13 EMA that gets rejected is the entry (the bot posts it). Not a trade by itself.`,
+          });
+        }
+        st.vomy10 = V10 && now - V10.at <= 40 * 60000 ? V10 : st.vomy10 && now - st.vomy10.at <= 40 * 60000 ? st.vomy10 : null;
+        const rt = st.vomy10 ? vomyRetest13(b3) : null;
+        if (rt && rt.dir === st.vomy10.dir) {
+          const up = rt.dir === "bull";
+          const next = Object.values(lv).filter((v) => (up ? v > rt.entry : v < rt.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+          found.push({
+            kind: "setup", sym, key: `vomy:${rt.bar.datetime}:${rt.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: rt.dir, entry: rt.entry, stop: rt.stop, target: next ?? null, needTrigger: true },
+            title: `${up ? "🐬 iVOMY" : "🤮 VOMY"} SPX ${up ? "CALLS ▲" : "PUTS ▼"} · 10m confirmed, 3m 13 retest`,
+            text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(rt.entry)}** · **Stop:** ${r2(rt.stop)} (a close back through the 13) · **Target:** ${next != null ? r2(next) : "—"} · expires in 9 min`
+              + `\n10m ${up ? "inverse Vomy" : "Vomy"} confirmed, then the 3m retested its 13 EMA ${rt.ema13} and was rejected.`,
           });
         }
         // opening read at 9:40: where SPX opened vs the trigger box, the VIX pivot, the trend-day check
@@ -767,6 +796,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           const fam = famOf(f.key) || "";
           // never play against a trend day (except a confirmed Vomy, the reversal setup); your plan alerts still post
           if (TDs && TDs !== dir && fam !== "vomy") f.noTrade = "against trend mode";
+          // opening window 9:33-10:00 (replay: 9:40-10:00 −0.22R): only ORB breaks and A+ cards are traded; the rest is watch-only
+          const openWin = t.min < 600 && fam !== "orb" && !(fam === "star" && f.grade === "A+");
+          if (openWin) f.noTrade = "opening window";
           const what = fam.startsWith("div") ? (bull ? "SPX made a lower low but momentum (Phase Oscillator) made a higher low: sellers are running out of steam" : "SPX made a higher high but momentum (Phase Oscillator) made a lower high: buyers are running out of steam")
             : fam.startsWith("cbox") ? `SPX broke ${bull ? "up" : "down"} out of a tight ${fam.slice(4)} compression range; tight ranges usually lead to a bigger move`
             : fam === "box" ? `the 10m chart broke ${bull ? "up" : "down"} out of its compression box; that often starts a bigger move`
@@ -785,6 +817,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             P ? (planSide === dir ? "with your plan ✓" : planSide ? "against your plan ✗" : "between your plan triggers") : null,
             V && st.vixPivot ? `VIX ${V.last > st.vixPivot ? "above" : "below"} its pivot ${st.vixPivot}${(V.last < st.vixPivot) === bull ? " ✓" : " ✗"}` : null,
             TDs ? (TDs === dir ? "with trend mode ✓" : "against trend mode ✗ (not paper traded)") : null,
+            openWin ? "⏳ opening window (before 10:00): watch only, not paper traded" : null,
           ].filter(Boolean);
           f.why = true;
           f.text += `\n**Why:** ${what}.\n${ctxBits.join(" · ")}`;

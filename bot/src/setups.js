@@ -101,6 +101,48 @@ export function vomy(bars) {
   return null;
 }
 
+// Vomy early entry (training notes #3): the ribbon was stacked, price broke the 13 EMA, now RETESTS the 13 and gets rejected.
+// Bearish: bar reaches up to the 13, closes back below it and red. Risk = a close beyond the 13.
+export function vomyRetest13(bars) {
+  if (!bars || bars.length < 60) return null;
+  const c = bars.map((b) => b.close);
+  const e8 = ema(c, 8), e13 = ema(c, 13), e21 = ema(c, 21), e48 = ema(c, 48);
+  const i = bars.length - 1, b = bars[i], A = barAtr(bars);
+  if (!A) return null;
+  const tol = A * 0.15;
+  const wasStacked = (up) => {
+    let run = 0, best = 0;
+    for (let j = i - 30; j <= i - 2; j++) {
+      const s = up ? e8[j] > e13[j] && e13[j] > e21[j] && e21[j] > e48[j] : e8[j] < e13[j] && e13[j] < e21[j] && e21[j] < e48[j];
+      run = s ? run + 1 : 0; best = Math.max(best, run);
+    }
+    return best >= 6;
+  };
+  const brokeBelow = c.slice(i - 8, i).some((x, k) => x < e13[i - 8 + k]), brokeAbove = c.slice(i - 8, i).some((x, k) => x > e13[i - 8 + k]);
+  if (wasStacked(true) && brokeBelow && b.high >= e13[i] - tol && b.close < e13[i] && b.close < b.open) {
+    return { dir: "bear", bar: b, entry: b.low, stop: Math.max(b.high, e13[i]) + tol, ema13: r2(e13[i]), ema48: r2(e48[i]) };
+  }
+  if (wasStacked(false) && brokeAbove && b.low <= e13[i] + tol && b.close > e13[i] && b.close > b.open) {
+    return { dir: "bull", bar: b, entry: b.high, stop: Math.min(b.low, e13[i]) - tol, ema13: r2(e13[i]), ema48: r2(e48[i]) };
+  }
+  return null;
+}
+
+// ORB break-and-hold (opening window): the first time two 3m closes in a row hold beyond the 9:30-9:33 range, with the 10m ribbon agreeing.
+// bars = today's completed 3m RTH bars (bar 0 = the opening range). Entry: 1m break of the 2nd bar; stop: under/over both bars.
+export function orbBreak(bars, orbh, orbl, rib10) {
+  if (!bars || bars.length < 3 || orbh == null || orbl == null) return null;
+  const i = bars.length - 1, b = bars[i], p = bars[i - 1];
+  const before = bars.slice(1, i - 1);
+  if (p.close > orbh && b.close > orbh && !before.some((x) => x.close > orbh) && rib10 && rib10.state === "bullish") {
+    return { dir: "bull", bar: b, entry: b.high, stop: Math.min(p.low, b.low), orbh, orbl };
+  }
+  if (p.close < orbl && b.close < orbl && !before.some((x) => x.close < orbl) && rib10 && rib10.state === "bearish") {
+    return { dir: "bear", bar: b, entry: b.low, stop: Math.max(p.high, b.high), orbh, orbl };
+  }
+  return null;
+}
+
 // "Psych" pivot: the Day-mode ATR level nearest to price, rounded to the nearest step (VIX 0.5, SPX 5)
 export function marketPivot(price, atrLevels, step) {
   if (price == null || !atrLevels) return null;

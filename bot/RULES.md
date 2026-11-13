@@ -124,7 +124,7 @@ Add a line to your morning plan post: `Event: FOMC 2:00` or `Event: CPI 8:30` (s
 
 ## Session
 
-| Time | Behavior |
+| Time | Behavior (see "Opening: both rules" below) |
 |---|---|
 | 4:00-9:30 | Track premarket, compute levels |
 | 9:30-9:33 | Build the 3-minute opening range, no trades |
@@ -332,11 +332,14 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 | **Trend mode** | 10m ribbon (2 pts), 3m ribbon, holding beyond the ORB, beyond the call/put trigger, through the Golden Gate, 1h cloud, VIX trending the other way, 50%+ of ATR used (max 9). 6+ with the 10m ribbon and the trigger on that side, not choppy, from 9:45. Lasts 60 minutes unless re-confirmed. | Right 72-79% over the **next 30-60 min**, only ~50% to the close, so it is a trend *window*, not a whole-day call. Signals with it +0.11R, against it +0.06R. |
 | **Never fight trend mode** | Signals against an active trend mode are posted but not paper traded (except a confirmed Vomy) | |
 | **🎯 21 EMA pullback** | Stacked 3m ribbon, price came from beyond the 8, a 3m bar dips into the 21 / 8-13 zone without losing the 48 and closes back past the 13. Entry: 1m close past that bar; stop: half a 3m ATR beyond the 21 zone; target: Golden Fib if the Gate was crossed, else the next ATR level. **The 1h cloud must agree.** Confluence shown: trend mode, stacked 21s (10m / 1h / daily), quiet pullback (SPY volume), VIX, Golden Gate. | Without the 1h filter −0.04R; **with it +0.06R, 57% wins**. The quiet-pullback (low volume) read did *not* help (shown, not required). |
-| **🤮 Vomy / 🐬 iVomy** | Stacked 3m ribbon for 6+ bars, then 2 closes through the 48 EMA. Entry on a 1m break, stop at the 13. | −0.08R so far: learning will switch it off if it keeps losing |
+| **🤮 Vomy / 🐬 iVomy** (Saty's way) | The **10m** confirms it (ribbon stacked 6+ bars, then 2 closes through the 48) → heads-up post. Within 40 min, a **3m** bar retests the 13 EMA and is rejected → the trade (stop: a close back through the 13). | Tested 4 versions: 3m only −0.08R (115), 10m only −0.03R (19), 3m 13-retest only +0.01R (439), **10m confirm + 3m 13 retest +0.72R, 75% wins (20)**: small sample, watching it |
+| **🚪 Opening range break** | Two 3m closes beyond the 9:30-9:33 range with the 10m ribbon agreeing (first time today, before 10:30) | 11 trades, 64% wins, −0.04R: flat so far |
 | **🌉 Golden Gate** | Heads-up when SPX crosses ±38.2% ATR (about 60% reach ±61.8%); pullback entries then target the Golden Fib | |
 | **🌅 Opening read** (9:40) | Open vs the trigger box (at the call trigger → often back to PDC, sometimes the put trigger), auto VIX pivot (Day ATR level nearest VIX, rounded to 0.5: VIX above = bearish SPX), trend check | |
 | **🗡️ Highlander** (3:45) | Top 2 leaderboard contracts: under 100k volume they usually die into the close → favor the side that kills them; 100k+ often finish in the money | |
 | **Key levels** | 3m, 10m, 1h and daily 21 EMAs added (A/A+ cards can fire at them) | |
+
+**Opening: both rules.** 9:30-9:33 the opening range forms (no trades). 9:33-10:00 is the **opening window**: only ORB breaks and A+ cards are traded; everything else posts as ⏳ watch-only (Saty: don't trade the first 10 minutes). From 10:00 normal rules. Replay: the window skipped 55 signals worth −11.6R (avg +0.112R → +0.124R per signal; a plain no-trades-before-9:40 rule only reached +0.113R).
 
 Not built (from the notes): TTM Squeeze (Bollinger inside Keltner) as a separate indicator: the Phase Oscillator compression already plays that role; the Monday-buy/Thursday-sell calendar test was run separately (not a bot strategy).
 
