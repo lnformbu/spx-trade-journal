@@ -1,5 +1,5 @@
 // Signal scanner, 9:30-16:00 ET (own cron; half the tickers each minute = every ticker every 2 minutes):
-//   🐋 whales        big premium on one contract since the last look (options chain volume change)
+//   (whale prints are not posted; they feed the options-flow check)
 //   📈 large moves   ±1/±2 ATR from yesterday's close, or half an ATR in 15 minutes
 //   🚀 momentum      fresh key-level break with VWAP, 3m Saty cloud and volume agreeing
 //   🗺️ your plan     trigger crossed / failed, scenario set up, targets reached (any ticker you post a plan for)
@@ -189,14 +189,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         // bought calls / sold puts = bullish; bought puts / sold calls = bearish
         const dir = atAsk ? (o.putCall === "CALL" ? "bull" : "bear") : atBid ? (o.putCall === "CALL" ? "bear" : "bull") : null;
         if (dir) flow.push({ at: now, dir, prem: Math.round(prem) });
-        if (prem < WHALE_MIN(sym)) continue;
-        const side = atAsk ? "bought at the ask" : atBid ? "sold at the bid" : "traded mid";
-        const opening = dv > (o.openInterest || 0);
-        found.push({
-          kind: "whale", sym, key: "whale:" + o.symbol + ":" + minuteNo, color: COLORS.whale,
-          title: `🐋 WHALE ${show(sym)} ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)}`,
-          text: `**${money(prem)}** in premium: ${dv.toLocaleString()} contracts at ~$${r2(px)}, ${side}${opening ? ", more than open interest (new positions)" : ""}.\n${show(sym)} ${r2(price)}${dir ? ` · reads ${dir === "bull" ? "bullish" : "bearish"}` : ""}`,
-        });
+        // whale prints are no longer posted; their premium is already in the options-flow total above (A/A+ scores use it)
       }
       st.vol[sym] = cur;
       st.flow[sym] = flow;
@@ -543,6 +536,6 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
 }
 
 export async function testWebhook(env) {
-  const r = await post(env, { title: "✅ Signals connected", description: "Whales, large moves, momentum, your plans and A/A+ setups for SPY, SPX, TSLA, MU, META, AVGO, SPCX, MSTR, GOOGL, AAPL will post here during market hours (9:30-4:00 ET).", color: COLORS.bull });
+  const r = await post(env, { title: "✅ Signals connected", description: "Large moves, momentum, your plans and A/A+ setups for SPY, SPX, TSLA, MU, META, AVGO, SPCX, MSTR, GOOGL, AAPL will post here during market hours (9:30-4:00 ET).", color: COLORS.bull });
   return { ok: r.ok, status: r.status, detail: r.ok ? undefined : (await r.json().catch(() => ({}))).message };
 }

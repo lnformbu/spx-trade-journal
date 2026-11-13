@@ -340,6 +340,7 @@
   .bot h3{margin:0;font-size:13px;font-weight:650;color:var(--ink);} .bot h3 small{font-weight:500;color:var(--ink-3);font-size:11.5px;}
   .bd-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
   @media(max-width:760px){.bd-row{grid-template-columns:minmax(0,1fr);}}
+  .bd-row.one{grid-template-columns:minmax(0,1fr);}
   /* status chips */
   .chips{display:flex;flex-wrap:wrap;gap:8px;}
   .chip{display:flex;flex-direction:column;gap:1px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;min-width:96px;font-variant-numeric:tabular-nums;}
@@ -486,8 +487,8 @@
       <div class="bd-main">
         <div class="chips" id="bdChips" aria-live="polite"></div>
         <div class="tfs" id="bdTfs"></div>
-        <div class="bd-row">
-          <section class="bd-box">
+        <div class="bd-row one">
+          <section class="bd-box" hidden>
             <div class="bd-h"><h3>Key levels</h3><button class="linkbtn" id="bdAllLv" type="button" aria-expanded="false">Show all</button></div>
             <div class="lvl2" id="bdLevels"></div>
             <table class="lv" id="botLevels" hidden aria-describedby="botH"></table>

@@ -329,7 +329,7 @@ async function run(env, { force = false } = {}) {
     // plans: every post in the plan channel today (every minute 9:15-9:45, every 5 minutes 8:00-15:30) + a pasted one
     const pk = "bot:plans:" + today;
     let plans = (await readJSON(env, pk)) || { posts: [] };
-    if (force || (t.min >= 555 && t.min <= 585) || (t.min >= 240 && t.min <= 930 && t.min % 5 === 0)) {
+    if (force || (t.min >= 540 && t.min <= 585) || (t.min >= 240 && t.min <= 930 && t.min % 5 === 0)) {
       try {
         const d = await discordPosts(env, today);
         if (d) {
