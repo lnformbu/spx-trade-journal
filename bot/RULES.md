@@ -130,9 +130,9 @@ You list scheduled events in the journal (FOMC, CPI, jobs report, big earnings l
 | 9:30-9:33 | Build the 3-minute opening range, no trades |
 | **9:33-11:30** | Main window |
 | 11:30-1:30 | A-grade setups only, tagged **midday** in the log so they can be compared |
-| 1:30-3:00 | Second window |
-| 3:00 | No new entries |
-| 3:45 | Close everything |
+| 1:30-3:55 | Second window, including power hour |
+| 3:55 | No new entries |
+| 3:59 | Close everything (0DTE never held into the 4:00 settlement) |
 
 ## Direction (1-hour chart, completed candles only)
 
@@ -210,7 +210,7 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 | Invalidated | the setup's reason is gone (e.g. ribbon flips against the trade) |
 | **NEW** Scalp time stop | not at least +10% within 10 minutes: exit; 0DTE time decay works against a trade that doesn't move *(start)* |
 | **NEW** Runner stall | runner makes no new high for 15 minutes: exit *(start)* |
-| Time | 3:45 |
+| Time | 3:59 |
 
 ## **NEW** Profit ladder (stops only move up, never down)
 
@@ -269,6 +269,27 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 - It can **never** change: the −30% maximum stop, 15% maximum loss, sizing, daily limits, entry window.
 - Changes are posted to #signals (🧠 Bot learning) and listed in the journal; a weekly paper report posts on Fridays.
 - In live mode, learned changes will need your approval before they apply.
+
+## **NEW** Style challengers (the bot finds its own trading style)
+
+Your rules are the **champion** and trade the paper account. Alongside, **challengers** trade the same SPX signals at the same moments,
+each with one change and its own $2,000 paper book (silent: no Discord posts, shown in the journal):
+
+| Challenger | Change |
+|---|---|
+| Runner | target 1 at +100%, trail keeps 70-75%, runner allowed 25 min without a new high |
+| Quick scalp | −20% stop, target 1 at +30%, breakeven at +15%, 6-minute time stop |
+| Delta 0.30 / 0.55 / 0.70 | buys the SPX 0DTE contract nearest that delta instead of the posted one |
+| Trade midday too | all setups 11:30-1:30, not only A-grade |
+| Mornings only | entries 9:33-11:30 only |
+| Size down weaker setups | 25% of the account instead of 50% when the learned edge is under +0.2R |
+
+- **Takeover (automatic, paper only):** checked every night. Over the same 20+ sessions a challenger needs 15+ trades, more P/L than the champion
+  by a clear margin (at least $50 or 10%), a profit factor at least as good, and a worst drawdown no more than 1.25× the champion's (or $200).
+  The best qualifying one becomes the champion, 🏆 is posted to #signals, and a new set of challengers is built around the new style.
+- After a takeover, SPX "Contract idea" lines in #signals use the champion's delta, so the posts and the paper trades stay the same.
+- Every style keeps the hard limits: 15% max loss per trade, −30% stop at most, daily loss limit and lockouts, one position, 3:59 close.
+- Live mode: a new style is never applied to real money without your approval.
 
 ## **NEW** Live mode (only after paper; switched on by you)
 

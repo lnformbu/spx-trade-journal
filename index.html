@@ -544,6 +544,8 @@
         <section class="bd-box"><h3>What it has learned <small id="ppModelV"></small></h3><table class="bs-t" id="ppFams"></table><div id="ppParams" style="margin-top:8px"></div></section>
         <section class="bd-box"><h3>Learning changes <small>trains itself after every close</small></h3><div class="bs-scroll" style="max-height:260px" id="ppChanges"></div></section>
       </div>
+      <section class="bd-box"><h3>Style challengers <small id="ppChH"></small></h3><table class="bs-t" id="ppCh"></table>
+        <p class="hint" style="margin-top:6px">Each challenger trades the same signals at the same moments with one change, on its own $2,000 paper book. After 20+ sessions, one that makes clearly more (15+ trades, better profit factor, drawdown no worse than 1.25×) takes over the paper account. Risk limits never change.</p></section>
     </div>
   </section>
 
@@ -1147,7 +1149,7 @@
       ["Contract",`<b>${esc(o.label)}</b> 0DTE × ${o.qtyOpen}/${o.qty}${o.posted?" (your posted contract)":""}`],
       ["Entry",`${usd(o.entry)} at ${esc(o.et)} ET`],["Now (bid)",o.lastBid!=null?`${usd(o.lastBid)} (${Math.round((o.lastBid/o.entry-1)*100)}%)`:"—"],
       ["Stop",usd(o.stop)+(o.t1?" · target 1 hit, trailing":"")],["From signal",esc(o.signal)],
-    ].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join(""):`<p class="hint">No open position. Trades SPX/SPY signals 9:33–3:00 ET, closes everything by 3:45.</p>`;
+    ].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join(""):`<p class="hint">No open position. Trades SPX signals 9:33–3:55 ET, closes everything at 3:59.</p>`;
     const lg=(A.log||[]).slice().reverse();
     $("#ppLog").innerHTML=(day&&lg.length)?lg.map(x=>`<tr><td>${esc(x.et)}</td><td style="text-align:left">${esc(x.action)}</td><td style="text-align:left">${esc(x.title)}<br><small style="color:var(--ink-3)">${esc(x.why)}</small></td></tr>`).join(""):`<tr><td class="hint">Nothing yet today.</td></tr>`;
     $("#ppTrades").innerHTML=`<tr><th>When</th><th>Contract</th><th>Setup</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th><th>R</th><th>Exit reason</th></tr>`+
@@ -1157,6 +1159,14 @@
     $("#ppFams").innerHTML=`<tr><th>Setup</th><th>Results</th><th>Win</th><th>Avg</th><th>Status</th></tr>`+(fams.map(([k,f])=>`<tr><td>${esc(FAM[k]||k)}</td><td>${f.n}</td><td>${Math.round(f.win*100)}%</td><td class="${f.r>0?"up":f.r<0?"dn":""}">${f.r>0?"+":""}${f.r}R</td><td>${f.off?"⛔ off":"✅ on"}</td></tr>`).join("")||`<tr><td colspan="5" class="hint">Trains after the first close with scored signals.</td></tr>`);
     const p=M.params||{};
     $("#ppParams").innerHTML=[["Exits now",`stop −${Math.round((p.stopPct||.3)*100)}% · target 1 +${Math.round((p.t1Pct||.6)*100)}% · time stop ${p.timeStopMin||10} min`],["Min A/A+ score",M.minScore||70]].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join("");
+    const C=P.challengers;
+    if(C){
+      const dates=Object.keys((C.hist||{}).champion||{}).sort();
+      const sum=h=>{ let pnl=0,tr=0,gw=0,gl=0; dates.forEach(d=>{ const x=h&&h[d]; if(x){ pnl+=x.pnl; tr+=x.trades; gw+=x.gw||0; gl+=x.gl||0; } }); return {pnl,tr,pf:gl?gw/gl:gw?Infinity:null}; };
+      const rows=[["champion",{name:"🏆 "+((M.style&&M.style.name)||"Your rules")+" (paper account)",open:A.open&&A.open.label}],...Object.entries(C.books||{})].map(([id,b])=>({...b,...sum(C.hist[id])})).sort((a,b)=>b.pnl-a.pnl);
+      $("#ppChH").textContent=`round ${C.gen} · ${dates.length} session${dates.length===1?"":"s"} of 20`;
+      $("#ppCh").innerHTML=`<tr><th>Style</th><th>Trades</th><th>P/L</th><th>PF</th><th>Open now</th></tr>`+rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.tr}</td><td class="${r.pnl>0?"up":r.pnl<0?"dn":""}">${usd(r.pnl)}</td><td>${r.pf==null?"—":r.pf===Infinity?"∞":r.pf.toFixed(2)}</td><td>${esc(r.open||"")}</td></tr>`).join("");
+    } else $("#ppCh").innerHTML=`<tr><td class="hint">Challengers start with the first paper session.</td></tr>`;
     $("#ppChanges").innerHTML=(M.changes||[]).map(c=>`<div class="bs-line"><span>${esc(c.text)}</span><span>${esc(c.date.slice(5))}</span></div>`).join("")||`<p class="hint">No changes yet. Setups are switched off only after 15+ results averaging below −0.15R; exit settings change only when a walk-forward test on newer trades agrees.</p>`;
   }
   function renderBotStats(){

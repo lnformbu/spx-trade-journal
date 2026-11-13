@@ -43,14 +43,14 @@ function contracts(chain) {
 }
 const fmtC = (o) => `${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)} ~ $${r2(o.mark)}`;
 // contract idea: nearest expiry, delta closest to 0.40 in the trade's direction
-function ideaO(list, dir) {
+function ideaO(list, dir, target = 0.4) {
   const side = list.filter((o) => o.putCall === (dir === "bull" ? "CALL" : "PUT") && o.mark > 0 && o.delta != null);
   if (!side.length) return null;
   const exp = side.map((o) => o.exp).sort()[0];
-  return side.filter((o) => o.exp === exp).sort((a, b) => Math.abs(Math.abs(a.delta) - 0.4) - Math.abs(Math.abs(b.delta) - 0.4))[0] || null;
+  return side.filter((o) => o.exp === exp).sort((a, b) => Math.abs(Math.abs(a.delta) - target) - Math.abs(Math.abs(b.delta) - target))[0] || null;
 }
-function idea(list, dir) {
-  const best = ideaO(list, dir);
+function idea(list, dir, target = 0.4) {
+  const best = ideaO(list, dir, target);
   return best ? `${fmtC(best)} (Δ ${Math.abs(best.delta).toFixed(2)})` : null;
 }
 // the contract a signal shows, in a form the paper trader can buy
@@ -125,6 +125,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
 
   const found = [];
   const errors = [];
+  const paperStyle = ((await readJSON(env, "paper:model")) || {}).style || null;
   const resolved = [];
 
   // ---- VIX on 10m (inverse of SPX): cloud, oscillator, last two 10m closes; refreshed every 10 minutes ----
@@ -509,10 +510,15 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       // market context of every signal from this ticker (the learning run compares winners and losers by it)
       const gexSide = GX && GX.flip != null && (sym === "$SPX" || (sym === "SPY" && ratio)) ? ((sym === "SPY" ? c0 * ratio : c0) >= GX.flip ? "positive" : "negative") : null;
       for (const f of found) if (f.sym === sym && f.track && f.contract === undefined) {
-        const o = ideaO(list, f.track.dir);
+        // SPX ideas use the paper account's current style delta (it can change when a challenger takes over)
+        const tgt = sym === "$SPX" && paperStyle && paperStyle.delta ? paperStyle.delta : 0.4;
+        const o = ideaO(list, f.track.dir, tgt);
         f.contract = cobj(o, sym);
-        if (o && !/ontract/.test(f.text)) f.text += `
-Contract idea: ${show(sym)} ${idea(list, f.track.dir)}`;
+        if (o) {
+          const line = `Contract idea: ${show(sym)} ${idea(list, f.track.dir, tgt)}`;
+          if (/Contract idea:[^\n]*/.test(f.text)) f.text = f.text.replace(/Contract idea:[^\n]*/, line);
+          else if (!/ontract/.test(f.text)) f.text += "\n" + line;
+        }
       }
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
