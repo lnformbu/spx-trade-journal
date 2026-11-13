@@ -633,8 +633,11 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           if (f.sym !== sym || !f.track || f.drop || f.why) continue;
           const dir = f.track.dir, bull = dir === "bull";
           const against = (bull && vs === "rising") || (!bull && vs === "falling");
-          if (against && f.kind !== "plan") { f.drop = "VIX against"; continue; }
-          if (against) f.vixAgainst = true;
+          // blocked only when VIX is clearly TRENDING against: its 10m cloud points the wrong way AND the last 10m bar kept going that way
+          const rb = V && V.rib && V.rib.state;
+          const strong = against && V && (bull ? rb === "bullish" && V.last >= V.prev : rb === "bearish" && V.last <= V.prev);
+          if (strong && f.kind !== "plan") { f.drop = "VIX trending against"; continue; }
+          if (strong) f.vixAgainst = true;
           const fam = famOf(f.key) || "";
           const what = fam.startsWith("div") ? (bull ? "SPX made a lower low but momentum (Phase Oscillator) made a higher low: sellers are running out of steam" : "SPX made a higher high but momentum (Phase Oscillator) made a lower high: buyers are running out of steam")
             : fam.startsWith("cbox") ? `SPX broke ${bull ? "up" : "down"} out of a tight ${fam.slice(4)} compression range; tight ranges usually lead to a bigger move`
@@ -646,7 +649,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             : fam === "star" ? `a ${bull ? "bullish" : "bearish"} reversal candle formed at a key level and most checks agree`
             : "setup triggered";
           const ctxBits = [
-            vs ? `VIX ${V ? V.last + " " : ""}${vs}${(bull && vs === "falling") || (!bull && vs === "rising") ? " ✓ confirms " + (bull ? "calls" : "puts") : vs === "mixed" ? " (not confirming yet)" : " ✗ against"}` : null,
+            vs ? `VIX ${V ? V.last + " " : ""}${vs}${(bull && vs === "falling") || (!bull && vs === "rising") ? " ✓ confirms " + (bull ? "calls" : "puts") : vs === "mixed" ? " (not confirming yet)" : strong ? " ✗ trending against" : " ⚠ ticking against (no trend yet)"}` : null,
             rib10 ? `10m cloud ${rib10.state}${side(rib10) === dir ? " ✓" : side(rib10) ? " ✗" : ""}` : null,
             choppy ? "choppy market ⚠" : "trending market ✓",
             P ? (planSide === dir ? "with your plan ✓" : planSide ? "against your plan ✗" : "between your plan triggers") : null,
