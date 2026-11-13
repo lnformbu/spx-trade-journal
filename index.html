@@ -341,6 +341,9 @@
   .bd-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
   @media(max-width:760px){.bd-row{grid-template-columns:minmax(0,1fr);}}
   .bd-row.one{grid-template-columns:minmax(0,1fr);}
+  .glance{font-size:15px;padding:10px 14px;margin-bottom:10px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line);color:var(--ink-2);}
+  .glance b{color:var(--ink);font-size:16px;} .glance b.up{color:var(--win);} .glance b.dn{color:var(--loss);}
+  details.more{margin-top:12px;} details.more>summary{cursor:pointer;font-weight:600;color:var(--ink-2);padding:6px 0;}
   /* status chips */
   .chips{display:flex;flex-wrap:wrap;gap:8px;}
   .chip{display:flex;flex-direction:column;gap:1px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;min-width:96px;font-variant-numeric:tabular-nums;}
@@ -487,6 +490,7 @@
     <summary class="card-head"><h2 id="botH">Bot desk</h2><span class="hint" id="botSt"></span></summary>
     <div class="bdesk">
       <div class="bd-main">
+        <div class="glance" id="bdGlance" aria-live="polite"></div>
         <div class="chips" id="bdChips" aria-live="polite"></div>
         <div class="tfs" id="bdTfs"></div>
         <div class="bd-row one">
@@ -506,10 +510,6 @@
             </details>
           </section>
         </div>
-        <section class="bd-box">
-          <div class="bd-h"><h3>Today's signals</h3><span class="hint">also posted to #signals</span></div>
-          <ol class="feed" id="bdFeed"></ol>
-        </section>
         <div id="botReview"></div>
       </div>
       <aside class="bd-side" aria-labelledby="gxH">
@@ -534,25 +534,27 @@
   </details>
 
   <section class="card bstats" id="paperCard" aria-labelledby="ppH">
-    <div class="card-head"><h2 id="ppH">Paper trading</h2><span class="hint">The bot trades SPX 0DTE from its own signals on live quotes: buys at the ask, sells at the bid, fees included. No real orders.</span></div>
+    <div class="card-head"><h2 id="ppH">Paper trading</h2><span class="hint">Practice money only. The bot trades the SPX contract in each signal, at real prices, with your rules.</span></div>
     <div class="bs-body">
       <div class="kpis" id="ppKpis"></div>
       <div class="bs-grid two">
         <section class="bd-box"><h3>Open position</h3><div id="ppOpen"></div></section>
-        <section class="bd-box"><h3>Today's decisions <small>every signal: taken, skipped and why</small></h3><div class="bs-scroll" style="max-height:220px"><table class="bs-t" id="ppLog"></table></div></section>
+        <section class="bd-box"><h3>Today's decisions <small>why each signal was taken or skipped</small></h3><div class="bs-scroll" style="max-height:220px"><table class="bs-t" id="ppLog"></table></div></section>
       </div>
       <section class="bd-box"><h3>Paper trades</h3><div class="bs-scroll"><table class="bs-t" id="ppTrades"></table></div></section>
+      <details class="more"><summary>How the bot is learning: setups on/off, styles being tested, recent changes</summary>
       <div class="bs-grid two">
         <section class="bd-box"><h3>What it has learned <small id="ppModelV"></small></h3><table class="bs-t" id="ppFams"></table><div id="ppParams" style="margin-top:8px"></div></section>
         <section class="bd-box"><h3>Learning changes <small>trains itself after every close</small></h3><div class="bs-scroll" style="max-height:260px" id="ppChanges"></div></section>
       </div>
       <section class="bd-box"><h3>Style challengers <small id="ppChH"></small></h3><table class="bs-t" id="ppCh"></table>
         <p class="hint" style="margin-top:6px">Each challenger trades the same signals at the same moments with one change, on its own $2,000 paper book. After 20+ sessions, one that makes clearly more (15+ trades, better profit factor, drawdown no worse than 1.25×) takes over the paper account. Risk limits never change.</p></section>
+      </details>
     </div>
   </section>
 
   <section class="card bstats" id="botStats" aria-labelledby="bsH">
-    <div class="card-head"><h2 id="bsH">Bot scorecard</h2><span class="hint">Each signal is scored by whether price reached its target before its stop. R = result ÷ risk (−1R = stopped out).</span></div>
+    <div class="card-head"><h2 id="bsH">Signal scorecard</h2><span class="hint">Did each signal work? ✅ = SPX hit the target first, ❌ = hit the stop first. "Option" = what the contract did. R: +1R = made what was risked, −1R = full stop.</span></div>
     <div class="bs-body">
       <div class="seg bs-period" role="radiogroup" aria-label="Period">
         <label><input type="radio" name="bsPeriod" value="all" checked><span>All time</span></label>
@@ -561,6 +563,8 @@
         <label><input type="radio" name="bsPeriod" value="1"><span>Today</span></label>
       </div>
       <div class="kpis" id="bsKpis"></div>
+      <section class="bd-box"><h3>Recent signal outcomes <small>bought at the ask when the signal triggered, sold at the bid when it was scored; hover a signal for its SPX levels</small></h3><div class="bs-scroll"><table class="bs-t" id="bsRecent"></table></div></section>
+      <details class="more"><summary>Breakdowns: by setup type, grade, ticker, time of day · your plan scorecard · training posts</summary>
       <div class="bs-grid">
         <section class="bd-box"><h3>By signal type</h3><table class="bs-t" id="bsByKind"></table></section>
         <section class="bd-box"><h3>By grade (A / A+ setups)</h3><table class="bs-t" id="bsByGrade"></table></section>
@@ -571,7 +575,7 @@
         <section class="bd-box"><h3>Your plan scorecard <small>from the daily plan reviews</small></h3><div id="bsPlan"></div></section>
         <section class="bd-box"><h3>Training posts <small>Setup: / Idea: / Lesson: in #spx-plan</small></h3><div id="bsLib"></div></section>
       </div>
-      <section class="bd-box"><h3>Recent signal outcomes <small>option bought at the ask when the signal triggers, sold at the bid when it's scored (up to ~2 min late); hover a signal for its SPX levels</small></h3><div class="bs-scroll"><table class="bs-t" id="bsRecent"></table></div></section>
+      </details>
     </div>
   </section>
 
@@ -996,10 +1000,17 @@
     const vx=st.vix10;
     const dtr=st.dtr, dtrCol=dtr==null?"var(--ink-3)":dtr>=90?"var(--loss)":dtr>70?"var(--accent)":"var(--win)";
     const side=P&&price!=null?(P.callTrigger!=null&&price>P.callTrigger?"bull":P.putTrigger!=null&&price<P.putTrigger?"bear":"range"):null;
+    // ---- one-line bias: SPX 10m cloud + VIX (opposite of SPX) ----
+    const vState=!vx?null:((vx.rib&&vx.rib.state==="bearish"&&vx.last<=vx.prev)||(!(vx.rib&&vx.rib.state==="bullish")&&vx.last<vx.prev))?"falling":((vx.rib&&vx.rib.state==="bullish"&&vx.last>=vx.prev)||(!(vx.rib&&vx.rib.state==="bearish")&&vx.last>vx.prev))?"rising":"mixed";
+    const c10=st.r10&&st.r10.state;
+    const bias=vState==="falling"&&c10==="bullish"?"calls":vState==="rising"&&c10==="bearish"?"puts":null;
+    $("#bdGlance").innerHTML=bias
+      ?`<b class="${bias==="calls"?"up":"dn"}">Lean ${bias.toUpperCase()}</b> · VIX ${vState} and the SPX 10m cloud is ${c10}: they agree.${st.choppy?" Choppy market: A+ setups only.":""}`
+      :`<b>No clear lean</b> · VIX is ${vState||"—"} and the SPX 10m cloud is ${c10||"—"}: they don't line up, so wait for an A+ setup or for them to agree.`;
     $("#bdChips").innerHTML=[
       `<div class="chip big ${ch==null?"":ch>=0?"good":"bad"}"><span class="l">SPX</span><span class="v">${f2(spx)}</span><span class="s">${ch==null?"":(ch>=0?"+":"")+ch.toFixed(2)+" ("+(ch/pdc*100).toFixed(2)+"%)"}</span></div>`,
       `<div class="chip"><span class="l">SPY</span><span class="v">${f2(price)}</span><span class="s">ratio ${R??"—"}</span></div>`,
-      vx?`<div class="chip ${vx.last<vx.prev?"good":"bad"}"><span class="l">VIX 10m</span><span class="v">${vx.last} ${vx.last<vx.prev?"▼":"▲"}</span><span class="s">${vx.last<vx.prev?"falling: supports calls":"rising: supports puts"}</span></div>`:"",
+      vx?`<div class="chip ${vState==="falling"?"good":vState==="rising"?"bad":""}"><span class="l">VIX 10m</span><span class="v">${vx.last} ${vState==="falling"?"▼":vState==="rising"?"▲":"↔"}</span><span class="s">${vState==="falling"?"falling: supports SPX calls":vState==="rising"?"rising: supports SPX puts":"mixed: no help either way"}</span></div>`:"",
       st.chop10!=null?`<div class="chip ${st.choppy?"warn":"good"}"><span class="l">Market</span><span class="v">${st.choppy?"Choppy":"Trending"}</span><span class="s">${st.choppy?"A+ setups only":"CHOP "+st.chop10}</span></div>`:"",
       dtr!=null?`<div class="chip"><span class="l">ATR used today</span><span class="v">${dtr}%</span><div class="meter" role="img" aria-label="${dtr}% of the daily ATR used"><i style="width:${Math.min(dtr,100)}%;background:${dtrCol}"></i></div></div>`:"",
       side?`<div class="chip ${side==="bull"?"good":side==="bear"?"bad":""}"><span class="l">Your plan</span><span class="v">${side==="bull"?"Calls side":side==="bear"?"Puts side":"In range"}</span><span class="s">${side==="range"?"between your triggers":"trigger "+(side==="bull"?"SPX "+(P.spxCall??P.callTrigger):"SPX "+(P.spxPut??P.putTrigger))+" active"}</span></div>`:"",
@@ -1064,7 +1075,7 @@
     }
 
     // ---- signals feed ----
-    $("#bdFeed").innerHTML=signals.length?signals.map(a=>`<li><span class="t">${esc(a.et)}</span><details><summary class="ti">${esc(a.title)}</summary><div class="tx">${esc(a.text)}</div></details></li>`).join(""):`<li><span></span><span class="hint">No signals yet today (9:30–4:00 ET).</span></li>`;
+    if($("#bdFeed")) $("#bdFeed").innerHTML=signals.length?signals.map(a=>`<li><span class="t">${esc(a.et)}</span><details><summary class="ti">${esc(a.title)}</summary><div class="tx">${esc(a.text)}</div></details></li>`).join(""):`<li><span></span><span class="hint">No signals yet today (9:30–4:00 ET).</span></li>`;
 
     // ---- after the close ----
     const rv=st.review;

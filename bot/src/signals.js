@@ -177,6 +177,15 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
     const rising = (V.rib && V.rib.state === "bullish") || V.last > V.prev;
     return dir === "bull" ? falling && !(V.rib && V.rib.state === "bullish") : rising && !(V.rib && V.rib.state === "bearish");
   };
+  // VIX direction on 10m (VIX moves opposite SPX): "falling" supports SPX calls, "rising" supports SPX puts
+  const vixState = () => {
+    const V = st.vix10;
+    if (!V) return null;
+    const rb = V.rib && V.rib.state;
+    if ((rb === "bearish" && V.last <= V.prev) || (rb !== "bullish" && V.last < V.prev)) return "falling";
+    if ((rb === "bullish" && V.last >= V.prev) || (rb !== "bearish" && V.last > V.prev)) return "rising";
+    return "mixed";
+  };
   st.chop = st.chop || {};
   const G = await readJSON(env, "greeks:spx");
   const GX = G && G.date === t.date ? G : null;
@@ -615,6 +624,37 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
       };
+      // SPX focus: SPY only gauges SPX (its own setups would duplicate SPX's); your plan alerts on SPY prices still post
+      if (sym === "SPY") for (const f of found) if (f.sym === sym && f.kind !== "plan") f.drop = "SPY duplicates SPX";
+      // VIX must not fight the trade (VIX is the inverse of SPX), and every trade signal says why in plain words
+      if (sym === "$SPX" || sym === "SPY") {
+        const vs = vixState(), V = st.vix10;
+        for (const f of found) {
+          if (f.sym !== sym || !f.track || f.drop || f.why) continue;
+          const dir = f.track.dir, bull = dir === "bull";
+          const against = (bull && vs === "rising") || (!bull && vs === "falling");
+          if (against && f.kind !== "plan") { f.drop = "VIX against"; continue; }
+          if (against) f.vixAgainst = true;
+          const fam = famOf(f.key) || "";
+          const what = fam.startsWith("div") ? (bull ? "SPX made a lower low but momentum (Phase Oscillator) made a higher low: sellers are running out of steam" : "SPX made a higher high but momentum (Phase Oscillator) made a lower high: buyers are running out of steam")
+            : fam.startsWith("cbox") ? `SPX broke ${bull ? "up" : "down"} out of a tight ${fam.slice(4)} compression range; tight ranges usually lead to a bigger move`
+            : fam === "box" ? `the 10m chart broke ${bull ? "up" : "down"} out of its compression box; that often starts a bigger move`
+            : fam === "flip" ? `the 10m Phase Oscillator turned ${bull ? "up out of oversold" : "down out of overbought"}: momentum is shifting ${bull ? "up" : "down"}`
+            : fam === "squeeze" ? `a 10m squeeze just released with the cloud ${bull ? "bullish" : "bearish"}: price tends to expand that way`
+            : fam === "mom" ? "SPX broke a key level with VWAP and the 3m cloud agreeing"
+            : fam === "plan-trigger" ? `SPX crossed your posted ${bull ? "call" : "put"} trigger`
+            : fam === "star" ? `a ${bull ? "bullish" : "bearish"} reversal candle formed at a key level and most checks agree`
+            : "setup triggered";
+          const ctxBits = [
+            vs ? `VIX ${V ? V.last + " " : ""}${vs}${(bull && vs === "falling") || (!bull && vs === "rising") ? " ✓ confirms " + (bull ? "calls" : "puts") : vs === "mixed" ? " (not confirming yet)" : " ✗ against"}` : null,
+            rib10 ? `10m cloud ${rib10.state}${side(rib10) === dir ? " ✓" : side(rib10) ? " ✗" : ""}` : null,
+            choppy ? "choppy market ⚠" : "trending market ✓",
+            P ? (planSide === dir ? "with your plan ✓" : planSide ? "against your plan ✗" : "between your plan triggers") : null,
+          ].filter(Boolean);
+          f.why = true;
+          f.text += `\n**Why:** ${what}.\n${ctxBits.join(" · ")}`;
+        }
+      }
     } catch (e) {
       errors.push(`${show(sym)}: ${e.message}`);
     }
@@ -624,6 +664,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   const sent = [];
   const candidates = [];
   for (const a of found) {
+    if (a.drop) { st.dropKeys = st.dropKeys || {}; if (!st.dropKeys[a.key]) { st.dropKeys[a.key] = a.drop; st.dropped = st.dropped || {}; st.dropped[a.drop] = (st.dropped[a.drop] || 0) + 1; } continue; }
     const last = st.fired[a.key];
     if (last && (a.once || now - last < (a.cooldown || 10) * 60000)) continue;
     const lastHour = st.alerts.filter((x) => x.sym === a.sym && (x.kind === "big" || x.kind === "momentum") && now - x.at < 3600e3).length;
@@ -638,9 +679,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         optEntry: !a.track.needTrigger && a.contract && a.contract.ask > 0 ? a.contract.ask : null });
     }
     // every signal posted with a contract is a paper-trade candidate: that contract, that entry, that stop (in the signal's own ticker)
-    if (!dry && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
+    if (!dry && !a.vixAgainst && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
       candidates.push({ key: a.key, fam: famOf(a.key), kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, et: hhmm(t.min), sym: a.sym,
-        contract: a.contract, dir: a.track.dir, uEntry: a.track.entry, uStop: a.track.stop, uTarget: a.track.target, needTrigger: !!a.track.needTrigger });
+        contract: a.contract, dir: a.track.dir, uEntry: a.track.entry, uStop: a.track.stop, uTarget: a.track.target, needTrigger: !!a.track.needTrigger,
+        why: (String(a.text).split("**Why:** ")[1] || "").trim() });
     }
     sent.push(alert);
     if (!dry) {

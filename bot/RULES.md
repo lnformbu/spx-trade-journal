@@ -302,6 +302,17 @@ each with one change and its own $2,000 paper book (silent: no Discord posts, sh
 | **Your #spx-training posts with a result** | "Result: +65%" = +65 ÷ 30 = +2.2R (win = +1R, loss = −1R, BE = 0). Counted at 1.5× weight; the market snapshot from when you posted adds context (only if posted within 15 minutes of the trade). |
 | **Your reactions on #signals** | ✅ 👍 🔥 = good call, ❌ 👎 = bad. Each setup type gets up to ±0.3R from your votes. Needs the bot's **Read Message History** permission in #signals. |
 
+## **NEW** SPX focus and the VIX rule
+
+- **SPX first:** SPY is only a gauge for SPX. SPY's own setups are not posted (SPX has the same scan); your plan alerts still track SPY prices and show SPX.
+- **VIX moves opposite SPX:** VIX falling on 10m supports SPX calls, VIX rising supports SPX puts.
+  - VIX **against** the trade (calls while VIX rises, puts while VIX falls): the signal is **not posted and not paper traded**.
+  - VIX **mixed** (no clear 10m direction): posted, marked "not confirming yet".
+  - Your plan alerts always post (they're yours), but a plan trigger with VIX against isn't paper traded.
+- Every trade signal ends with **Why:** in plain words (what the setup means) plus ✓ / ✗ for VIX, the 10m cloud, trend vs chop and your plan.
+  Paper buys repeat it as **Why taken**.
+- The Bot desk opens with a one-line lean: **Lean CALLS** when VIX is falling and the SPX 10m cloud is bullish, **Lean PUTS** for the mirror, otherwise **No clear lean**.
+
 ## **NEW** Posts and alerts
 
 - **Scorecard (journal):** each signal shows its contract, the option price when it triggered (ask) and when it was scored (bid, up to ~2 min late) and the option %; the score (R) stays on SPX so signals are comparable whatever strike was used.

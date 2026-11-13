@@ -158,7 +158,7 @@ async function stepBook(b, cfg, X) {
       const bull = p.dir === "bull", tk = p.sym.replace("$", "");
       X.messages.push({
         title: `📄 PAPER BUY ${qty} × ${k.label} @ ${usd(ask)}`,
-        text: `From: ${p.title} (${p.et} ET) · ${how}\nStop ${usd(b.open.stop)} (−${Math.round(P.stopPct * 100)}%) or ${tk} ${bull ? "below" : "above"} ${r2(p.uStop)} · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(ask * (1 + P.t1Pct))})${p.uTarget != null ? ` or ${tk} ${r2(p.uTarget)}` : ""}\nRisk ${usd(b.open.risk)} of ${usd(b.balance)} · style: ${cfg.name}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
+        text: `From: ${p.title} (${p.et} ET) · ${how}${p.why ? `\n**Why taken:** ${p.why}` : ""}\nStop ${usd(b.open.stop)} (−${Math.round(P.stopPct * 100)}%) or ${tk} ${bull ? "below" : "above"} ${r2(p.uStop)} · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(ask * (1 + P.t1Pct))})${p.uTarget != null ? ` or ${tk} ${r2(p.uTarget)}` : ""}\nRisk ${usd(b.open.risk)} of ${usd(b.balance)} · style: ${cfg.name}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
         color: bull ? 0x2ec26b : 0xf0556b,
       });
     }
