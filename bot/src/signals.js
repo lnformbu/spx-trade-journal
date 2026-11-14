@@ -393,11 +393,15 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         for (const [k, fib, up] of [["+0.382", "+0.618", true], ["-0.382", "-0.618", false]]) {
           const g = lv[k];
           if (g == null || !(up ? c3 < g && c0 >= g : c3 > g && c0 <= g)) continue;
+          // PDF 14 (Tezak) check on our data, SPY 5m Apr-Nov 2026: gate → Golden Fib same day 76% if opened before 10:00,
+          // ~67% 10:00-12:00, only 20-25% after 12:00. Golden Fib → full ATR only ~33%, so the Golden Fib is the main target.
+          const late = t.min >= 720, odds = t.min < 600 ? "~75%" : t.min < 720 ? "~65%" : "only ~20-25%";
           found.push({
-            kind: "gg", sym, key: `gg:${t.date}:${k}`, once: true, color: COLORS.star,
-            title: `🌉 GOLDEN GATE ${up ? "+" : "−"}38.2% crossed · SPX ${r2(c0)}`,
-            text: `SPX crossed ${r2(g)}. About 60% of the time it goes on to the Golden Fib ${up ? "+" : "−"}61.8% **${r2(lv[fib])}**.`
-              + `\n**How to trade it:** works best with the ribbon stacked ${up ? "up" : "down"} (3m ${rib3 ? rib3.state : "—"}, 10m ${rib10 ? rib10.state : "—"}). Don't chase the cross: take the pullback to the 3m ribbon, target ${r2(lv[fib])}.`,
+            kind: "gg", sym, key: `gg:${t.date}:${k}`, once: true, color: late ? COLORS.big : COLORS.star,
+            title: `🌉 GOLDEN GATE ${up ? "+" : "−"}38.2% crossed${late ? " (late, low odds)" : ""} · SPX ${r2(c0)}`,
+            text: `SPX crossed ${r2(g)} at ${hhmm(t.min)}. Opened at this time of day, it reaches the Golden Fib ${up ? "+" : "−"}61.8% **${r2(lv[fib])}** the same day ${odds} of the time.`
+              + (late ? `\n**Late gate:** after noon it usually stalls. Don't buy for the Golden Fib; manage what you already hold.`
+                : `\n**How to trade it:** works best with the ribbon stacked ${up ? "up" : "down"} (3m ${rib3 ? rib3.state : "—"}, 10m ${rib10 ? rib10.state : "—"}). Don't chase the cross: take the pullback to the 3m ribbon, target ${r2(lv[fib])} and take most profit there (it carries on to the full ATR only ~1 in 3 times).`),
           });
         }
         // 21 EMA pullback (scalp entry) in the trend-day direction, or wherever the 10m and 3m ribbons agree

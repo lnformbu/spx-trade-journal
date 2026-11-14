@@ -381,6 +381,32 @@ Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" in
 
 Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
 
+## **NEW** PDF 14 (Tezak: probabilities of reaching Saty ATR levels)
+
+The PDF is only a title page linking a video, so the probabilities were measured on our own data instead (Day-mode levels: previous close ± ATR14 × fib).
+
+SPY daily, 10 years (2,483 days):
+
+| Level | Touched up / down | Goes on to the next level |
+|---|---|---|
+| Trigger 23.6% | 66% / 58% | 79% reach the Golden Gate |
+| Golden Gate 38.2% | 52% / 46% | 67% reach the Golden Fib 61.8% |
+| Golden Fib 61.8% | 35% / 31% | 45-55% reach the full ATR |
+| Full ATR | 16% / 17% | 52-62% reach 123.6% |
+
+Both triggers are touched on the same day 26% of the time (chop days).
+
+SPY 5m, Apr-Nov 2026 (138 days), after the first touch the same day:
+
+| Move | Overall | By time of the first touch |
+|---|---|---|
+| Trigger → Golden Gate | 70% | 9:30-10:30 ~75-100% · 10:30-12:00 59% |
+| Golden Gate → Golden Fib | 61% | **before 10:00 76%** · 10:00-12:00 ~67% · **after 12:00 only 20-25%** |
+| Golden Fib → full ATR | 33% | before 10:30 40-47% · later ~18% |
+| Golden Gate → back to the opposite trigger | 16% | morning ~23% · afternoon 0% |
+
+**Built:** the 🌉 Golden Gate post now gives the odds for the time of day it fired. After 12:00 it is marked "late, low odds" with "don't buy for the Golden Fib". The Golden Fib is the main profit target, because it continues to the full ATR only about 1 time in 3.
+
 ## **NEW** Live mode (only after paper; switched on by you)
 
 - Entries use limit orders at or just through the ask, raised in small steps a limited number of times, then cancelled.
