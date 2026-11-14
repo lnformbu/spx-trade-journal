@@ -400,6 +400,94 @@ on swings Saty uses the gate to **stay in** a trade (trim on the way), not as an
 (after the gate, max 2 per side per day, until the Golden Fib is reached). Both paper-traded; learning switches them off if they fail live.
 When the ribbon is not stacked, or after noon, the gate post is a heads-up only.
 
+## **NEW** PDFs 8 and 9 (TTM Squeeze, Mastering the Squeeze)
+
+Saty's favorite swing setup. Rules from the PDFs: build in the red dots (5+ best), the first green dot confirms direction, momentum hints the way,
+price within ±1 ATR of the 21 EMA, EMAs stacked, trim at +1 ATR from the 21 and take profit at +2 ATR (Keltner 21), 30-60 DTE delta 0.7 contracts,
+fewer fake-outs at 30m and above. PDF 9 is mostly a TOS scanner walkthrough (S&P 500 weeklys, beta > 1, squeeze on, near the 21, volume > 1M).
+
+| Tested | Result |
+|---|---|
+| SPY daily TTM squeeze, 9 years, calls above the 21 with momentum up | 19 trades, PF 1.57, both halves positive; the bot's current Saty-compression swing rule is better (PF 1.92) → kept |
+| + within 1 ATR / 5+ red dots / stacked EMAs (daily) | only 1-3 trades in 9 years on SPY: can't judge, not added |
+| Squeeze puts (daily) | lose again → swings stay calls only |
+| Keltner exits (+1/+2 ATR from the 21) vs monthly levels | no better → monthly levels kept |
+| "Beyond ±2 ATR from the 21 reverts" (SPY daily) | barely: next 5 days +0.10% after +2 ATR vs +0.26% any day → not a trade |
+| Intraday TTM 10m / 15m / 30m (SPY 5m) | 10m 5+ red dots +0.16R vs under 5 −0.06R; 30m no better intraday |
+| 5+ bar filter on the bot's own 10m Saty compression (replay) | **hurt**: −0.27R (15) vs +0.05R (33) for all → rejected, bar count only shown in the post |
+
+Nothing new was switched on from PDFs 8/9; the existing swing squeeze rule already matches the best version found.
+
+## **NEW** PDF 10 (Sanity checking strikes and expirations)
+
+AMD example: premarket rejection at the call trigger under a bearish ribbon; entries at the previous-close rejection, the put trigger, or the
+premarket-low break; strikes at the next ATR level (95 = midrange "pretty safe"). SPY example: a target past −1 ATR (380 with −1 ATR at 392) is
+not realistic, since going past ±1 ATR is rare (our data: ~16% of days). Rolling a winner beats buying far OTM. ITM/ATM safer, OTM only if sanity-checked.
+
+**Built:** every contract idea is checked against the trade's target and ±1 ATR. If the delta pick's strike is past either, the bot uses the
+nearest strike inside the limit (same expiry) and says so ("✔️ Strike check"). Swings already use ITM delta ~0.70.
+
+## **NEW** PDF 11 (Scalping SPX / day trading SPY with Time Warp)
+
+Setups: SPX 1m chart with 3m ribbon (our 3m focus), SPY 3m with 10m ribbon (his "bread and butter"); don't chase, buy the 21 EMA / 8-13 in trend;
+don't buy the first bounce after a deep extension, wait for the 13 to be recovered; stops: ribbon, 21 EMA, VWAP, ATR level, premarket low;
+VIX > 20 = scalp/day trade, < 20 = swing; beginners: SPY 10m with 2-4 DTE.
+
+| Tested | Result |
+|---|---|
+| "Open at the put trigger → back to the previous close, if not the call trigger" (SPY daily, 10 yrs) | previous close reached 72%, but the put Golden Gate also 74%: a range day, not a direction |
+| Which comes first (SPY 5m, 44 trigger opens) | **Golden Gate first ~70%** (31 of 44): continuation, not reversion |
+
+**Built:** the 🌅 opening read now says a trigger open usually continues to that side's Golden Gate first; the previous close is the
+magnet only after the trigger is lost. The rest (3m/10m pairing, pullback entries, stop choices) is already how the bot works.
+
+## **NEW** PDF 12 (Options volume leaderboard)
+
+TOS scanner for 0DTE contracts sorted by volume. Saty's read: calls spiking at support = bounce (premium holds), calls spiking at resistance = exits
+(premium falls), puts the mirror. Sanity-check the strike with an ATR level, enter well, scale out at levels.
+Can't be backtested (no history of intraday option volume), so it is **measured live**: the 5-minute leaderboard job now records 0DTE call vs put
+volume since the last snapshot vs the day's pace (spike = 1.8x). Every SPX signal gets a `flow` context (with / against / quiet), the post shows
+"0DTE call volume spiking ✓/✗", and the nightly learning compares winners and losers by it.
+
+## **NEW** PDF 13 (SPY day trade plan, multi-timeframe thesis, market pivots)
+
+Plan = setup/thesis, trigger, entry (no chasing), exits (scale out, no diamond hands), stop (technical preferred): every bot post already has
+these. Strikes no more than 1 main ATR level away (the PDF 10 check). Timeframes: 3m scalp, 10m intraday trend, 1h broader trend, daily most important.
+
+| Tested | Result |
+|---|---|
+| VIX market pivot (nearest .5 to the VIX ATR level closest to the open), 36 days | SPX went the pivot's way to the close only 37-44% → **no edge**, shown as info only |
+| Losing the call trigger from above (SPY 5m, 48 days) | previous close reached 63%, put trigger only 29% |
+| Trading that (puts on the lost trigger, target previous close) | 44 trades −0.13R (calls mirror −0.12R) → **rejected** |
+
+## **NEW** PDF 15 (Tips and the Trend Mantra)
+
+Play the trend, no bias · trends reach the midrange if not the full ATR · no trading the first 10 minutes · no chop ("Chopzilla") · wait for
+price above/below the EMAs · never chase, wait for the pullback · never play against the trend with momentum · VIX < 20 swing, > 20 scalp.
+The trigger-box tip (trigger open → previous close) is the PDF 11 claim our data contradicts (Golden Gate first ~70%).
+
+| Checked in the replay | Result |
+|---|---|
+| Choppy vs trending market | 12 signals −0.63R vs 2,370 +0.15R → chop flag confirmed |
+| With vs against trend mode | +0.29R (1,122) vs +0.04R (368) → "never against the trend" confirmed (not paper traded) |
+| Opening window | already built (9:33-10:00 watch only except ORB, A+, Golden Gate go) |
+
+## **NEW** PDF 16 (The Highlander, end-of-day SPX)
+
+Morph's EOD play: at ~3:45 check the top 2-3 leaderboard contracts; under 100k volume they usually expire worthless ("one contract to kill them all"),
+100k+ often closes ITM. Check ATR levels / key levels, structure vs Phase Oscillator (divergence), reversal candle at the level, enter ITM/ATM on the
+retrace, take profit at the next ATR level. Saty: "a squeeze on 1m/3m EOD helps tremendously"; chop day = good EOD, trend day = choppy EOD.
+
+| Checked | Result |
+|---|---|
+| All replay signals after 3:30 | 188 signals, −0.09R (vs +0.15R all day) |
+| A/A+ cards after 3:30 | 49, 57% wins, **+0.13R** |
+| Everything else after 3:30 | 139, **−0.17R** (squeeze −0.52R on 7, 1m compression −0.25R on 20) → the "EOD squeeze" claim did not hold |
+| Top contract dies unless 100k (needs leaderboard history) | only 2 days stored → **now logged every close** ("lb:hist"), judged later |
+
+**Built:** after 3:30 only A/A+ cards are paper traded; other signals still post with "watch only". The 3:45 Highlander heads-up stays.
+Every close the bot records the top 3 leaderboard contracts, their volume and whether they finished ITM.
+
 ## **NEW** PDF 14 (Tezak: probabilities of reaching Saty ATR levels)
 
 The PDF is only a title page linking a video, so the probabilities were measured on our own data instead (Day-mode levels: previous close ± ATR14 × fib).

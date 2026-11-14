@@ -15,7 +15,7 @@ import { patterns, atLevel } from "../src/patterns.js";
 import { resolveTracks } from "../src/signals.js";
 import { famOf } from "../src/learn.js";
 import { LEVEL_NAMES } from "../src/plan.js";
-import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak, levelRetest, pullback8 } from "../src/setups.js";
+import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak, levelRetest, pullback8, ggPullback, barAtr } from "../src/setups.js";
 import { ema } from "../src/levels.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -60,6 +60,7 @@ for (const date of days) {
   const fired = new Set();
   const found = [];
   let T10 = null, trendDir = null, trendOk = 0, vomy10 = null;
+  const ggArm = {}; // PDF 7: Golden Gate crossed today, per side
   for (let min = OPEN + 3; min < CLOSE - 5; min++) {
     const nowMs = rows.find((c) => c.t.min === min)?.datetime;
     if (!nowMs) continue;
@@ -111,6 +112,21 @@ for (const date of days) {
         const spyVol3 = aggregate(spy.filter((c) => c.datetime >= nowMs - 60 * 60000 && c.datetime < nowMs), 3).map((b) => b.volume);
         const cf = pbConfluence({ dir: pb.dir, trendOn: !!trendDir && trendDir === pb.dir, stack, spyVol3, ggCrossed, cloudH, vix: null });
         add(`pb21:${pb.bar.datetime}:${pb.dir}`, "setup", { dir: pb.dir, entry: pb.entry, stop: pb.stop, target: (ggCrossed && !fibHit ? fib : next) ?? null, needTrigger: true }, { conf: cf.bits.map((b) => b.split(" (")[0]) });
+      }
+      // Golden Gate go + pullback (PDF 7, same as live)
+      for (const [k, fk, up] of [["+0.382", "+0.618", true], ["-0.382", "-0.618", false]]) {
+        const g = lv[k], fib = lv[fk], dirG = up ? "bull" : "bear";
+        if (g == null || fib == null) continue;
+        if (up ? c3 < g && c0 >= g : c3 > g && c0 <= g) {
+          if (!ggArm[dirG]) ggArm[dirG] = { n: 0 };
+          const A3 = barAtr(b3all);
+          if (min < 720 && side(rib3a) === dirG && A3 && rib3a.ema[48] != null && (up ? fib - c0 > A3 : c0 - fib > A3))
+            add(`ggo:${date}:${k}`, "setup", { dir: dirG, entry: c0, stop: up ? rib3a.ema[48] - A3 * 0.5 : rib3a.ema[48] + A3 * 0.5, target: fib, needTrigger: false });
+        }
+        const arm = ggArm[dirG];
+        if (!arm || arm.n >= 2 || (up ? intra.hod >= fib : intra.lod <= fib)) continue;
+        const gp = ggPullback(b3all, dirG, fib);
+        if (gp && !fired.has(`ggpb:${gp.bar.datetime}:${dirG}`)) { arm.n++; add(`ggpb:${gp.bar.datetime}:${dirG}`, "setup", { dir: dirG, entry: gp.entry, stop: gp.stop, target: fib, needTrigger: false }); }
       }
       // VOMY_TEST=1: compare B (10m Vomy), C (3m 13-retest), D (10m Vomy then 3m 13-retest); not saved as families otherwise
       if (process.env.VOMY_TEST) {
@@ -182,6 +198,7 @@ for (const date of days) {
     // 10m phase flip, squeeze, compression breakout (only on a fresh 10m close)
     if (min % 10 === 0 && osc10) {
       if (osc10.cross) { const dir = osc10.flip.startsWith("oversold") ? "bull" : "bear"; add(`flip:$SPX:${dir}:${Math.floor(nowMs / 600000)}`, "phase", { dir, entry: c0, stop: dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: dir === "bull" ? c0 + D.atr * 0.3 : c0 - D.atr * 0.3 }); }
+      const sqLen = osc10._track ? (() => { let n = 0; for (let k = osc10._track.length - 2; k >= 0 && osc10._track[k] === 1; k--) n++; return n; })() : 0; // PDF 8/9: 5+ bar squeezes only
       if (osc10.squeezeFired && side(rib10)) { const dir = side(rib10); add(`squeeze:$SPX:${Math.floor(nowMs / 600000)}`, "phase", { dir, entry: c0, stop: dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: dir === "bull" ? c0 + D.atr * 0.3 : c0 - D.atr * 0.3 }); }
       const lc = b10.at(-1), pc = b10.at(-2);
       if (box10 && lc && pc) {

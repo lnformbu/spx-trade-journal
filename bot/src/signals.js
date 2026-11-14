@@ -539,8 +539,10 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           st.vixPivot = vp;
           const op = intra.open, near = (v) => op != null && v != null && Math.abs(op - v) <= D.atr * 0.06;
           const ct = r2(lv["+0.236"]), pt = r2(lv["-0.236"]);
-          const read = near(lv["+0.236"]) ? `Opened at the **call trigger** ${ct}. If it can't hold above, it often goes back to the previous close ${D.pdc}, sometimes all the way to the put trigger ${pt}. Holding above = calls toward the Golden Gate ${r2(lv["+0.382"])}.`
-            : near(lv["-0.236"]) ? `Opened at the **put trigger** ${pt}. If it can't hold below, it often goes back to the previous close ${D.pdc}, sometimes all the way to the call trigger ${ct}. Holding below = puts toward the Golden Gate ${r2(lv["-0.382"])}.`
+          // PDF 11 says a trigger open usually returns to the previous close. Our data (SPY 5m Apr-Nov 2026) says the opposite came first:
+          // the Golden Gate was hit before the previous close on 31 of 44 trigger opens (~70%); both get hit on ~70% of such days (10 yrs daily).
+          const read = near(lv["+0.236"]) ? `Opened at the **call trigger** ${ct}. In our data it reached the call Golden Gate ${r2(lv["+0.382"])} first ~70% of the time (continuation), before any trip back to the previous close ${D.pdc}. Favor calls while it holds the trigger; lose it and the previous close is the magnet.`
+            : near(lv["-0.236"]) ? `Opened at the **put trigger** ${pt}. In our data it reached the put Golden Gate ${r2(lv["-0.382"])} first ~70% of the time (continuation), before any trip back to the previous close ${D.pdc}. Favor puts while it holds below; reclaim the trigger and the previous close is the magnet.`
             : op > lv["-0.236"] && op < lv["+0.236"] ? `Opened inside the trigger box (${pt}–${ct}): expect chop until a trigger breaks; a clean break often runs to the Golden Gate.`
             : op > lv["+0.236"] ? `Opened above the call trigger ${ct}: bullish while it holds; pullbacks to the trigger or the 3m 21 EMA are the entries.`
             : `Opened below the put trigger ${pt}: bearish while it holds; pullbacks to the trigger or the 3m 21 EMA are the entries.`;
@@ -548,7 +550,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             kind: "open", sym, key: `open:${t.date}`, once: true, color: COLORS.plan,
             title: `🌅 SPX opening read · ${r2(op)} (previous close ${D.pdc})`,
             text: read
-              + `\nVIX ${st.vix10 ? st.vix10.last : "—"}${vp ? ` · pivot **${vp}**: VIX above it = bearish SPX, below = bullish` : ""}`
+              + `\nVIX ${st.vix10 ? st.vix10.last : "—"}${vp ? ` · Saty pivot ${vp} (above = bearish SPX, below = bullish; no edge in our test yet, info only)` : ""}`
               + `\nTrend-day check: ${TS ? `${TS.score}/${TS.max} ${TS.dir === "bull" ? "up" : "down"}${TS.bits.length ? " (" + TS.bits.join(", ") + ")" : ""}` : "—"}`,
           });
         }
@@ -600,13 +602,16 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             + `\n${show(sym)} ${r2(c0)} · wait for a 3m candle confirmation${idea(list, dir) ? `\nContract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         });
       }
+      // PDF 8/9 "5+ red dots" tested: on SPY TTM 10m it helped (+0.16R vs −0.06R), but on the bot's own Saty compression it hurt
+      // (5+ bars: 15 replay results −0.27R vs +0.03R for all), so every compression fire is kept; the bar count is shown.
+      const sqLen = osc10 && osc10._track ? (() => { let n = 0; for (let k = osc10._track.length - 2; k >= 0 && osc10._track[k] === 1; k--) n++; return n; })() : 0;
       if (osc10 && osc10.squeezeFired && side(rib10)) {
         const dir = side(rib10);
         found.push({
           kind: "phase", sym, key: `squeeze:${sym}:${Math.floor(now / 600000)}`, once: true, color: COLORS[dir],
           track: { dir, entry: c0, stop: dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: dir === "bull" ? c0 + D.atr * 0.3 : c0 - D.atr * 0.3 },
           title: `🗜️ SQUEEZE FIRED ${show(sym)} ${dir === "bull" ? "UP" : "DOWN"} (10m)`,
-          text: `Compression just ended with the 10m cloud ${rib10.state}; phase ${osc10.value}. ${show(sym)} ${r2(c0)}, VWAP ${vwap ?? "—"}.`,
+          text: `Compression of ${sqLen} bars (10m) just ended with the 10m cloud ${rib10.state}; phase ${osc10.value}. ${show(sym)} ${r2(c0)}, VWAP ${vwap ?? "—"}.`,
         });
       }
 
@@ -828,7 +833,17 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       for (const f of found) if (f.sym === sym && f.track && f.contract === undefined) {
         // SPX ideas use the paper account's current style delta (it can change when a challenger takes over)
         const tgt = sym === "$SPX" && paperStyle && paperStyle.delta ? paperStyle.delta : 0.4;
-        const o = ideaO(list, f.track.dir, tgt);
+        let o = ideaO(list, f.track.dir, tgt);
+        // PDF 10 strike sanity check: an OTM strike must be reachable, so at or inside the trade's target and never past ±1 ATR
+        // (SPY touches ±1 ATR on only ~16% of days). Otherwise use the nearest strike inside that limit, same expiry.
+        const bullF = f.track.dir === "bull";
+        const lims = [f.track.target, lv && lv[bullF ? "+1" : "-1"]].filter((v) => v != null && isFinite(v));
+        const limit = lims.length ? (bullF ? Math.min(...lims) : Math.max(...lims)) : null;
+        if (o && limit != null && (bullF ? o.strikePrice > limit : o.strikePrice < limit)) {
+          const alt = list.filter((x) => x.exp === o.exp && x.putCall === o.putCall && x.mark > 0 && x.delta != null && (bullF ? x.strikePrice <= limit : x.strikePrice >= limit))
+            .sort((a, b) => (bullF ? b.strikePrice - a.strikePrice : a.strikePrice - b.strikePrice))[0];
+          if (alt) { f.text += `\n✔️ Strike check: ${o.strikePrice} was past the target ${r2(limit)}, using ${alt.strikePrice} instead`; o = alt; }
+        }
         f.contract = cobj(o, sym);
         if (o) {
           const line = `Contract idea: ${show(sym)} ${idea(list, f.track.dir, tgt)}`;
@@ -840,6 +855,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
         trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",
+        // PDF 12: 0DTE volume spiking on the trade's side (calls for a call trade) = with; the other side spiking = against
+        flow: (() => { const F = GX && GX.lb && GX.lb.flow; if (!F || !f.track || (sym !== "$SPX" && sym !== "SPY")) return null; const up = f.track.dir === "bull";
+          const w = up ? F.callSpike && F.calls > F.puts : F.putSpike && F.puts > F.calls, ag = up ? F.putSpike && F.puts > F.calls : F.callSpike && F.calls > F.puts;
+          return w ? "with" : ag ? "against" : "quiet"; })(),
       };
       // SPX focus: SPY only gauges SPX (its own setups would duplicate SPX's); your plan alerts on SPY prices still post
       if (sym === "SPY") for (const f of found) if (f.sym === sym && f.kind !== "plan") f.drop = "SPY duplicates SPX";
@@ -862,6 +881,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           // opening window 9:33-10:00 (replay: 9:40-10:00 −0.22R): only ORB breaks and A+ cards are traded; the rest is watch-only
           const openWin = t.min < 600 && fam !== "orb" && fam !== "ggo" && !(fam === "star" && f.grade === "A+");
           if (openWin) f.noTrade = "opening window";
+          // end of day (PDF 16 check): after 3:30 only A/A+ cards held up in the replay (+0.13R vs −0.17R for the rest)
+          const eodWin = t.min >= 930 && fam !== "star";
+          if (eodWin) f.noTrade = "end-of-day window";
           const what = fam.startsWith("div") ? (bull ? "SPX made a lower low but momentum (Phase Oscillator) made a higher low: sellers are running out of steam" : "SPX made a higher high but momentum (Phase Oscillator) made a lower high: buyers are running out of steam")
             : fam.startsWith("cbox") ? `SPX broke ${bull ? "up" : "down"} out of a tight ${fam.slice(4)} compression range; tight ranges usually lead to a bigger move`
             : fam === "box" ? `the 10m chart broke ${bull ? "up" : "down"} out of its compression box; that often starts a bigger move`
@@ -881,9 +903,12 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             rib10 ? `10m cloud ${rib10.state}${side(rib10) === dir ? " ✓" : side(rib10) ? " ✗" : ""}` : null,
             choppy ? "choppy market ⚠" : "trending market ✓",
             P ? (planSide === dir ? "with your plan ✓" : planSide ? "against your plan ✗" : "between your plan triggers") : null,
-            V && st.vixPivot ? `VIX ${V.last > st.vixPivot ? "above" : "below"} its pivot ${st.vixPivot}${(V.last < st.vixPivot) === bull ? " ✓" : " ✗"}` : null,
+            // PDF 13 VIX pivot tested (36 days): SPX went the pivot's way only 37-44% of the time, so it's shown as info, not a ✓/✗
+            V && st.vixPivot ? `VIX ${V.last > st.vixPivot ? "above" : "below"} its pivot ${st.vixPivot} (info)` : null,
             TDs ? (TDs === dir ? "with trend mode ✓" : "against trend mode ✗ (not paper traded)") : null,
+            f.ctx && f.ctx.flow === "with" ? `0DTE ${bull ? "call" : "put"} volume spiking ✓` : f.ctx && f.ctx.flow === "against" ? `0DTE ${bull ? "put" : "call"} volume spiking ✗` : null,
             openWin ? "⏳ opening window (before 10:00): watch only, not paper traded" : null,
+            eodWin ? "⏳ after 3:30 only A/A+ cards are paper traded (this one is watch only)" : null,
           ].filter(Boolean);
           f.why = true;
           f.text += `\n**Why:** ${what}.\n${ctxBits.join(" · ")}`;

@@ -63,6 +63,7 @@ export function features(x) {
     plan: c.plan || null,
     vix: c.vix == null ? null : c.vix ? "agrees" : "disagrees",
     trend: c.trend || null,
+    flow: c.flow || null,
   };
 }
 const shrunk = (sum, n) => sum / (n + PRIOR);

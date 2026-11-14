@@ -65,6 +65,8 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (t.min < 573) return "before 9:33 (opening range)";
   if (t.min >= 955) return "no new entries after 3:55";
   if (t.min < 600 && cand.fam !== "orb" && cand.fam !== "ggo" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
+  // PDF 16 check (replay): after 3:30 signals averaged −0.09R; only A/A+ cards held up (+0.13R, 49), the rest −0.17R (139)
+  if (t.min >= 930 && cand.fam !== "star") return "end-of-day window (after 3:30): only A/A+ cards";
   // event days (your plan's "Event:" line): no entries 15 min either side; a pre-market event = A+ only until 9:45
   const ev = events.find((e) => t.min >= e.min - 15 && t.min < e.min + 15);
   if (ev) return `${ev.name} at ${hhmm(ev.min)}: no entries 15 minutes either side`;
@@ -358,6 +360,22 @@ export async function runLearning(env, deps, { force = false, report = false, qu
   const fbRes = await collectFeedback(env, readJSON, writeJSON, t).catch((e) => ({ err: e.message, items: [] }));
   const replayData = (await readJSON(env, "bot:replay")) || { items: [] };
   const lib = (await readJSON(env, "lib:setups")) || { items: [] };
+  // PDF 16 Highlander log: does the top of the SPX 0DTE leaderboard expire worthless unless it traded 100k+? (not testable from
+  // history, so every close is recorded in "lb:hist" and the rule gets judged once there are enough days)
+  try {
+    const lbDay = await readJSON(env, "lb:spx:" + t.date);
+    const hist = (await readJSON(env, "lb:hist")) || { items: [] };
+    if (lbDay && lbDay.c && t.min >= 960 && !hist.items.some((x) => x.date === t.date) && deps.schwab && deps.schwabToken) {
+      const q = await deps.schwab(await deps.schwabToken(env), "/marketdata/v1/quotes?fields=quote&symbols=%24SPX");
+      const close = q && q.$SPX && q.$SPX.quote && q.$SPX.quote.lastPrice;
+      if (close) {
+        const top = Object.values(lbDay.c).sort((a, b) => b.vol - a.vol).slice(0, 3)
+          .map((c) => ({ k: c.k, t: c.t, vol: c.vol, itm: c.t === "C" ? close > c.k : close < c.k }));
+        hist.items.push({ date: t.date, close, top });
+        await writeJSON(env, "lb:hist", { items: hist.items.slice(-400) });
+      }
+    }
+  } catch (e) { console.error("lb hist", e); }
   const { model, changes } = learn(prev, stats.items, trades.items, t.date, {
     replay: replayData.items, training: lib.items.filter((x) => x.result), feedback: fbRes.items || [],
   });
