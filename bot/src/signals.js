@@ -10,7 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
-import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak } from "./setups.js";
+import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -396,13 +396,54 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           // PDF 14 (Tezak) check on our data, SPY 5m Apr-Nov 2026: gate → Golden Fib same day 76% if opened before 10:00,
           // ~67% 10:00-12:00, only 20-25% after 12:00. Golden Fib → full ATR only ~33%, so the Golden Fib is the main target.
           const late = t.min >= 720, odds = t.min < 600 ? "~75%" : t.min < 720 ? "~65%" : "only ~20-25%";
+          const dirG = up ? "bull" : "bear";
+          // arm the Golden Gate pullback for the rest of the day (PDF 7)
+          st.ggArm = st.ggArm && st.ggArm.date === t.date ? st.ggArm : { date: t.date };
+          if (!st.ggArm[dirG]) st.ggArm[dirG] = { at: hhmm(t.min), n: 0 };
+          // PDF 7 backtest: buying the cross itself before noon WITH the 3m ribbon stacked: SPY 5m 62 trades ~81% wins +0.29R,
+          // SPX 3m 16 trades +0.20R; after noon it lost (−0.13R). Stop past the 3m 48 EMA, target the Golden Fib.
+          const A3 = barAtr(b3);
+          if (!late && side(rib3) === dirG && A3 && rib3.ema[48] != null && (up ? lv[fib] - c0 > A3 : c0 - lv[fib] > A3)) {
+            const stop = up ? rib3.ema[48] - A3 * 0.5 : rib3.ema[48] + A3 * 0.5;
+            found.push({
+              kind: "setup", sym, key: `ggo:${t.date}:${k}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+              track: { dir: dirG, entry: r2(c0), stop: r2(stop), target: lv[fib], needTrigger: false },
+              title: `🌉 GOLDEN GATE GO ${up ? "CALLS ▲" : "PUTS ▼"} · SPX ${r2(c0)} crossed ${up ? "+" : "−"}38.2% at ${hhmm(t.min)}`,
+              text: `**Entry:** now ~${r2(c0)} · **Stop:** ${r2(stop)} (past the 3m 48 EMA) · **Target:** Golden Fib **${r2(lv[fib])}**`
+                + `\nCrossed the Golden Gate ${r2(g)} before noon with the 3m ribbon stacked ${up ? "up" : "down"}: it reaches the Golden Fib the same day ${odds} of the time. Take most profit there (full ATR only ~1 in 3).`
+                + `\nMissed it? The bot also posts the pullback to the 3m ribbon after the gate.`,
+            });
+            continue;
+          }
           found.push({
             kind: "gg", sym, key: `gg:${t.date}:${k}`, once: true, color: late ? COLORS.big : COLORS.star,
             title: `🌉 GOLDEN GATE ${up ? "+" : "−"}38.2% crossed${late ? " (late, low odds)" : ""} · SPX ${r2(c0)}`,
             text: `SPX crossed ${r2(g)} at ${hhmm(t.min)}. Opened at this time of day, it reaches the Golden Fib ${up ? "+" : "−"}61.8% **${r2(lv[fib])}** the same day ${odds} of the time.`
-              + (late ? `\n**Late gate:** after noon it usually stalls. Don't buy for the Golden Fib; manage what you already hold.`
-                : `\n**How to trade it:** works best with the ribbon stacked ${up ? "up" : "down"} (3m ${rib3 ? rib3.state : "—"}, 10m ${rib10 ? rib10.state : "—"}). Don't chase the cross: take the pullback to the 3m ribbon, target ${r2(lv[fib])} and take most profit there (it carries on to the full ATR only ~1 in 3 times).`),
+              + (late ? `\n**Late gate:** after noon it usually stalls. Don't buy the cross. A pullback to the 3m ribbon can still work (the bot posts it).`
+                : `\n**How to trade it:** the 3m ribbon isn't stacked ${up ? "up" : "down"} yet (3m ${rib3 ? rib3.state : "—"}), so don't chase the cross: wait for the pullback to the 3m ribbon (the bot posts it), target ${r2(lv[fib])}.`),
           });
+        }
+        // Golden Gate pullback (PDF 7): after the gate is crossed, a 3m pullback to the 13 EMA holding the 48, target the Golden Fib.
+        // Backtest: SPY 5m 91 trades +0.17R, SPX 3m 28 trades +0.17R, works morning and afternoon. Max 2 per side per day.
+        if (st.ggArm && st.ggArm.date === t.date) {
+          for (const dirG of ["bull", "bear"]) {
+            const arm = st.ggArm[dirG];
+            if (!arm || arm.n >= 2) continue;
+            const up = dirG === "bull", fib = lv[up ? "+0.618" : "-0.618"];
+            if (fib == null || (up ? intra.hod >= fib : intra.lod <= fib)) continue;   // Golden Fib already reached: done for the day
+            const gp = ggPullback(b3, dirG, fib);
+            if (!gp) continue;
+            const key = `ggpb:${gp.bar.datetime}:${dirG}`;
+            if (st.fired && st.fired[key]) continue;
+            arm.n++;
+            found.push({
+              kind: "setup", sym, key, once: true, color: up ? COLORS.bull : COLORS.bear,
+              track: { dir: dirG, entry: r2(gp.entry), stop: r2(gp.stop), target: fib, needTrigger: false },
+              title: `🌉 GOLDEN GATE PULLBACK ${up ? "CALLS ▲" : "PUTS ▼"} · SPX ${r2(gp.entry)}`,
+              text: `**Entry:** now ~${r2(gp.entry)} · **Stop:** ${r2(gp.stop)} (past the 3m 48 EMA ${gp.ema48}) · **Target:** Golden Fib **${r2(fib)}**`
+                + `\nThe gate was crossed at ${arm.at}; the 3m pulled back to the 13 EMA ${gp.ema13}, held the 48 and closed back ${up ? "up" : "down"}. Saty's "buy the pullback to a trending ribbon".`,
+            });
+          }
         }
         // 21 EMA pullback (scalp entry) in the trend-day direction, or wherever the 10m and 3m ribbons agree
         const tdNow = st.trendDay[sym] && st.trendDay[sym].active ? st.trendDay[sym].dir : null;
@@ -819,7 +860,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           // never play against a trend day (except a confirmed Vomy, the reversal setup); your plan alerts still post
           if (TDs && TDs !== dir && fam !== "vomy") f.noTrade = "against trend mode";
           // opening window 9:33-10:00 (replay: 9:40-10:00 −0.22R): only ORB breaks and A+ cards are traded; the rest is watch-only
-          const openWin = t.min < 600 && fam !== "orb" && !(fam === "star" && f.grade === "A+");
+          const openWin = t.min < 600 && fam !== "orb" && fam !== "ggo" && !(fam === "star" && f.grade === "A+");
           if (openWin) f.noTrade = "opening window";
           const what = fam.startsWith("div") ? (bull ? "SPX made a lower low but momentum (Phase Oscillator) made a higher low: sellers are running out of steam" : "SPX made a higher high but momentum (Phase Oscillator) made a lower high: buyers are running out of steam")
             : fam.startsWith("cbox") ? `SPX broke ${bull ? "up" : "down"} out of a tight ${fam.slice(4)} compression range; tight ranges usually lead to a bigger move`
@@ -830,7 +871,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             : fam === "plan-trigger" ? `SPX crossed your posted ${bull ? "call" : "put"} trigger`
             : fam === "star" ? `a ${bull ? "bullish" : "bearish"} reversal candle formed at a key level and most checks agree`
             : fam === "pb8" ? `in a strong ${bull ? "up" : "down"}trend SPX tested the 3m 8 EMA (top of the ribbon) and held: ride the trend, don't chase it`
-            : fam === "pb21" ? `SPX pulled back into the 3m 21 EMA in a ${bull ? "rising" : "falling"} ribbon and held: the wait-for-the-pullback entry (no chasing)`
+            : fam === "ggo" ? `SPX crossed the Golden Gate (±38.2% ATR) before noon with the 3m ribbon stacked: most such mornings reach the Golden Fib`
+            : fam === "ggpb" ? `after crossing the Golden Gate, SPX pulled back to the 3m ribbon and held the 48 EMA: the PDF 7 entry, aiming for the Golden Fib`
+            : fam === "pb21" ?`SPX pulled back into the 3m 21 EMA in a ${bull ? "rising" : "falling"} ribbon and held: the wait-for-the-pullback entry (no chasing)`
             : fam === "vomy" ? `the ${bull ? "falling" : "rising"} 3m ribbon broke and held the 48 EMA: a multi-EMA crossover reversal (${bull ? "inverse Vomy" : "Vomy"})`
             : "setup triggered";
           const ctxBits = [

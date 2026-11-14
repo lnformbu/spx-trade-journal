@@ -381,6 +381,25 @@ Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" in
 
 Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
 
+## **NEW** PDF 7 (Golden Gate): chart study and what was built
+
+Charts: QQQ 3m bull day: call trigger hit, pullback to the ribbon (entry), Golden Gate crossed, rejected at 50%, pulled back and **held the 48** (no Vomy),
+consolidated, then a bull flag into the Golden Fib. IWM 3m bear day: fast break through the gate with no pullback (hard to enter), Golden Fib hit,
+later a second gate cross, pullback to the ribbon, Golden Fib again. TSLA examples show the same pattern on every mode (day/multiday/swing/position);
+on swings Saty uses the gate to **stay in** a trade (trim on the way), not as an entry. Checklist: gate hit, ribbon stacked, entry at the ribbon, profit at the Golden Fib.
+
+| Tested (stop past the 3m 48 EMA, target the Golden Fib) | SPY 5m, 140 days | SPX 3m, 35 days |
+|---|---|---|
+| Buy the cross, any ribbon | 97 trades, 67% wins, +0.10R | 26, 77%, +0.32R |
+| **Buy the cross, ribbon stacked, before noon** | 62 trades, ~81% wins, **+0.29R** | 16, ~75%, +0.20R |
+| Buy the cross after noon | −0.13R | −0.02R |
+| **Pullback to the 13 EMA holding the 48, after the gate** | 91 trades, 57% wins, **+0.17R** (morning and afternoon) | 28, 57%, +0.17R |
+| Deeper pullback to the 21 only | 34 trades, +0.18R (mixed by time) | 7 trades |
+
+**Built:** 🌉 GOLDEN GATE GO (cross before noon with the 3m ribbon stacked; allowed in the 9:33-10:00 window) and 🌉 GOLDEN GATE PULLBACK
+(after the gate, max 2 per side per day, until the Golden Fib is reached). Both paper-traded; learning switches them off if they fail live.
+When the ribbon is not stacked, or after noon, the gate post is a heads-up only.
+
 ## **NEW** PDF 14 (Tezak: probabilities of reaching Saty ATR levels)
 
 The PDF is only a title page linking a video, so the probabilities were measured on our own data instead (Day-mode levels: previous close ± ATR14 × fib).
