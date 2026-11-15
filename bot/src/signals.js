@@ -33,7 +33,7 @@ async function push(env, embed) {
   await fetch("https://ntfy.sh/", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ topic: env.NTFY_TOPIC, title: String(embed.title).slice(0, 200), message: String(embed.description || "").replace(/\*\*/g, "").slice(0, 1500) || " " }) }).catch(() => {});
 }
-export async function post(env, embed) {
+export async function post(env, embed, replyTo = null) {
   await push(env, embed);
   if (env.SIGNALS_WEBHOOK) {
     return fetch(env.SIGNALS_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Signals", embeds: [embed] }) });
@@ -41,7 +41,7 @@ export async function post(env, embed) {
   return fetch(`https://discord.com/api/v10/channels/${env.SIGNALS_CHANNEL_ID}/messages`, {
     method: "POST",
     headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "Content-Type": "application/json", "User-Agent": "DiscordBot (spx-bot, 1.0)" },
-    body: JSON.stringify({ embeds: [embed] }),
+    body: JSON.stringify({ embeds: [embed], ...(replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}) }),
   });
 }
 
@@ -94,6 +94,72 @@ async function spxContract(schwab, token, date, strike, type) {
 
 // A signal wins when price reaches its target before its stop (no target = 2R). A bar touching both counts as the stop.
 // A+/A setups must first trigger (1m beyond the signal candle) within 9 minutes. Still open after 60 minutes or at 15:55 = closed at the last price.
+
+// ---- take-profit ladder: the trade's own target, then the next real levels in its path (ATR levels, your thesis,
+// quarterly levels, 21/200 EMAs, HOD/LOD). TP1 sell ½ and move the stop to entry, TP2 sell ¼, the runner rides to TP3.
+export function tpLadder(dir, entry, stop, target, levels, A) {
+  const bull = dir === "bull", R = Math.abs(entry - stop);
+  if (!(R > 0) || !A) return null;
+  const ahead = (v) => (bull ? v - entry : entry - v);
+  const minGap = Math.max(R * 0.5, A * 0.03);
+  const cands = levels.filter(([, v]) => v != null && isFinite(v) && ahead(v) >= minGap).sort((x, y) => ahead(x[1]) - ahead(y[1]));
+  const uniq = [];
+  for (const c of cands) if (!uniq.length || ahead(c[1]) - ahead(uniq[uniq.length - 1][1]) >= A * 0.05) uniq.push(c);
+  let first = target != null && ahead(target) >= minGap ? ["signal target", target] : uniq.shift();
+  if (!first) first = ["2R", bull ? entry + 2 * R : entry - 2 * R];
+  const rest = uniq.filter(([, v]) => ahead(v) >= ahead(first[1]) + A * 0.05);
+  const tp2 = rest[0] || ["3R", bull ? entry + 3 * R : entry - 3 * R], tp3 = rest[1] || null;
+  const rr = (v) => r2(ahead(v) / R);
+  return [first, tp2, tp3].filter(Boolean).map(([name, v]) => ({ name, price: r2(v), R: rr(v) }));
+}
+const tpText = (tps) => tps.map((x, i) => `${i === 0 ? "TP1" : i === 1 ? "TP2" : "Runner"} **${x.price}** (${x.name}, ${x.R}R)${i === 0 ? " sell ½" : i === 1 ? " sell ¼" : ""}`).join(" · ");
+
+// follow-ups for a posted SPX trade: triggered, TP1 / TP2 / runner hits, stop, back to entry, not working, 3:55 close
+export function manageTrades(st, sym, rth, now, t, ema21) {
+  const out = [];
+  for (const m of (st.mgmt || []).filter((x) => x.sym === sym && x.stage !== "done")) {
+    const bull = m.dir === "bull", tps = m.tps;
+    const say = (title, text, color) => out.push({ replyTo: m.mid, title: `${title} · ${m.title.replace(/^⭐ /, "").slice(0, 70)}`, text, color });
+    const bars = rth.filter((c) => c.datetime > (m.last || m.at - 59000));
+    if (bars.length) m.last = bars[bars.length - 1].datetime;
+    if (m.stage === "wait") {
+      const hit = bars.find((c) => (bull ? c.close > m.entry : c.close < m.entry));
+      if (hit) {
+        m.stage = "open"; m.enteredAt = hit.datetime;
+        say("▶️ TRIGGERED", `SPX closed ${bull ? "above" : "below"} the entry ${m.entry}: the trade is on. Stop ${m.stop}.\n**Take profits:** ${tpText(tps)}\nAfter TP1, move the stop to the entry ${m.entry}.`, 0x3b82f6);
+      } else if (now - m.at > 9 * 60000) { m.stage = "done"; continue; }
+      else continue;
+    }
+    for (const c of bars.filter((c) => c.datetime >= (m.enteredAt || 0))) {
+      const reached = (v) => (bull ? c.high >= v : c.low <= v);
+      const against = (v) => (bull ? c.low <= v : c.high >= v);
+      if (!m.hit1 && against(m.stop)) { m.stage = "done"; say("🛑 STOP HIT", `SPX touched the stop ${m.stop}: out of the trade.`, 0xf0556b); break; }
+      if (!m.hit1 && reached(tps[0].price)) {
+        m.hit1 = c.datetime;
+        say("💰 TP1 HIT", `SPX reached ${tps[0].price} (${tps[0].name}). **Sell about half** and move the stop to the entry ${m.entry} (risk-free now).\nNext: ${tps.slice(1).map((x) => `${x.price} (${x.name})`).join(", ") || "trail the rest"}.`, 0x2ec26b);
+        continue;
+      }
+      if (m.hit1 && !m.hit2 && c.datetime > m.hit1 && against(m.entry)) {
+        m.stage = "done"; say("↩️ BACK TO ENTRY", `After TP1, SPX came back to the entry ${m.entry}: close the rest at breakeven. The trade still paid on the first half.`, 0xffd700); break;
+      }
+      if (m.hit1 && !m.hit2 && tps[1] && reached(tps[1].price)) {
+        m.hit2 = c.datetime;
+        say("💰 TP2 HIT", `SPX reached ${tps[1].price} (${tps[1].name}). **Sell another quarter.**${tps[2] ? ` Let the last quarter run toward ${tps[2].price} (${tps[2].name}), trailing it under the 3m 21 EMA.` : " Trail the last quarter under the 3m 21 EMA."}`, 0x2ec26b);
+        if (!tps[2]) m.trail = true;
+        continue;
+      }
+      if (m.hit2 && tps[2] && reached(tps[2].price)) { m.stage = "done"; say("🏁 RUNNER TARGET HIT", `SPX reached ${tps[2].price} (${tps[2].name}): close the runner. Full plan completed.`, 0x2ec26b); break; }
+    }
+    if (m.stage === "done") continue;
+    const c0 = rth.length ? rth[rth.length - 1].close : null;
+    if (m.hit2 && ema21 != null && c0 != null && (bull ? c0 < ema21 : c0 > ema21)) { m.stage = "done"; say("🏁 RUNNER OUT", `SPX closed ${bull ? "below" : "above"} the 3m 21 EMA ${r2(ema21)}: close the runner, lock in the trade.`, 0xffd700); continue; }
+    if (m.stage === "open" && !m.hit1 && now - (m.enteredAt || m.at) > 60 * 60000) { m.stage = "done"; say("⏳ NOT WORKING", `60 minutes in and no TP1 (${tps[0].price}). Most winners pay well before this: consider closing.`, 0x9aa0a6); continue; }
+    if (t.min >= 955) { m.stage = "done"; say("⏰ 3:55 CLOSE", `0DTE: close whatever is left before 3:59.`, 0x9aa0a6); }
+  }
+  st.mgmt = (st.mgmt || []).filter((x) => x.stage !== "done" || now - x.at < 6 * 3600e3).slice(-60);
+  return out;
+}
+
 export function resolveTracks(st, sym, rth, now, t) {
   const out = [];
   for (const tr of (st.track || []).filter((x) => x.sym === sym && !x.done)) {
@@ -132,6 +198,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   const t = et(now);
   if (!force && (t.wd === "Sat" || t.wd === "Sun" || t.min < OPEN || t.min > CLOSE)) return { skipped: "market closed" };
   const key = "sig:day:" + t.date;
+  const mgmtMsgs = [];
   const st = (await readJSON(env, key)) || { date: t.date, alerts: [], fired: {}, vol: {}, daily: {}, flow: {}, planSt: {} };
   st.flow = st.flow || {}; st.planSt = st.planSt || {};
   const minuteNo = Math.floor(now / 60000);
@@ -283,6 +350,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           for (const x of needExit) { const o = Qo(x.contract.symbol); if (o && o.bidPrice != null) x.optExit = o.bidPrice; }
         }
         resolved.push(...res);
+        if (sym === "$SPX") mgmtMsgs.push(...manageTrades(st, sym, rth, now, t, (() => { const b = aggregate(done, 3).filter((x) => x.datetime + 180000 <= now); return b.length > 30 ? ema(b.map((x) => x.close), 21).at(-1) : null; })()));
       }
 
       // ---- large moves ----
@@ -998,6 +1066,15 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           f.text += `\n**Why:** ${what}.\n${ctxBits.join(" · ")}`;
         }
       }
+      // take-profit ladder on every SPX trade signal (also used for the follow-up posts)
+      if (sym === "$SPX") for (const f of found) {
+        if (f.sym !== sym || !f.track || f.track.entry == null || f.track.stop == null || f.drop) continue;
+        const lvAll = [...keyLevels, ["high of day", intra.hod], ["low of day", intra.lod]];
+        const tps = tpLadder(f.track.dir, f.track.entry, f.track.stop, f.track.target, lvAll, D.atr);
+        if (!tps) continue;
+        f.tps = tps;
+        f.text += `\n**Take profits:** ${tpText(tps)} · after TP1 move the stop to entry${f.track.needTrigger ? " (the bot posts when it triggers and at each level)" : " (the bot posts at each level)"}`;
+      }
     } catch (e) {
       errors.push(`${show(sym)}: ${e.message}`);
     }
@@ -1006,6 +1083,11 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   // dedupe, cooldowns, per-ticker hourly cap (whales, plan and A+ alerts are never capped)
   const sent = [];
   const candidates = [];
+  // follow-ups on trades posted earlier (replies under the original signal)
+  if (!dry) for (const m of mgmtMsgs) {
+    const r = await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: `${hhmm(t.min)} ET · trade follow-up` } }, m.replyTo).catch((e) => ({ ok: false, status: e.message }));
+    if (!r.ok) errors.push("follow-up post: " + r.status);
+  }
   for (const a of found) {
     if (a.drop) { st.dropKeys = st.dropKeys || {}; if (!st.dropKeys[a.key]) { st.dropKeys[a.key] = a.drop; st.dropped = st.dropped || {}; st.dropped[a.drop] = (st.dropped[a.drop] || 0) + 1; } continue; }
     const last = st.fired[a.key];
@@ -1033,6 +1115,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         .catch((e) => ({ ok: false, status: e.message }));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }
+      if (r.ok && a.tps && !a.noTrade && a.track) (st.mgmt = st.mgmt || []).push({ key: a.key, sym: a.sym, title: a.title, dir: a.track.dir, entry: a.track.entry, stop: a.track.stop, tps: a.tps, at: now, mid: alert.mid || null, stage: a.track.needTrigger ? "wait" : "open", enteredAt: a.track.needTrigger ? null : now });
     }
   }
   // finished signals go to the bot scorecard (journal: Bot view)

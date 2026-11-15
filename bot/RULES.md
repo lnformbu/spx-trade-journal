@@ -381,6 +381,20 @@ Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" in
 
 Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
 
+## **NEW** Take-profit ladder and trade follow-ups (SPX)
+
+Every SPX trade signal now carries a **Take profits** line:
+- **TP1** = the signal's own target (or the first real level ahead): **sell ½ and move the stop to entry** (risk-free).
+- **TP2** = the next level in the trade's path: **sell ¼**.
+- **Runner** = the level after that; trail the last ¼ under the 3m 21 EMA.
+Levels used: Day ATR levels, your weekly thesis levels, quarterly (Position) levels, daily 21 / weekly 21 / daily 200 EMA, high/low of day,
+at least ½R away and spaced apart (falls back to 2R / 3R when nothing is in range).
+
+The bot then **replies under the original signal** as the trade plays out:
+▶️ TRIGGERED (for entry-on-a-close signals, with the ladder) · 💰 TP1 HIT (sell half, stop to entry) · 💰 TP2 HIT (sell a quarter) ·
+🏁 RUNNER TARGET HIT / RUNNER OUT (close below the 3m 21 EMA) · 🛑 STOP HIT · ↩️ BACK TO ENTRY after TP1 · ⏳ NOT WORKING (no TP1 in 60 min) · ⏰ 3:55 CLOSE.
+Watch-only signals get the ladder for reference but no follow-ups. The paper account keeps its own (learned) exits.
+
 ## **NEW** Your weekly bigger-picture thesis (#spx-training)
 
 Your weekly post (daily chart, Position/quarterly ATR levels, weekly 21 and daily 200 EMA) is saved as the bot's thesis ("bot:thesis").
