@@ -418,6 +418,11 @@ export default {
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
     if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));
+    // your weekly bigger-picture thesis from #spx-training: { date, text, levels: [{ name, price, role }], scenarios: [..] }
+    if (url.pathname === "/thesis") {
+      if (req.method === "POST") { const b = await req.json(); await writeJSON(env, "bot:thesis", b); return json({ ok: true, levels: (b.levels || []).length }); }
+      return json(await readJSON(env, "bot:thesis"));
+    }
     if (url.pathname === "/vision-test") {
       const lib = await readJSON(env, "lib:setups");
       const img = url.searchParams.get("url") || (lib && lib.items.filter((x) => x.images && x.images.length).at(-1)?.images[0]);
@@ -477,6 +482,9 @@ export default {
         const c = await (await fetch(`https://discord.com/api/v10/channels/${chId}`, { headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN } })).json();
         return json({ name: c.name, type: c.type, last_message_id: c.last_message_id, guild: c.guild_id, count: Array.isArray(msgs) ? msgs.length : msgs });
       }
+      // full=1 (training channel only): the whole text and chart image links, to study your analysis posts
+      if (url.searchParams.get("full") && url.searchParams.get("ch") === "training" && Array.isArray(msgs))
+        return json(msgs.map((m) => ({ at: m.timestamp, author: m.author && m.author.username, content: m.content || "", images: (m.attachments || []).map((a) => a.url) })));
       return json(Array.isArray(msgs) ? msgs.map((m) => ({ at: m.timestamp, et: et(Date.parse(m.timestamp)), author: m.author && m.author.username, len: (m.content || "").length, start: (m.content || "").slice(0, 60), embeds: (m.embeds || []).length, attachments: (m.attachments || []).length })) : msgs);
     }
     if (url.pathname === "/atr") {

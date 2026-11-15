@@ -381,6 +381,16 @@ Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" in
 
 Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
 
+## **NEW** Your weekly bigger-picture thesis (#spx-training)
+
+Your weekly post (daily chart, Position/quarterly ATR levels, weekly 21 and daily 200 EMA) is saved as the bot's thesis ("bot:thesis").
+- The bot now computes the same bigger-picture levels you use: quarterly (Position) ATR levels, daily 200 EMA, weekly 21 EMA (checked against your
+  thinkorswim chart: Q pivot 7651.54, Q put trigger 7510, Q Golden Gate 7423, D21 7603.6, W21 7552.71, D200 7366.7).
+- Your levels (e.g. 7500 support, 7300-7400 demand, 7760 / ATH supply) are key levels for alerts and for the paper trader's "rejected at a level" exit.
+- Every SPX signal says when it runs into one of these levels before its target ("⚠ runs into your 7500 support first").
+- The 9:40 opening read lists your scenarios for the week.
+- Swing (monthly) levels now use 10 years of monthly data, so they match thinkorswim more closely.
+
 ## **NEW** PDFs 1-4 (ATR Levels, ATR day-trading checklist, Pivot Ribbon, Phase Oscillator)
 
 | PDF | Claim tested | Result | Built |

@@ -151,6 +151,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   const found = [];
   const errors = [];
   const paperStyle = ((await readJSON(env, "paper:model")) || {}).style || null;
+  // your weekly bigger-picture thesis (key levels + scenarios), saved from #spx-training
+  const thesis = await readJSON(env, "bot:thesis");
   const resolved = [];
 
   // ---- VIX on 10m (inverse of SPX): cloud, oscillator, last two 10m closes; refreshed every 10 minutes ----
@@ -198,16 +200,27 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const q = quotes[sym] && quotes[sym].quote;
       if (!q) continue;
       const price = q.lastPrice;
-      if (!st.daily[sym] || st.daily[sym].ema21d === undefined) {
-        const d = await history(token, { symbol: sym, periodType: "year", period: "1", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
+      if (!st.daily[sym] || st.daily[sym].ema21w === undefined) {
+        const d = await history(token, { symbol: sym, periodType: "year", period: "3", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
         const dl = dayLevels(d, t.date);
-        const mo = await history(token, { symbol: sym, periodType: "year", period: "5", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
+        const mo = await history(token, { symbol: sym, periodType: "year", period: "10", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
         st.daily[sym] = dl && {
           ...dl,
           cloudD: cloud2021(d.filter((c) => dailyDate(c) < t.date)),
           swing: modeLevels(mo.filter((c) => dailyDate(c).slice(0, 7) < t.date.slice(0, 7))),
           // daily 21 EMA (swing pullback zone)
           ema21d: (() => { const cl = d.filter((c) => dailyDate(c) < t.date).map((c) => c.close); return cl.length > 21 ? Math.round(ema(cl, 21).at(-1) * 100) / 100 : null; })(),
+          // bigger picture (your weekly analysis): Position = quarterly ATR levels, daily 200 EMA, weekly 21 EMA
+          position: (() => {
+            const qs = [];
+            for (const c of mo) { const dd = dailyDate(c), q = dd.slice(0, 4) + "Q" + (Math.floor((+dd.slice(5, 7) - 1) / 3) + 1), x = qs.at(-1);
+              if (!x || x.q !== q) qs.push({ q, open: c.open, high: c.high, low: c.low, close: c.close, datetime: c.datetime });
+              else { x.high = Math.max(x.high, c.high); x.low = Math.min(x.low, c.low); x.close = c.close; } }
+            const cur = t.date.slice(0, 4) + "Q" + (Math.floor((+t.date.slice(5, 7) - 1) / 3) + 1);
+            return modeLevels(qs.filter((x) => x.q < cur));
+          })(),
+          ema200d: (() => { const cl = d.filter((c) => dailyDate(c) < t.date).map((c) => c.close); return cl.length > 200 ? Math.round(ema(cl, 200).at(-1) * 100) / 100 : null; })(),
+          ema21w: (() => { const wk = []; for (const c of d.filter((c) => dailyDate(c) < t.date)) { const dt = new Date(Date.parse(dailyDate(c))), mon = new Date(dt); mon.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); const k = mon.toISOString().slice(0, 10), x = wk.at(-1); if (!x || x.k !== k) wk.push({ k, close: c.close }); else x.close = c.close; } return wk.length > 21 ? Math.round(ema(wk.map((x) => x.close), 21).at(-1) * 100) / 100 : null; })(),
         };
       }
       const D = st.daily[sym];
@@ -362,6 +375,12 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         ...(SW ? [["Swing call trigger", SW.atrLevels["+0.236"]], ["Swing put trigger", SW.atrLevels["-0.236"]]] : []),
         // 21 EMAs on the scalp (3m), day (10m), multiday (1h) and daily charts: pullback zones
         ["3m EMA 21", rib3 && rib3.ema[21]], ["10m EMA 21", T10.rib && T10.rib.ema[21]], ["1h EMA 21", T10.ema21h], ["daily EMA 21", D.ema21d],
+        ["daily EMA 200", D.ema200d], ["weekly EMA 21", D.ema21w],
+        ...(D.position ? [["Quarterly pivot", D.position.prevClose], ["Quarterly call trigger", D.position.atrLevels["+0.236"]], ["Quarterly put trigger", D.position.atrLevels["-0.236"]],
+          ["Quarterly Golden Gate up", D.position.atrLevels["+0.382"]], ["Quarterly Golden Gate down", D.position.atrLevels["-0.382"]],
+          ["Quarterly midrange up", D.position.atrLevels["+0.618"]], ["Quarterly midrange down", D.position.atrLevels["-0.618"]]] : []),
+        // your posted weekly thesis levels (#spx-training bigger-picture post), SPX only
+        ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price]) : []),
       ];
       // SPX gamma levels (call wall, put wall, flip, Eye of Sauron, biggest nodes); SPY gets them divided by the SPX/SPY ratio
       const gconv = sym === "$SPX" ? 1 : sym === "SPY" && ratio ? 1 / ratio : null;
@@ -592,6 +611,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             title: `🌅 SPX opening read · ${r2(op)} (previous close ${D.pdc})`,
             text: read
               + `\nVIX ${st.vix10 ? st.vix10.last : "—"}${vp ? ` · Saty pivot ${vp} (above = bearish SPX, below = bullish; no edge in our test yet, info only)` : ""}`
+              + (thesis && thesis.scenarios ? `\n**Your weekly thesis (${thesis.date}):** ${thesis.scenarios.join(" · ")}` : "")
               + `\nTrend-day check: ${TS ? `${TS.score}/${TS.max} ${TS.dir === "bull" ? "up" : "down"}${TS.bits.length ? " (" + TS.bits.join(", ") + ")" : ""}` : "—"}`,
           });
         }
@@ -961,6 +981,17 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             f.ctx && f.ctx.flow === "with" ? `0DTE ${bull ? "call" : "put"} volume spiking ✓` : f.ctx && f.ctx.flow === "against" ? `0DTE ${bull ? "put" : "call"} volume spiking ✗` : null,
             openWin ? "⏳ opening window (before 10:00): watch only, not paper traded" : null,
             f.noTradeWhy ? "⏳ " + f.noTradeWhy : null,
+            // bigger picture: the first of your thesis levels / quarterly levels / D200 / W21 the trade runs into before its target
+            (() => {
+              if (sym !== "$SPX" || !f.track) return null;
+              const e = f.track.entry ?? c0, tg = f.track.target, A = D.atr || 50;
+              const big = [...(thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price]) : []),
+                ...(D.position ? [["quarterly pivot", D.position.prevClose], ["quarterly put trigger", D.position.atrLevels["-0.236"]], ["quarterly call trigger", D.position.atrLevels["+0.236"]], ["quarterly Golden Gate", D.position.atrLevels["-0.382"]]] : []),
+                ["daily 200 EMA", D.ema200d], ["weekly 21 EMA", D.ema21w], ["daily 21 EMA", D.ema21d]].filter(([, v]) => v != null);
+              const far = tg != null ? Math.abs(tg - e) : A * 0.4;
+              const hit = big.filter(([, v]) => (bull ? v > e : v < e) && Math.abs(v - e) <= far && Math.abs(v - e) >= A * 0.02).sort((x, y) => Math.abs(x[1] - e) - Math.abs(y[1] - e))[0];
+              return hit ? `⚠ runs into ${hit[0]} ${r2(hit[1])} first (bigger-picture level: take profit there or expect a fight)` : null;
+            })(),
             eodWin ? "⏳ after 3:30 only A/A+ cards are paper traded (this one is watch only)" : null,
           ].filter(Boolean);
           f.why = true;
