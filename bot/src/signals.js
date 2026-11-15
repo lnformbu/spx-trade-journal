@@ -10,7 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
-import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr } from "./setups.js";
+import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10 } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -25,6 +25,8 @@ const COLORS = { whale: 0x8b5cf6, big: 0xf0b429, bull: 0x2ec26b, bear: 0xf0556b,
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 // free phone push (ntfy app) for paper trades, style takeovers, recaps and bot health; topic is a Cloudflare secret
+// best families after every rule (same list as paper.js CORE)
+const CORE_FAMS = new Set(["vomy", "pb8", "ckl10", "atr1", "div1m", "ggpb", "ggo", "pb21"]);
 const PUSH = /^(📄|🏆|🔑|⛔|✅ Bot|🗓️|🧭)/u;
 async function push(env, embed) {
   if (!env.NTFY_TOPIC || !PUSH.test(embed.title || "")) return;
@@ -314,6 +316,17 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           cloudH: cloud2021(aggregate(m5, 60).filter((b) => b.datetime + 3600000 <= now)),
           ema21h: (() => { const r = ribbon(aggregate(m5, 60).filter((b) => b.datetime + 3600000 <= now)); return r ? r.ema[21] : null; })(),
           chop: chop(b10),
+          // PDF 2 10m checklist entry (SPX): regular-hours 10m bars, as backtested
+          ckl: sym === "$SPX" ? (() => {
+            const r = b10.filter((b) => { const mm = et(b.datetime).min; return mm >= 570 && mm < 960; });
+            const start = r.findIndex((b) => et(b.datetime).date === t.date);
+            const out = {};
+            for (const dirC of ["bull", "bear"]) {
+              const c = checklist10(r, start, (b) => et(b.datetime).min, D.atrLevels, D.atr, dirC);
+              if (c) out[dirC] = { ...c, barAt: c.bar.datetime, at: now };
+            }
+            return out;
+          })() : null,
         };
       }
       const T10 = st.tf10[sym];
@@ -467,6 +480,34 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             text: `**Entry:** 1m close ${up ? "above" : "below"} **${r2(pb.entry)}** · **Stop:** ${r2(pb.stop)} · **Target:** ${target != null ? r2(target) : "—"}${ggCrossed && !fibHit ? " (Golden Fib)" : ""} · expires in 9 min`
               + `\n3m bar pulled into the 21 EMA ${pb.ema21} (8 ${pb.ema8} / 13 ${pb.ema13}) and closed back ${up ? "above" : "below"} the 13`
               + `\nConfluence ${cf.score}/6: ${cf.bits.join(" · ")}`,
+          });
+        }
+        // PDF 2 10m checklist: trigger + 34/50 trend + <70% ATR used, then the 10m pullback to the 8/21 EMA (SPY 10m 106 trades +0.29R)
+        for (const dirC of ["bull", "bear"]) {
+          const ck = T10.ckl && T10.ckl[dirC];
+          if (!ck || now - ck.at > 12 * 60000 || t.min >= 930) continue;
+          const up = dirC === "bull";
+          found.push({
+            kind: "setup", sym, key: `ckl10:${ck.barAt}:${dirC}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: dirC, entry: r2(ck.entry), stop: r2(ck.stop), target: r2(ck.target), needTrigger: false },
+            title: `✅ SPX 10m CHECKLIST ${up ? "CALLS ▲" : "PUTS ▼"} · pullback to the ${ck.pulled}`,
+            text: `**Entry:** now ~${r2(ck.entry)} · **Stop:** ${r2(ck.stop)} (past the 10m 34/50 cloud) · **Target:** midrange **${r2(ck.target)}**, runners to ${r2(ck.full)}`
+              + `\nSaty's day-trade checklist: 10m close ${up ? "above the call" : "below the put"} trigger, ${up ? "above" : "below"} the 34/50 cloud, under 70% of the ATR used, then the pullback to the ${ck.pulled} held.`,
+          });
+        }
+        // ±1 ATR snap-back (PDF 1 mean reversion): first 3m close back inside after touching ±1 ATR, target the midrange.
+        // SPX replay 9 results +0.56R (fading +1 ATR with puts +0.79R; bouncing off −1 ATR with calls weak everywhere → calls watch-only).
+        for (const dirS of t.min < 930 ? ["bull", "bear"] : []) {
+          const sn = atrSnap(b3rth, lv, D.atr, dirS);
+          if (!sn) continue;
+          const up = dirS === "bull";
+          found.push({
+            kind: "setup", sym, key: `atr1:${t.date}:${dirS}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: dirS, entry: r2(sn.entry), stop: r2(sn.stop), target: r2(sn.target), needTrigger: false },
+            ...(up ? { noTradeWhy: "calls side of the snap-back is watch-only (weak in every test)" } : {}),
+            title: `🪃 SPX ±1 ATR SNAP-BACK ${up ? "CALLS ▲ (watch only)" : "PUTS ▼"} · ${r2(sn.entry)}`,
+            text: `**Entry:** now ~${r2(sn.entry)} · **Stop:** ${r2(sn.stop)} (past today's extreme) · **Target:** midrange **${r2(sn.target)}**`
+              + `\nSPX stretched to the ${up ? "−" : "+"}1 ATR ${sn.full} (a full day's range) and the 3m just closed back inside: the move is exhausted, fade it back toward the midrange.`,
           });
         }
         // 8 EMA ride (PDF 5): in trend mode, a 3m test of the top of the ribbon that holds (replay: 212 trades, +0.51R; +0.10R without the 3 best days)
@@ -638,11 +679,15 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         for (const [tf, bars, o] of [["1m", b1, o1], ["3m", b3, o3]]) {
           if (!o) continue;
           const dv = divergence(bars, o._osc);
+          // PDF 4: divergences that start out in the accumulation/distribution or extreme zone (past ±61.8) are reversals; inside ±61.8
+          // they are mostly pullbacks. Replay: 3m inside ±61.8 −0.21R (46) vs past it +0.02R (29); 1m +0.19R inside vs ~+1.1R past (8).
+          const zoneX = dv && dv.o1 != null && Math.abs(dv.o1) >= 61.8;
           if (dv && (tf !== "1m" || side(rib3) === dv.dir)) found.push({
             kind: "setup", sym, key: `div:${tf}:${dv.at}`, once: true, color: COLORS[dv.dir],
             track: { dir: dv.dir, entry: c0, stop: dv.dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: null },
-            title: `📐 SPX ${tf} ${dv.dir === "bull" ? "BULLISH" : "BEARISH"} DIVERGENCE`,
-            text: `${dv.text}. SPX ${r2(c0)}. Look for a ${tf === "1m" ? "1m" : "3m"} candle confirmation at a level.`,
+            ...(tf === "3m" && !zoneX ? { noTradeWhy: "3m divergence inside the ±61.8 zone (a pullback, not a reversal): watch only" } : {}),
+            title: `📐 SPX ${tf} ${dv.dir === "bull" ? "BULLISH" : "BEARISH"} DIVERGENCE${zoneX ? " · from the extreme zone" : ""}`,
+            text: `${dv.text}. SPX ${r2(c0)}. Oscillator started at ${dv.o1 != null ? Math.round(dv.o1) : "—"} (${zoneX ? "past ±61.8: reversal odds better" : "inside ±61.8: more likely just a pullback"}). Look for a ${tf === "1m" ? "1m" : "3m"} candle confirmation at a level.`,
           });
           const bx = compressionBox(bars, o._track);
           const lc = bars.at(-1), pc = bars.at(-2);
@@ -877,7 +922,12 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           if (strong) f.vixAgainst = true;
           const fam = famOf(f.key) || "";
           // never play against a trend day (except a confirmed Vomy, the reversal setup); your plan alerts still post
-          if (TDs && TDs !== dir && fam !== "vomy") f.noTrade = "against trend mode";
+          if (TDs && TDs !== dir && fam !== "vomy" && fam !== "atr1") f.noTrade = "against trend mode";
+          // replay with every rule: momentum breaks −0.36R (55) and 3m divergences −0.30R (8) still lose → watch only
+          if ((fam === "mom" || fam === "div3m") && !f.noTradeWhy) f.noTradeWhy = "watch only: this setup lost money in the replay";
+          if (f.noTradeWhy) f.noTrade = f.noTradeWhy;
+          // core playbook (best after every rule; the paper "Core playbook only" challenger trades just these): ⭐ in the title
+          if (CORE_FAMS.has(fam) && !f.noTrade && !/^⭐/.test(f.title)) f.title = "⭐ " + f.title;
           // opening window 9:33-10:00 (replay: 9:40-10:00 −0.22R): only ORB breaks and A+ cards are traded; the rest is watch-only
           const openWin = t.min < 600 && fam !== "orb" && fam !== "ggo" && !(fam === "star" && f.grade === "A+");
           if (openWin) f.noTrade = "opening window";
@@ -893,7 +943,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             : fam === "plan-trigger" ? `SPX crossed your posted ${bull ? "call" : "put"} trigger`
             : fam === "star" ? `a ${bull ? "bullish" : "bearish"} reversal candle formed at a key level and most checks agree`
             : fam === "pb8" ? `in a strong ${bull ? "up" : "down"}trend SPX tested the 3m 8 EMA (top of the ribbon) and held: ride the trend, don't chase it`
-            : fam === "ggo" ? `SPX crossed the Golden Gate (±38.2% ATR) before noon with the 3m ribbon stacked: most such mornings reach the Golden Fib`
+            : fam === "ckl10" ? "Saty's 10m day-trade checklist lined up (trigger broken, trend cloud agrees, range left) and the pullback held: the no-chase entry"
+            : fam === "atr1" ? `SPX ran a full ATR ${bull ? "down" : "up"} and just closed back inside it: an exhausted move that usually snaps back toward the midrange`
+            : fam === "ggo" ?`SPX crossed the Golden Gate (±38.2% ATR) before noon with the 3m ribbon stacked: most such mornings reach the Golden Fib`
             : fam === "ggpb" ? `after crossing the Golden Gate, SPX pulled back to the 3m ribbon and held the 48 EMA: the PDF 7 entry, aiming for the Golden Fib`
             : fam === "pb21" ?`SPX pulled back into the 3m 21 EMA in a ${bull ? "rising" : "falling"} ribbon and held: the wait-for-the-pullback entry (no chasing)`
             : fam === "vomy" ? `the ${bull ? "falling" : "rising"} 3m ribbon broke and held the 48 EMA: a multi-EMA crossover reversal (${bull ? "inverse Vomy" : "Vomy"})`
@@ -908,6 +960,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             TDs ? (TDs === dir ? "with trend mode ✓" : "against trend mode ✗ (not paper traded)") : null,
             f.ctx && f.ctx.flow === "with" ? `0DTE ${bull ? "call" : "put"} volume spiking ✓` : f.ctx && f.ctx.flow === "against" ? `0DTE ${bull ? "put" : "call"} volume spiking ✗` : null,
             openWin ? "⏳ opening window (before 10:00): watch only, not paper traded" : null,
+            f.noTradeWhy ? "⏳ " + f.noTradeWhy : null,
             eodWin ? "⏳ after 3:30 only A/A+ cards are paper traded (this one is watch only)" : null,
           ].filter(Boolean);
           f.why = true;

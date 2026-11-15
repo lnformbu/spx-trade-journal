@@ -224,9 +224,9 @@ export function divergence(bars, osc) {
   }
   const h2 = highs.at(-1), h1 = highs.at(-2), l2 = lows.at(-1), l1 = lows.at(-2);
   if (h2 != null && h1 != null && n - 1 - h2 <= 6 && bars[h2].high > bars[h1].high && osc[h2] < osc[h1])
-    return { dir: "bear", text: `higher high ${bars[h2].high} vs ${bars[h1].high}, oscillator lower ${osc[h2]} vs ${osc[h1]}`, at: bars[h2].datetime };
+    return { dir: "bear", text: `higher high ${bars[h2].high} vs ${bars[h1].high}, oscillator lower ${osc[h2]} vs ${osc[h1]}`, at: bars[h2].datetime, o1: osc[h1], o2: osc[h2] };
   if (l2 != null && l1 != null && n - 1 - l2 <= 6 && bars[l2].low < bars[l1].low && osc[l2] > osc[l1])
-    return { dir: "bull", text: `lower low ${bars[l2].low} vs ${bars[l1].low}, oscillator higher ${osc[l2]} vs ${osc[l1]}`, at: bars[l2].datetime };
+    return { dir: "bull", text: `lower low ${bars[l2].low} vs ${bars[l1].low}, oscillator higher ${osc[l2]} vs ${osc[l1]}`, at: bars[l2].datetime, o1: osc[l1], o2: osc[l2] };
   return null;
 }
 

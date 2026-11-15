@@ -15,7 +15,7 @@ import { patterns, atLevel } from "../src/patterns.js";
 import { resolveTracks } from "../src/signals.js";
 import { famOf } from "../src/learn.js";
 import { LEVEL_NAMES } from "../src/plan.js";
-import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak, levelRetest, pullback8, ggPullback, barAtr } from "../src/setups.js";
+import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak, levelRetest, pullback8, ggPullback, barAtr, atrSnap, checklist10 } from "../src/setups.js";
 import { ema } from "../src/levels.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +81,13 @@ for (const date of days) {
         ema21h: (() => { const r = ribbon(aggregate(all, 60).filter((b) => b.datetime + 3600000 <= nowMs)); return r ? r.ema[21] : null; })() };
     }
     const { b10, rib10, osc10, box10, cloudH } = T10;
+    // PDF 2 10m checklist (same as live): recomputed on each 10-minute refresh, posted once per 10m bar
+    if (min % 10 === 0) {
+      const rb = T10.b10.filter((b) => { const mm = et(b.datetime).min; return mm >= 570 && mm < 960; });
+      const st0 = rb.findIndex((b) => et(b.datetime).date === date);
+      T10.ckl = {};
+      for (const dc of ["bull", "bear"]) { const c = checklist10(rb, st0, (b) => et(b.datetime).min, lv, D.atr, dc); if (c) T10.ckl[dc] = c; }
+    }
     const ch = T10.ch, crosses = rth.length > 20 ? vwapCrosses(rth, 60) : 0;
     const choppy = ch != null && ch > 61.8 && ((rib10 && rib10.flips >= 2) || crosses >= 4);
     const vwap = intra.vwap, dtr = dtrPct(intra.hod, intra.lod, D.atr, D.pdc);
@@ -114,6 +121,15 @@ for (const date of days) {
         add(`pb21:${pb.bar.datetime}:${pb.dir}`, "setup", { dir: pb.dir, entry: pb.entry, stop: pb.stop, target: (ggCrossed && !fibHit ? fib : next) ?? null, needTrigger: true }, { conf: cf.bits.map((b) => b.split(" (")[0]) });
       }
       // Golden Gate go + pullback (PDF 7, same as live)
+      for (const dc of ["bull", "bear"]) { const c = T10.ckl && T10.ckl[dc]; if (c && min < 930) add("ckl10:" + c.bar.datetime + ":" + dc, "setup", { dir: dc, entry: c.entry, stop: c.stop, target: c.target, needTrigger: false }); }
+      // ±1 ATR snap-back (PDF 1, same as live): first 3m close back inside after touching ±1 ATR, before 3:30
+      if (min < 930) {
+        const b3t = aggregate(rth, 3).filter((b) => b.datetime + 180000 <= nowMs);
+        for (const dirS of ["bull", "bear"]) {
+          const sn = atrSnap(b3t, lv, D.atr, dirS);
+          if (sn) add(`atr1:${date}:${dirS}`, "setup", { dir: dirS, entry: sn.entry, stop: sn.stop, target: sn.target, needTrigger: false });
+        }
+      }
       for (const [k, fk, up] of [["+0.382", "+0.618", true], ["-0.382", "-0.618", false]]) {
         const g = lv[k], fib = lv[fk], dirG = up ? "bull" : "bear";
         if (g == null || fib == null) continue;
@@ -211,7 +227,7 @@ for (const date of days) {
     for (const [tf, bars, o] of [["1m", b1, phaseOsc(b1)], ["3m", b3, osc3]]) {
       if (!o) continue;
       const dv = divergence(bars, o._osc);
-      if (dv && (tf !== "1m" || side(rib3a) === dv.dir)) add(`div:${tf}:${dv.at}`, "setup", { dir: dv.dir, entry: c0, stop: dv.dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: null });
+      if (dv && (tf !== "1m" || side(rib3a) === dv.dir)) add(`div:${tf}:${dv.at}`, "setup", { dir: dv.dir, entry: c0, stop: dv.dir === "bull" ? c0 - D.atr * 0.15 : c0 + D.atr * 0.15, target: null }, { o1: dv.o1, o2: dv.o2 });
       const bx = compressionBox(bars, o._track), lc = bars.at(-1), pc = bars.at(-2);
       if (bx && lc && pc && ((pc.close <= bx.high && lc.close > bx.high) || (pc.close >= bx.low && lc.close < bx.low)) && (tf !== "1m" || side(rib3a) === (lc.close > bx.high ? "bull" : "bear"))) {
         const up = lc.close > bx.high;
@@ -244,7 +260,7 @@ for (const date of days) {
     const slice = rthAll.filter((c) => c.datetime < end);
     const res = resolveTracks({ track: [{ ...f.track, sym: "$SPX" }] }, "$SPX", slice, end + 60 * 60000 + 1, { min: et(end).min })[0];
     if (!res || res.R == null) continue;
-    out.push({ conf: f.conf, date, sym: "$SPX", kind: f.kind, key: f.key, fam: famOf(f.key), grade: f.grade || null, score: f.score ?? null, et: f.et, dir: f.track.dir, ctx: f.ctx, R: res.R, outcome: res.outcome, replay: true });
+    out.push({ conf: f.conf, o1: f.o1, o2: f.o2, date, sym: "$SPX", kind: f.kind, key: f.key, fam: famOf(f.key), grade: f.grade || null, score: f.score ?? null, et: f.et, dir: f.track.dir, ctx: f.ctx, R: res.R, outcome: res.outcome, replay: true });
   }
   process.stdout.write(`${date}: ${found.length} signals\n`);
 }

@@ -381,6 +381,35 @@ Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" in
 
 Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
 
+## **NEW** PDFs 1-4 (ATR Levels, ATR day-trading checklist, Pivot Ribbon, Phase Oscillator)
+
+| PDF | Claim tested | Result | Built |
+|---|---|---|---|
+| 1 ATR Levels | Opening inside the trigger box = range-bound day | only 26% stay inside (range 0.82 vs 0.98 ATR) | no |
+| 1 | Range label: 70% / 90% of ATR used = little room left | ranges kept extending ~0.4-0.5 ATR more | no (as a stop rule) |
+| 1 | Trigger-break template (½ at midrange, rest at ±1 ATR) | +0.14R (99); with the 10m 34/50 trend −0.03R | no |
+| 1 | **±1 ATR snap-back** (touch ±1 ATR, first close back inside, target the midrange) | SPY 5m 34 trades +0.69R; SPX 3m-10m +0.85..+1.00R; SPX replay 9 +0.56R. Fading +1 ATR (puts) strong, bouncing off −1 ATR (calls) weak | 🪃 **SNAP-BACK**: puts traded (allowed against trend mode), calls watch-only |
+| 2 Day-trade checklist | 10m close past the trigger + 34/50 trend + < 70% ATR used, then the 8/21 EMA pullback; stop past 34/50, target midrange | SPY 10m 106 trades 57% **+0.29R** (+0.23R without the 70% rule), SPX 10m 14 +1.42R, SPX replay 12 trades 75% +1.02R; on 3m only +0.12R | ✅ **10m CHECKLIST** (10m chart, as Saty trades it) |
+| 2 | "0-3 trades a day" | the first 3 signals of a day were the worst (−0.07R); quality matters, not order | core playbook ⭐ instead |
+| 3 Pivot Ribbon | Daily conviction arrow (13/48 cross) | next 20 days +1.83% (82% up) vs +1.07% any day, but as a swing with the bot's management PF 0.76 (9) | no |
+| 3 | 10m conviction arrows | no edge (next 60 min ≈ flat), as Saty warns | no |
+| 4 Phase Oscillator | Divergence from past ±61.8 = reversal, inside = pullback | 3m: inside −0.21R (46) vs past +0.02R (29); 1m: inside +0.19R vs past ~+1.1R (8) | 3m divergences inside ±61.8 watch-only, zone shown in the post |
+
+## **NEW** Whole-system review (replay, every rule applied, Oct-Nov 2026, 33 days)
+
+| Version | Result |
+|---|---|
+| All tradable families, no filters | 1,801 signals, 49% wins, +0.16R, PF 1.32 |
+| With every current rule | 1,334 signals, 50%, **+0.22R**, PF 1.46 |
+| One position at a time (30-min hold) | 8.8 trades/day, +0.16R, PF 1.35, 18 of 33 days green, +47R total, worst day −5R, max drawdown −12R |
+| **Core playbook only**, one at a time | 4.9 trades/day, 57% wins, **+0.32R, PF 1.84** (first half +0.54R, second half +0.12R) |
+
+Core playbook (⭐ in Discord): Vomy, 8 EMA ride, 10m checklist, ±1 ATR snap-back (puts), 1m divergence, Golden Gate pullback/go, 21 EMA pullback.
+Still losing after every rule → no longer paper traded (watch only): momentum breaks (−0.36R, 55), 3m divergences (−0.30R, 8).
+A "Core playbook only" challenger now paper-trades next to the current style and takes over automatically if it wins over 20+ sessions.
+Caveats: R is measured on SPX moves, not option P&L (fills, spread and theta cost extra); 33 days is a short sample and the second half was weaker.
+Live orders stay off until you switch them on after paper results.
+
 ## **NEW** PDF 7 (Golden Gate): chart study and what was built
 
 Charts: QQQ 3m bull day: call trigger hit, pullback to the ribbon (entry), Golden Gate crossed, rejected at 50%, pulled back and **held the 48** (no Vomy),

@@ -214,3 +214,58 @@ export function ggPullback(bars, dir, fib) {
     ema13: r2(e13[i]), ema48: r2(e48[i]), atr3: r2(A),
   };
 }
+
+// PDF 1 ±1 ATR snap-back (mean reversion): price touched ±1 daily ATR today, then this 3m bar is the FIRST close back inside.
+// Fade toward the midrange (±61.8%), stop just past the extreme. Backtest Apr-Nov 2026: SPY 5m 34 trades 59% +0.69R
+// (fading +1 ATR with puts +1.00R; bouncing off −1 ATR with calls only +0.30R), SPX 3m/5m/10m +0.85..+1.00R on 11-12 trades.
+// bars = today's regular-session 3m bars (closed), lv = Day ATR levels, A = daily ATR.
+export function atrSnap(bars, lv, A, dir) {
+  if (!bars || bars.length < 3 || !lv || !A) return null;
+  const bull = dir === "bull", full = lv[bull ? "-1" : "+1"], tg = lv[bull ? "-0.618" : "+0.618"];
+  if (full == null || tg == null) return null;
+  const i0 = bars.findIndex((b) => (bull ? b.low <= full : b.high >= full));
+  const i = bars.length - 1;
+  if (i0 < 0 || i <= i0) return null;
+  const inside = (b) => (bull ? b.close > full : b.close < full);
+  if (!inside(bars[i])) return null;
+  for (let k = i0 + 1; k < i; k++) if (inside(bars[k])) return null; // only the first recovery
+  const ext = bars.slice(i0, i + 1);
+  const stop = bull ? Math.min(...ext.map((b) => b.low)) - A * 0.05 : Math.max(...ext.map((b) => b.high)) + A * 0.05;
+  const entry = bars[i].close;
+  if (bull ? tg <= entry : tg >= entry) return null;
+  return { dir, bar: bars[i], entry, stop, target: tg, full: r2(full) };
+}
+
+// PDF 2 day-trade checklist on the 10m chart: a 10m close beyond the trigger, on the trend side of the 34/50 EMA cloud, with < 70% of
+// the ATR used → armed. Then the entry is a 10m pullback that tags the 8 or 21 EMA and closes back in trend (max 2 per side, until the
+// midrange is hit). Stop past the 34/50 cloud, target the midrange (then ±1 ATR). Backtest Apr-Nov 2026: SPY 10m 106 trades 57% +0.29R
+// (+0.23R without the 70% filter), SPX 10m 14 trades +1.42R; the same on 3m was only +0.12R.
+// bars = 10m RTH bars incl. earlier days (closed), start = index of today's first bar, minOf(bar) = minutes after midnight ET.
+export function checklist10(bars, start, minOf, lv, A, dir) {
+  if (!bars || bars.length < 60 || start == null || start < 0 || !lv || !A) return null;
+  const bull = dir === "bull", s = bull ? 1 : -1;
+  const trig = lv[bull ? "+0.236" : "-0.236"], mid = lv[bull ? "+0.618" : "-0.618"];
+  if (trig == null || mid == null) return null;
+  const c = bars.map((b) => b.close), e8 = ema(c, 8), e21 = ema(c, 21), e34 = ema(c, 34), e50 = ema(c, 50);
+  const last = bars.length - 1;
+  let hi = -Infinity, lo = Infinity, armed = false, n = 0;
+  for (let i = start; i <= last; i++) {
+    const b = bars[i], m = minOf(b);
+    hi = Math.max(hi, b.high); lo = Math.min(lo, b.low);
+    if (m < 580 || m >= 900) continue;
+    const trend = bull ? b.close > Math.max(e34[i], e50[i]) : b.close < Math.min(e34[i], e50[i]);
+    if (!armed) { if ((bull ? b.close > trig : b.close < trig) && trend && (hi - lo) / A < 0.7) armed = true; continue; }
+    if (bull ? b.high >= mid : b.low <= mid) return null; // midrange reached: done for the day
+    const t21 = bull ? b.low <= e21[i] * 1.0003 && b.close > e21[i] : b.high >= e21[i] * 0.9997 && b.close < e21[i];
+    const t8 = bull ? b.low <= e8[i] && b.close > e8[i] : b.high >= e8[i] && b.close < e8[i];
+    if (!(t21 || t8) || !trend) continue;
+    n++;
+    if (n > 2) return null;
+    if (i === last) {
+      const stop = bull ? Math.min(e34[i], e50[i]) - A * 0.05 : Math.max(e34[i], e50[i]) + A * 0.05;
+      if ((b.close - stop) * s <= 0) return null;
+      return { dir, bar: b, entry: b.close, stop, target: mid, full: lv[bull ? "+1" : "-1"], pulled: t21 ? "21 EMA" : "8 EMA", ema21: r2(e21[i]) };
+    }
+  }
+  return null;
+}

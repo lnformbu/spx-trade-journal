@@ -17,7 +17,9 @@ const START = 2000;
 const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
-const TRADED = new Set(["star", "mom", "flip", "squeeze", "box", "div1m", "div3m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy", "orb", "pb8", "ggo", "ggpb"]);
+// best families after every rule (replay): Vomy, 8 EMA ride, 10m checklist, ±1 ATR snap-back, 1m divergence, Golden Gate pullback/go, 21 EMA pullback
+export const CORE = new Set(["vomy", "pb8", "ckl10", "atr1", "div1m", "ggpb", "ggo", "pb21"]);
+const TRADED = new Set(["star", "flip", "squeeze", "box", "div1m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy", "orb", "pb8", "ggo", "ggpb", "atr1", "ckl10"]);
 const group = (sym) => (sym === "SPY" || sym === "$SPX" ? "SPX" : sym);   // SPY and SPX count as one market
 const rootOf = (contract) => String((contract && contract.symbol) || "").split(" ")[0].replace(/^SPXW$/, "SPX");
 // which option underlyings get paper traded: wrangler.toml PAPER_TICKERS (default "$SPX"; add e.g. ",TSLA" later)
@@ -34,6 +36,8 @@ export const TEMPLATES = [
   { id: "allday", name: "Trade midday too", apply: (c) => ({ ...c, window: "all" }) },
   { id: "morning", name: "Mornings only (9:33-11:30)", apply: (c) => ({ ...c, window: "morning" }) },
   { id: "edge", name: "Size down weaker setups", apply: (c) => ({ ...c, sizing: "edge" }) },
+  // replay with every rule, one position at a time: core playbook 162 trades 57% +0.32R PF 1.84 vs all families +0.16R PF 1.35
+  { id: "core", name: "Core playbook only", apply: (c) => ({ ...c, fams: "core" }) },
 ];
 export function championCfg(model) {
   const s = (model && model.style) || BASE_STYLE;
@@ -41,7 +45,7 @@ export function championCfg(model) {
 }
 export function makeChallengers(champ, gen, date) {
   const books = {};
-  const sig = (c) => JSON.stringify([c.params, c.delta, c.window, c.sizing]);
+  const sig = (c) => JSON.stringify([c.params, c.delta, c.window, c.sizing, c.fams || null]);
   for (const tp of TEMPLATES) {
     const cfg = tp.apply({ ...champ, params: { ...champ.params } });
     if (sig(cfg) === sig(champ)) continue;
@@ -72,6 +76,7 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (ev) return `${ev.name} at ${hhmm(ev.min)}: no entries 15 minutes either side`;
   const pre = events.find((e) => e.min < 570);
   if (pre && t.min < 585 && cand.grade !== "A+") return `${pre.name} day: A+ only until 9:45`;
+  if (cfg.fams === "core" && !CORE.has(cand.fam)) return "this style trades the core playbook only";
   if (cfg.window === "morning" && t.min >= 690) return "this style trades mornings only";
   if (cfg.window !== "all" && t.min >= 690 && t.min < 810 && !(cand.fam === "star" && (cand.grade === "A+" || cand.score >= 90))) return "midday 11:30-1:30: A-grade (90+) only";
   if (d.done) return d.done;
@@ -266,6 +271,8 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   const champ = championCfg(model);
   let ch = await readJSON(env, "paper:challengers");
   if (!ch) ch = makeChallengers(champ, 1, t.date);
+  // a challenger template added after this generation started gets its own fresh book
+  for (const tp of TEMPLATES) if (!ch.books[tp.id]) { const cfg = tp.apply({ ...champ, params: { ...champ.params } }); ch.books[tp.id] = { cfg: { ...cfg, id: tp.id, name: tp.name, traits: [...(champ.traits || []), tp.name] }, book: newBook() }; }
   acct.shadow = acct.shadow || [];
   const token = await schwabToken(env);
 
@@ -384,7 +391,7 @@ export async function runLearning(env, deps, { force = false, report = false, qu
   const ch = await readJSON(env, "paper:challengers");
   const win = ch && pickWinner(ch);
   if (win) {
-    model.style = { name: [...(win.cfg.traits || [])].join(" + ") || win.cfg.name, traits: win.cfg.traits || [], delta: win.cfg.delta, window: win.cfg.window, sizing: win.cfg.sizing };
+    model.style = { name: [...(win.cfg.traits || [])].join(" + ") || win.cfg.name, traits: win.cfg.traits || [], delta: win.cfg.delta, window: win.cfg.window, sizing: win.cfg.sizing, fams: win.cfg.fams || null };
     model.params = { ...win.cfg.params };
     const text = `🏆 New trading style takes over: ${model.style.name}. Over ${win.C.sessions} sessions: ${usd(win.S.pnl)} vs ${usd(win.C.pnl)} (your rules), `
       + `profit factor ${win.S.pf} vs ${win.C.pf}, ${win.S.trades} trades, worst drawdown ${usd(win.S.dd)} vs ${usd(win.C.dd)}.`;

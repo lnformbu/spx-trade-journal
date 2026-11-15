@@ -51,6 +51,9 @@ for (let i = 260; i < days.length - 1; i++) {
   // S2: daily 21 EMA pullback that holds
   if (bullStack && c.low <= e21[i] * 1.002 && c.close > e21[i] && c.close > c.open && cool("s2b")) { simulate("Daily 21 EMA pullback (calls)", i, "bull", lv); last.s2b = i; }
   if (bearStack && c.high >= e21[i] * 0.998 && c.close < e21[i] && c.close < c.open && cool("s2s")) { simulate("Daily 21 EMA pullback (puts)", i, "bear", lv); last.s2s = i; }
+  // S4 (PDF 3): daily conviction arrow, the 13 EMA crossing above the 48
+  if (e13[i] >= e48[i] && e13[i - 1] < e48[i - 1] && cool("s4b")) { simulate("Daily conviction arrow (calls)", i, "bull", lv); last.s4b = i; }
+  if (e13[i] < e48[i] && e13[i - 1] >= e48[i - 1] && cool("s4s")) { simulate("Daily conviction arrow (puts)", i, "bear", lv); last.s4s = i; }
   // S3: squeeze fires with the ribbon, near the 21 EMA (within 1.5 daily ATR)
   const o = osc[i]; const atrD = Math.abs(lv["+1"] - lv["-1"]) / 2 / 4; // rough daily ATR from the monthly ATR (~1/4)
   if (o && o.squeezeFired && Math.abs(c.close - e21[i]) < 1.5 * atrD) {
