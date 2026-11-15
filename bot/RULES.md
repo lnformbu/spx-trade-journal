@@ -381,6 +381,23 @@ Saty's annotated SPY 10m chart: (1) clear trending ribbon, price makes "fins" in
 
 Live Vomy now: 16 trades, 75% wins, **+0.82R** in the replay (small sample).
 
+## **NEW** Kill the Leaderboard (your EOD framework + Saty's EOD cards)
+
+Data the 5-minute options job now adds: **tax list** (0DTE leaderboard names with 100k+ volume and last ≥ 20% above their own VWAP),
+**0DTE gamma per strike** (calls +, puts −, sized by max(open interest, volume)) with an hour of history → the **strike gaining gamma**
+over the last ~30 minutes, positive-gamma nodes, negative nodes; plus the existing call/put walls, max pain and Eye of Sauron.
+
+Posts in #signals:
+- **3:30 🎯 EOD PLAN**: board populated (tax list + which holders get shaken → kill direction) or empty (pin on the growing node);
+  walls = the range (don't plan beyond them); likely pin (growing gamma → max pain → max-gamma strike); the fakeout to watch; risk rules.
+- **3:30-3:45 🔁 EOD FAKEOUT FADE**: SPX ran opposite the kill into a positive-gamma node / key level and the 1m candle rejects it → fade toward the pin (ITM/ATM).
+- **3:40 🗡️ FINAL 20**: the real shake: pin, distance, top contracts (100k+ often finish ITM, under 100k usually die), trade the path with ATM/ITM. Replaces the old 3:45 Highlander note.
+Risk (on every EOD post): profits only, size for zero (premium = max loss, no stop), limit orders, targets in advance (½ at +100% or ⅔ at +50%, ¼ at +200%, runner for the cash-settle).
+
+Not backtested (no history of option volume or 0DTE gamma), so: the fakeout fade is **watch-only** for now, every day's plan is saved
+("eod:plan") and scored at 4:10 against the close (pin error, inside the walls, kill direction right, did the shaken names die) in "lb:hist".
+Paper account: after 3:30 a style only enters if its day is green (profits only), still A/A+ cards only.
+
 ## **NEW** Take-profit ladder and trade follow-ups (SPX)
 
 Every SPX trade signal now carries a **Take profits** line:

@@ -61,6 +61,8 @@ export async function runGreeks(env, deps, { force = false } = {}) {
   // PDF 12: volume flow, 0DTE call vs put contracts traded since the last snapshot (~5 min) vs the day's usual pace
   const firstSnap = !Object.keys(lb.c).length;
   let dCall = 0, dPut = 0;
+  // Kill the Leaderboard: 0DTE gamma per strike (calls +, puts −), sized by max(open interest, today's volume)
+  const g0 = {};
   for (const o of legsOf(chain, true, t.date)) {
     const vol = o.totalVolume || 0;
     const px = o.last || o.mark;
@@ -70,12 +72,14 @@ export async function runGreeks(env, deps, { force = false } = {}) {
     if (dv > 0) { c.pv += dv * px; c.vw += dv; }
     if (dv > 0) { if (o.type === "C") dCall += dv; else dPut += dv; }
     c.vol = vol; c.last = px; c.bid = o.bid; c.ask = o.ask;
+    if (o.gamma != null && Math.abs(o.strikePrice - spot) <= 60) g0[o.strikePrice] = (g0[o.strikePrice] || 0) + (o.type === "C" ? 1 : -1) * o.gamma * Math.max(o.openInterest || 0, vol) * 100;
   }
   if (!firstSnap) {
     lb.flowHist = [...(lb.flowHist || []), { at: now, c: dCall, p: dPut }].slice(-90);
     const h = lb.flowHist.slice(0, -1), avgC = h.length ? h.reduce((x, y) => x + y.c, 0) / h.length : null, avgP = h.length ? h.reduce((x, y) => x + y.p, 0) / h.length : null;
     lb.flow = { calls: dCall, puts: dPut, callSpike: avgC != null && h.length >= 3 && dCall > 1.8 * avgC, putSpike: avgP != null && h.length >= 3 && dPut > 1.8 * avgP, at: hhmm(t.min) };
   }
+  lb.gHist = [...(lb.gHist || []), { at: now, m: Object.fromEntries(Object.entries(g0).map(([k, v]) => [k, Math.round(v)])) }].slice(-14);
   lb.at = now;
   await writeJSON(env, lbKey, lb);
   const top = Object.values(lb.c).sort((a, b) => b.vol - a.vol).slice(0, 10).map((c) => {
@@ -101,7 +105,16 @@ export async function runGreeks(env, deps, { force = false } = {}) {
     }
     return { low: Math.min(...ok), high: Math.max(...ok) };
   })() : null;
-  g.lb = { top, maxPain: best && best.S, maxPainZone: zone, at: hhmm(t.min), flow: lb.flow || null };
+  // tax list (VWAP winners): 100k+ volume and last well above the contract's own VWAP → the premium that needs shaking
+  const tax = top.filter((c) => c.vol >= 100000 && c.pnlPct >= 20);
+  // gamma nodes now, and the strike GAINING gamma over ~30 minutes while others lose it (the likely kill / pin)
+  const nowG = lb.gHist.at(-1).m, past = lb.gHist.find((h) => now - h.at >= 25 * 60000 && now - h.at <= 40 * 60000) || lb.gHist[0];
+  const nodes = Object.entries(nowG).map(([k, v]) => ({ strike: +k, g: v, d: past && past !== lb.gHist.at(-1) ? v - (past.m[k] || 0) : 0 }));
+  const pos = nodes.filter((x) => x.g > 0).sort((a, b) => b.g - a.g), neg = nodes.filter((x) => x.g < 0).sort((a, b) => a.g - b.g);
+  const growing = [...nodes].filter((x) => x.d > 0).sort((a, b) => b.d - a.d)[0] || null;
+  const gamma0 = { maxStrike: [...nodes].sort((a, b) => Math.abs(b.g) - Math.abs(a.g))[0]?.strike ?? null, growing: growing && growing.strike,
+    posNodes: pos.slice(0, 5).map((x) => x.strike), negNodes: neg.slice(0, 3).map((x) => x.strike), window: past ? Math.round((now - past.at) / 60000) : 0 };
+  g.lb = { top, maxPain: best && best.S, maxPainZone: zone, at: hhmm(t.min), flow: lb.flow || null, tax, gamma0 };
 
   g.date = t.date; g.et = hhmm(t.min);
   g.expiries = Object.keys(chain.callExpDateMap || {}).map((x) => x.split(":")[0]);

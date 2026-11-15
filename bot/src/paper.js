@@ -71,6 +71,8 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (t.min < 600 && cand.fam !== "orb" && cand.fam !== "ggo" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
   // PDF 16 check (replay): after 3:30 signals averaged −0.09R; only A/A+ cards held up (+0.13R, 49), the rest −0.17R (139)
   if (t.min >= 930 && cand.fam !== "star") return "end-of-day window (after 3:30): only A/A+ cards";
+  // Kill the Leaderboard risk rule: EOD trades come out of the day's profits only
+  if (t.min >= 930 && !(d.pnl > 0)) return "end of day: profits only (this book is not green today)";
   // event days (your plan's "Event:" line): no entries 15 min either side; a pre-market event = A+ only until 9:45
   const ev = events.find((e) => t.min >= e.min - 15 && t.min < e.min + 15);
   if (ev) return `${ev.name} at ${hhmm(ev.min)}: no entries 15 minutes either side`;
@@ -378,7 +380,13 @@ export async function runLearning(env, deps, { force = false, report = false, qu
       if (close) {
         const top = Object.values(lbDay.c).sort((a, b) => b.vol - a.vol).slice(0, 3)
           .map((c) => ({ k: c.k, t: c.t, vol: c.vol, itm: c.t === "C" ? close > c.k : close < c.k }));
-        hist.items.push({ date: t.date, close, top });
+        // Kill the Leaderboard plan vs the close: pin error, inside the walls, did the shaken name die
+        const plan = await readJSON(env, "eod:plan:" + t.date);
+        const eod = plan ? { ...plan, close, pinErr: plan.pin != null ? Math.round((close - plan.pin) * 100) / 100 : null,
+          insideWalls: plan.walls && plan.walls[0] && plan.walls[1] ? close >= plan.walls[0] && close <= plan.walls[1] : null,
+          killWorked: plan.killDir && plan.spx ? (plan.killDir === "bull" ? close > plan.spx : close < plan.spx) : null,
+          taxDied: (plan.tax || []).map((c) => ({ label: c.label, vol: c.vol, died: c.type === "C" ? close <= c.strike : close >= c.strike })) } : null;
+        hist.items.push({ date: t.date, close, top, eod });
         await writeJSON(env, "lb:hist", { items: hist.items.slice(-400) });
       }
     }

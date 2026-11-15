@@ -12,7 +12,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { et, OPEN, CLOSE, dayLevels, aggregate, intradayLevels, ribbon, phaseOsc, cloud2021, compressionBox, chop, vwapCrosses, divergence, dtrPct } from "../src/levels.js";
 import { patterns, atLevel } from "../src/patterns.js";
-import { resolveTracks } from "../src/signals.js";
+import { resolveTracks, tpLadder } from "../src/signals.js";
 import { famOf } from "../src/learn.js";
 import { LEVEL_NAMES } from "../src/plan.js";
 import { trendScore, pullback21, vomy, vomyRetest13, pbConfluence, orbBreak, levelRetest, pullback8, ggPullback, barAtr, atrSnap, checklist10 } from "../src/setups.js";
@@ -103,7 +103,8 @@ for (const date of days) {
     const add = (key, kind, track, extra = {}) => {
       if (fired.has(key)) return; fired.add(key);
       const trend = trendDir ? (trendDir === track.dir ? "with" : "against") : "none";
-      found.push({ key, kind, track: { ...track, at: nowMs }, et: et0, ctx: { chop: choppy, gex: null, vix: null, plan: "none", trend }, ...extra });
+      const tps = tpLadder(track.dir, track.entry, track.stop, track.target, [...keyLevels, ["high of day", intra.hod], ["low of day", intra.lod]], D.atr);
+      found.push({ key, kind, track: { ...track, at: nowMs }, et: et0, ctx: { chop: choppy, gex: null, vix: null, plan: "none", trend }, ...extra, tps });
     };
     // 21 EMA pullback and Vomy (src/setups.js, same as live)
     {
@@ -260,7 +261,25 @@ for (const date of days) {
     const slice = rthAll.filter((c) => c.datetime < end);
     const res = resolveTracks({ track: [{ ...f.track, sym: "$SPX" }] }, "$SPX", slice, end + 60 * 60000 + 1, { min: et(end).min })[0];
     if (!res || res.R == null) continue;
-    out.push({ conf: f.conf, o1: f.o1, o2: f.o2, date, sym: "$SPX", kind: f.kind, key: f.key, fam: famOf(f.key), grade: f.grade || null, score: f.score ?? null, et: f.et, dir: f.track.dir, ctx: f.ctx, R: res.R, outcome: res.outcome, replay: true });
+    // EXIT TEST: take-profit ladder (½ at TP1 + stop to entry, ¼ at TP2, ¼ runner to TP3 or the 60-min close) on the same bars
+    let ladR = null;
+    if (f.tps) {
+      const tr = f.track, bull = tr.dir === "bull", risk = Math.abs(tr.entry - tr.stop);
+      let ent = tr.needTrigger ? null : tr.at, h1 = false, h2 = false, got = 0, left = 1, stop = tr.stop, last = null;
+      for (const c of slice) {
+        if (c.datetime + 60000 <= tr.at) continue;
+        if (!ent) { if (c.datetime > tr.at + 9 * 60000) break; if (bull ? c.high >= tr.entry : c.low <= tr.entry) ent = c.datetime; else continue; }
+        last = c;
+        const adv = (v) => (bull ? c.low <= v : c.high >= v), fav = (v) => (bull ? c.high >= v : c.low <= v), r = (v) => ((bull ? 1 : -1) * (v - tr.entry)) / risk;
+        if (adv(stop)) { got += left * r(stop); left = 0; break; }
+        if (!h1 && fav(f.tps[0].price)) { h1 = true; got += 0.5 * r(f.tps[0].price); left -= 0.5; stop = tr.entry; }
+        if (h1 && !h2 && f.tps[1] && fav(f.tps[1].price)) { h2 = true; got += 0.25 * r(f.tps[1].price); left -= 0.25; }
+        if (h2 && f.tps[2] && fav(f.tps[2].price)) { got += left * r(f.tps[2].price); left = 0; break; }
+      }
+      if (ent && last && left > 0) got += left * (((bull ? 1 : -1) * (last.close - tr.entry)) / risk);
+      if (ent) ladR = Math.round(got * 100) / 100;
+    }
+    out.push({ conf: f.conf, o1: f.o1, o2: f.o2, date, ladR, sym: "$SPX", kind: f.kind, key: f.key, fam: famOf(f.key), grade: f.grade || null, score: f.score ?? null, et: f.et, dir: f.track.dir, ctx: f.ctx, R: res.R, outcome: res.outcome, replay: true });
   }
   process.stdout.write(`${date}: ${found.length} signals\n`);
 }

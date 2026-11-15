@@ -683,17 +683,67 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
               + `\nTrend-day check: ${TS ? `${TS.score}/${TS.max} ${TS.dir === "bull" ? "up" : "down"}${TS.bits.length ? " (" + TS.bits.join(", ") + ")" : ""}` : "—"}`,
           });
         }
-        // Highlander (3:45): the top leaderboard contracts usually die into the close unless they have 100k+ volume
-        if (GX && GX.lb && GX.lb.top && GX.lb.top.length && t.min >= 945 && t.min <= 952) {
-          const top = GX.lb.top.slice(0, 2);
-          found.push({
-            kind: "setup", sym, key: `highlander:${t.date}`, once: true, color: COLORS.star,
-            title: `🗡️ HIGHLANDER (3:45) · top of the LB: SPX ${top[0].label}`,
-            text: top.map((c) => `• **${c.label}** ${Math.round(c.vol / 1000)}k volume, ${c.itm ? "in" : "out of"} the money: `
-                + (c.vol >= 100000 ? "100k+ volume, these often finish in the money; don't fight it" : `under 100k, usually "killed" into the close → favor SPX finishing ${c.type === "C" ? "below" : "above"} ${c.strike}`)).join("\n")
-              + `\nMax pain zone ${GX.lb.maxPainZone ? `${GX.lb.maxPainZone.low}–${GX.lb.maxPainZone.high}` : "—"} · SPX ${r2(c0)}`
-              + `\n**How to trade it:** wait for a reversal at a key level (Phase Oscillator divergence, 1m/3m squeeze) in the direction that kills the top contract; ITM/ATM 0DTE; take profit at the next ATR level; watch for a last 1-2 minute reversal. The paper account closes everything at 3:59.`,
+        // ---- Kill the Leaderboard (your EOD framework + Saty's EOD cards): plan at 3:30, fakeout fade 3:30-3:45, real shake at 3:40 ----
+        const LB = GX && GX.lb;
+        if (LB && LB.top && t.min >= 930 && t.min < 959) {
+          const tax = LB.tax || [], G0 = LB.gamma0 || {};
+          // the kill: shake the biggest tax-list name (calls in profit → push down, puts in profit → push up); empty board → pin on the growing node
+          const victim = tax[0] || null;
+          const pin = G0.growing ?? LB.maxPain ?? G0.maxStrike ?? null;
+          const killDir = victim ? (victim.type === "C" ? "bear" : "bull") : pin != null ? (pin > c0 ? "bull" : "bear") : null;
+          const walls = [GX.putWall, GX.callWall];
+          const rangeTxt = walls[0] && walls[1] ? `${walls[0]}–${walls[1]} (${Math.round(walls[1] - walls[0])} pts)` : "—";
+          const riskTxt = "**Risk:** profits only (skip EOD if the day is red) · size for zero (premium = max loss, no stop) · limit orders only · targets set in advance: ½ off at +100% (or ⅔ at +50%), ¼ at +200%, runner for the cash-settle.";
+          if (t.min < 937) found.push({
+            kind: "setup", sym, key: `eodplan:${t.date}`, once: true, color: COLORS.star,
+            title: `🎯 EOD PLAN · Kill the Leaderboard · SPX ${r2(c0)}`,
+            text: (tax.length ? `**Board populated** (100k+ volume, last well above its VWAP): ${tax.slice(0, 3).map((c) => `${c.label} ${Math.round(c.vol / 1000)}k, +${c.pnlPct}% vs VWAP`).join(" · ")}.
+The kill: shake ${victim.label} holders → favor SPX ${killDir === "bear" ? "down" : "up"}.`
+                : `**Board empty** (no 100k+ winners above VWAP): no shake to plan. Expect a pin on the gamma node that is growing${pin != null ? `: **${pin}**` : ""}.`)
+              + `
+**Walls / range:** ${rangeTxt}. Don't plan beyond the walls.`
+              + `
+**Likely pin:** ${pin ?? "—"}${G0.growing != null ? ` (gaining gamma over the last ${G0.window} min)` : ""} · max pain ${LB.maxPain ?? "—"} · max-gamma strike ${G0.maxStrike ?? "—"}${GX.eye ? ` · Eye of Sauron ${GX.eye.strike} (magnet, then violent repel)` : ""}`
+              + `
+**Fakeout watch (~3:30-3:45):** a run ${killDir === "bear" ? "UP" : "DOWN"} into a positive-gamma node (${(G0.posNodes || []).slice(0, 3).join(", ") || "—"}) or key level is likely the fakeout: fade it. A push through a negative node (${(G0.negNodes || []).join(", ") || "—"}) that gets reclaimed is the fakeout too.`
+              + `
+${riskTxt}`,
           });
+          // fakeout fade: price ran AGAINST the kill into a positive-gamma node / key level and the 1m candle is rejecting it
+          if (killDir && t.min < 945) {
+            const lvls = [...(G0.posNodes || []).map((k) => ["positive-gamma node " + k, k]), ...keyLevels.filter(([, v]) => v != null)];
+            const b = rth[rth.length - 1], pb = rth[rth.length - 2];
+            const hit = b && lvls.find(([, v]) => (killDir === "bear" ? b.high >= v && b.close < v && pb && pb.close < v : b.low <= v && b.close > v && pb && pb.close > v) && Math.abs(v - c0) <= D.atr * 0.08);
+            const ranAgainst = rth.length > 30 && (killDir === "bear" ? c0 > rth[rth.findIndex((x) => x.t.min >= 930)]?.close : c0 < rth[rth.findIndex((x) => x.t.min >= 930)]?.close);
+            if (hit && ranAgainst) {
+              const up = killDir === "bull", lvl = hit[1];
+              found.push({
+                kind: "setup", sym, key: `eodfade:${t.date}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+                track: { dir: killDir, entry: r2(c0), stop: r2(up ? b.low - D.atr * 0.03 : b.high + D.atr * 0.03), target: pin != null && (up ? pin > c0 : pin < c0) ? pin : null, needTrigger: false },
+                noTradeWhy: "EOD framework is new: logged and measured before the paper account trades it",
+                title: `🔁 EOD FAKEOUT FADE ${up ? "CALLS ▲" : "PUTS ▼"} · SPX rejected ${hit[0]} ${r2(lvl)}`,
+                text: `Into the close SPX ran the opposite way of the likely kill and is rejecting ${hit[0]} ${r2(lvl)}: the early fakeout. Fade it toward the pin ${pin ?? "—"}. ITM/ATM 0DTE${idea(list, killDir, 0.6) ? ` e.g. ${idea(list, killDir, 0.6)}` : ""}.
+${riskTxt}`,
+              });
+            }
+          }
+          // the real shake (final 20 minutes): pin, path to it, ATM/ITM contract
+          if (t.min >= 940 && t.min <= 947 && pin != null) {
+            const toPin = pin > c0 ? "bull" : "bear";
+            found.push({
+              kind: "setup", sym, key: `eodshake:${t.date}`, once: true, color: COLORS.star,
+              title: `🗡️ FINAL 20 · the real shake · pin ${pin} · SPX ${r2(c0)}`,
+              text: `Gamma is shifting; the pin usually solidifies in the last 10 minutes. Likely pin **${pin}**${G0.growing != null ? " (strike gaining gamma)" : ""}, ${Math.abs(Math.round(pin - c0))} pts ${toPin === "bull" ? "above" : "below"}.`
+                + `
+${tax.length ? `Top contracts: ${LB.top.slice(0, 3).map((c) => `${c.label} ${Math.round(c.vol / 1000)}k${c.vol >= 100000 ? " (100k+: often finishes ITM)" : " (under 100k: usually killed)"}`).join(" · ")}` : "Board empty: trade the path to the pin."}`
+                + `
+**How:** hold the fade, or trade the path to the pin with ATM/ITM${idea(list, toPin, 0.6) ? ` (e.g. ${idea(list, toPin, 0.6)})` : ""}: extrinsic value burns fast, ITM can cash-settle. Watch for a reversal in the last 1-2 minutes.`
+                + `
+${riskTxt}`,
+            });
+          }
+          // remember the plan; the 4:10 run scores it against the close (pin error, did the tax list die)
+          if (!dry && t.min >= 940 && !st.eodSaved) { st.eodSaved = true; await writeJSON(env, "eod:plan:" + t.date, { at: hhmm(t.min), spx: r2(c0), killDir, victim: victim && victim.label, tax: tax.map((c) => ({ label: c.label, strike: c.strike, type: c.type, vol: c.vol })), pin, maxPain: LB.maxPain, growing: G0.growing ?? null, walls }); }
         }
       }
 
