@@ -768,16 +768,34 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           const pin = G0.growing ?? LB.maxPain ?? G0.maxStrike ?? null;
           const killDir = victim ? (victim.type === "C" ? "bear" : "bull") : pin != null ? (pin > c0 ? "bull" : "bear") : null;
           const walls = [GX.putWall, GX.callWall];
+          // GEX REGIME (dealer gamma): above the flip dealers are long gamma and DAMPEN moves (pins hold, fades work);
+          // below it they are short gamma and AMPLIFY moves (pins break, the day's move runs toward the wall).
+          // Last half hour rule (Baltussen et al.; GEX-scalping-tradingbot): -GEX follow the move since the open, +GEX fade it.
+          const regime = GX.flip != null ? (c0 >= GX.flip ? "+" : "-") : GX.totals && GX.totals.gex != null ? (GX.totals.gex >= 0 ? "+" : "-") : null;
+          const nearFlip = GX.flip != null && Math.abs(c0 - GX.flip) <= D.atr * 0.05;
+          const open0 = rth[0] && rth[0].open, dayMv = open0 ? c0 - open0 : 0;
+          const flatDay = !open0 || Math.abs(dayMv) < c0 * 0.001;
+          const gexDir = regime && !flatDay && !nearFlip ? (regime === "-" ? (dayMv > 0 ? "bull" : "bear") : (dayMv > 0 ? "bear" : "bull")) : null;
+          const gexAgree = gexDir && killDir ? gexDir === killDir : null;
+          const wallTo = (d) => (d === "bull" ? GX.callWall : GX.putWall);
+          const gexTxt = regime == null ? "**GEX regime:** —"
+            : `**GEX regime: ${regime === "+" ? "POSITIVE" : "NEGATIVE"}** (SPX ${r2(c0)} ${regime === "+" ? "above" : "below"} the flip ${GX.flip ?? "—"}): dealers ${regime === "+" ? "dampen moves → pins hold, fade the day" : "amplify moves → pins break, follow the day toward the wall"}.`
+              + (nearFlip ? " ⚠ Right at the flip: regime unclear, small size." : flatDay ? " Flat day: no follow/fade call." : `
+Day ${dayMv > 0 ? "+" : ""}${r2(dayMv)} pts since the open → GEX says **${gexDir === "bull" ? "CALLS" : "PUTS"}**${gexAgree === true ? " ✅ agrees with the kill" : gexAgree === false ? " ⚠ disagrees with the kill: smaller size or skip" : ""}.`);
           const rangeTxt = walls[0] && walls[1] ? `${walls[0]}–${walls[1]} (${Math.round(walls[1] - walls[0])} pts)` : "—";
           const riskTxt = "**Risk:** profits only (skip EOD if the day is red) · size for zero (premium = max loss, no stop) · limit orders only · targets set in advance: ½ off at +100% (or ⅔ at +50%), ¼ at +200%, runner for the cash-settle.";
           if (t.min < 937) found.push({
             kind: "setup", sym, key: `eodplan:${t.date}`, once: true, color: COLORS.star,
+            // scored (not paper traded): the GEX follow/fade call from 3:30 to the close
+            ...(gexDir ? { track: { dir: gexDir, entry: r2(c0), stop: r2(gexDir === "bull" ? c0 - D.atr * 0.1 : c0 + D.atr * 0.1), target: wallTo(gexDir) ?? null, needTrigger: false },
+              noTradeWhy: "EOD GEX regime call: measured before the paper account trades it" } : {}),
             title: `🎯 EOD PLAN · Kill the Leaderboard · SPX ${r2(c0)}`,
             text: (tax.length ? `**Board populated** (100k+ volume, last well above its VWAP): ${tax.slice(0, 3).map((c) => `${c.label} ${Math.round(c.vol / 1000)}k, +${c.pnlPct}% vs VWAP`).join(" · ")}.
 The kill: shake ${victim.label} holders → favor SPX ${killDir === "bear" ? "down" : "up"}.`
                 : `**Board empty** (no 100k+ winners above VWAP): no shake to plan. Expect a pin on the gamma node that is growing${pin != null ? `: **${pin}**` : ""}.`)
               + `
-**Walls / range:** ${rangeTxt}. Don't plan beyond the walls.`
+${gexTxt}
+**Walls / range:** ${rangeTxt}. ${regime === "-" ? "Short gamma: a break toward a wall can run to it." : "Don't plan beyond the walls."}`
               + `
 **Likely pin:** ${pin ?? "—"}${G0.growing != null ? ` (gaining gamma over the last ${G0.window} min)` : ""} · max pain ${LB.maxPain ?? "—"} · max-gamma strike ${G0.maxStrike ?? "—"}${GX.eye ? ` · Eye of Sauron ${GX.eye.strike} (magnet, then violent repel)` : ""}`
               + `
@@ -786,7 +804,7 @@ The kill: shake ${victim.label} holders → favor SPX ${killDir === "bear" ? "do
 ${riskTxt}`,
           });
           // fakeout fade: price ran AGAINST the kill into a positive-gamma node / key level and the 1m candle is rejecting it
-          if (killDir && t.min < 945) {
+          if (killDir && t.min < 945 && regime !== "-") {   // fades need dealers dampening moves: skipped in negative GEX
             const lvls = [...(G0.posNodes || []).map((k) => ["positive-gamma node " + k, k]), ...keyLevels.filter(([, v]) => v != null)];
             const b = rth[rth.length - 1], pb = rth[rth.length - 2];
             const hit = b && lvls.find(([, v, z]) => { const tz = Math.max(z || 0, D.atr * 0.03); return (killDir === "bear" ? b.high >= v - tz && b.close < v && pb && pb.close < v : b.low <= v + tz && b.close > v && pb && pb.close > v) && Math.abs(v - c0) <= D.atr * 0.08 + tz; });
@@ -798,18 +816,23 @@ ${riskTxt}`,
                 track: { dir: killDir, entry: r2(c0), stop: r2(up ? b.low - D.atr * 0.03 : b.high + D.atr * 0.03), target: pin != null && (up ? pin > c0 : pin < c0) ? pin : null, needTrigger: false },
                 noTradeWhy: "EOD framework is new: logged and measured before the paper account trades it",
                 title: `🔁 EOD FAKEOUT FADE ${up ? "CALLS ▲" : "PUTS ▼"} · SPX rejected ${hit[0]} ${r2(lvl)}`,
-                text: `Into the close SPX ran the opposite way of the likely kill and is rejecting ${hit[0]} ${r2(lvl)}: the early fakeout. Fade it toward the pin ${pin ?? "—"}. ITM/ATM 0DTE${idea(list, killDir, 0.6) ? ` e.g. ${idea(list, killDir, 0.6)}` : ""}.
+                text: `Into the close SPX ran the opposite way of the likely kill and is rejecting ${hit[0]} ${r2(lvl)}: the early fakeout. Fade it toward the pin ${pin ?? "—"}.${regime === "+" ? " Positive GEX: dealers sell rips / buy dips, fades usually hold." : ""}${gexAgree === false ? " ⚠ GEX follow/fade call points the other way." : ""} ITM/ATM 0DTE${idea(list, killDir, 0.6) ? ` e.g. ${idea(list, killDir, 0.6)}` : ""}.
 ${riskTxt}`,
               });
             }
           }
           // the real shake (final 20 minutes): pin, path to it, ATM/ITM contract
           if (t.min >= 940 && t.min <= 947 && pin != null) {
-            const toPin = pin > c0 ? "bull" : "bear";
+            const toPin = regime === "-" && gexDir ? gexDir : pin > c0 ? "bull" : "bear";
+            const shakeTgt = regime === "-" && gexDir ? wallTo(gexDir) ?? null : pin;
             found.push({
               kind: "setup", sym, key: `eodshake:${t.date}`, once: true, color: COLORS.star,
+              track: { dir: toPin, entry: r2(c0), stop: r2(toPin === "bull" ? c0 - D.atr * 0.1 : c0 + D.atr * 0.1), target: shakeTgt != null && (toPin === "bull" ? shakeTgt > c0 : shakeTgt < c0) ? shakeTgt : null, needTrigger: false },
+              noTradeWhy: "EOD framework is new: logged and measured before the paper account trades it",
               title: `🗡️ FINAL 20 · the real shake · pin ${pin} · SPX ${r2(c0)}`,
-              text: `Gamma is shifting; the pin usually solidifies in the last 10 minutes. Likely pin **${pin}**${G0.growing != null ? " (strike gaining gamma)" : ""}, ${Math.abs(Math.round(pin - c0))} pts ${toPin === "bull" ? "above" : "below"}.`
+              text: (regime === "-" && gexDir
+                ? `**Negative GEX:** dealers amplify, so pins tend to break. Follow the day ${gexDir === "bull" ? "UP" : "DOWN"} toward the ${gexDir === "bull" ? "call" : "put"} wall ${shakeTgt ?? "—"} rather than fading to the pin ${pin}.`
+                : `Gamma is shifting; the pin usually solidifies in the last 10 minutes. Likely pin **${pin}**${G0.growing != null ? " (strike gaining gamma)" : ""}, ${Math.abs(Math.round(pin - c0))} pts ${toPin === "bull" ? "above" : "below"}.${regime === "+" ? " Positive GEX: pins hold." : ""}`)
                 + `
 ${tax.length ? `Top contracts: ${LB.top.slice(0, 3).map((c) => `${c.label} ${Math.round(c.vol / 1000)}k${c.vol >= 100000 ? " (100k+: often finishes ITM)" : " (under 100k: usually killed)"}`).join(" · ")}` : "Board empty: trade the path to the pin."}`
                 + `
@@ -819,7 +842,7 @@ ${riskTxt}`,
             });
           }
           // remember the plan; the 4:10 run scores it against the close (pin error, did the tax list die)
-          if (!dry && t.min >= 940 && !st.eodSaved) { st.eodSaved = true; await writeJSON(env, "eod:plan:" + t.date, { at: hhmm(t.min), spx: r2(c0), killDir, victim: victim && victim.label, tax: tax.map((c) => ({ label: c.label, strike: c.strike, type: c.type, vol: c.vol })), pin, maxPain: LB.maxPain, growing: G0.growing ?? null, walls }); }
+          if (!dry && t.min >= 940 && !st.eodSaved) { st.eodSaved = true; await writeJSON(env, "eod:plan:" + t.date, { at: hhmm(t.min), spx: r2(c0), killDir, victim: victim && victim.label, tax: tax.map((c) => ({ label: c.label, strike: c.strike, type: c.type, vol: c.vol })), pin, maxPain: LB.maxPain, growing: G0.growing ?? null, walls, regime, flip: GX.flip ?? null, dayMv: r2(dayMv), gexDir, gexAgree }); }
         }
       }
 

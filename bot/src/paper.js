@@ -392,6 +392,7 @@ export async function runLearning(env, deps, { force = false, report = false, qu
         const eod = plan ? { ...plan, close, pinErr: plan.pin != null ? Math.round((close - plan.pin) * 100) / 100 : null,
           insideWalls: plan.walls && plan.walls[0] && plan.walls[1] ? close >= plan.walls[0] && close <= plan.walls[1] : null,
           killWorked: plan.killDir && plan.spx ? (plan.killDir === "bull" ? close > plan.spx : close < plan.spx) : null,
+          gexWorked: plan.gexDir && plan.spx ? (plan.gexDir === "bull" ? close > plan.spx : close < plan.spx) : null,
           taxDied: (plan.tax || []).map((c) => ({ label: c.label, vol: c.vol, died: c.type === "C" ? close <= c.strike : close >= c.strike })) } : null;
         hist.items.push({ date: t.date, close, top, eod });
         await writeJSON(env, "lb:hist", { items: hist.items.slice(-400) });
