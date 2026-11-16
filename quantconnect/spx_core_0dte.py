@@ -23,6 +23,7 @@ import random
 # Phase split: 10m Saty Phase Oscillator zone at entry, read from the trade's side (squeeze / launch / with / late / extended / against / reversal).
 # NULL control: every real signal also gets a coin-flip-direction twin (same moment, same exits, mirrored stop/target).
 #   The real setups only have an edge if they beat their own null.
+# Daily phase split (Saty Time Warp): the DAILY Phase Oscillator zone through yesterday, read from the trade's side.
 # Daily 20 EMA split: trade with / against yesterday's SPX close vs its daily 20 EMA.
 # Mag 7 split: AAPL MSFT NVDA AMZN GOOGL META TSLA vs today's open at entry: with (5+ of 7 the trade's way) / mixed / against.
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
@@ -261,7 +262,7 @@ class SpxCore0DTE(QCAlgorithm):
         self.m7open, self.m7last = {}, {}
         self.s1, self.s3, self.s10 = BarSeries([8, 21, 48]), BarSeries([8, 13, 21, 48]), BarSeries([8, 21, 34, 50])
         self.a3, self.a10 = Agg(3, self.s3), Agg(10, self.s10)
-        self.day, self.lv, self.A, self.d20 = None, None, None, None
+        self.day, self.lv, self.A, self.d20, self.dser = None, None, None, None, BarSeries([21])
         self.trades, self.flips, self.nulls, self.open, self.no_chain, self.unclosed = [], [], [], [], 0, 0
         self.rng = random.Random(11)       # coin-flip control (fixed seed = repeatable)
         # warm the EMAs with the 10 days before the start
@@ -289,6 +290,9 @@ class SpxCore0DTE(QCAlgorithm):
         for r in rows:
             e20 = ema_next(e20, r["c"], 20)
         self.d20 = "bull" if pdc > e20 else "bear"
+        self.dser = BarSeries([21])        # daily bars through yesterday, for the daily Phase Oscillator (Saty "Time Warp")
+        for r in rows:
+            self.dser.add(r)
         self.A, self.lv = A, {}
         for f in FIBS:
             self.lv["+%s" % f] = r2(pdc + A * f)
@@ -414,7 +418,7 @@ class SpxCore0DTE(QCAlgorithm):
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "d20": "with" if self.d20 == d else "against", "tp": {}, "flip": flip_of is not None}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "phaseD": phase_zone(self.dser, d), "mag7": self.mag7_side(d), "d20": "with" if self.d20 == d else "against", "tp": {}, "flip": flip_of is not None}
         tr["null"] = null
         if flip_of is not None:
             tr["paper"] = flip_of["paper"]
@@ -515,6 +519,8 @@ class SpxCore0DTE(QCAlgorithm):
             out.append("DAILY20 %-7s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("d20") == z]), stats(tpv([t for t in core if t.get("d20") == z], 0.20))))
         for z in ("with", "mixed", "against"):
             out.append("MAG7 %-7s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("mag7") == z]), stats(tpv([t for t in core if t.get("mag7") == z], 0.20))))
+        for z in ("squeeze", "launch", "with", "late", "extended", "against", "reversal"):
+            out.append("DAILY PHASE %-8s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("phaseD") == z]), stats(tpv([t for t in core if t.get("phaseD") == z], 0.20))))
         for z in ("squeeze", "launch", "with", "late", "extended", "against", "reversal"):
             out.append("PHASE %-8s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("phase") == z]), stats(tpv([t for t in core if t.get("phase") == z], 0.20))))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):

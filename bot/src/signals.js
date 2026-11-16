@@ -285,7 +285,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const q = quotes[sym] && quotes[sym].quote;
       if (!q) continue;
       const price = q.lastPrice;
-      if (!st.daily[sym] || st.daily[sym].ema21w === undefined) {
+      if (!st.daily[sym] || st.daily[sym].ema21w === undefined || st.daily[sym].oscD === undefined) {
         const d = await history(token, { symbol: sym, periodType: "year", period: "3", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
         const dl = dayLevels(d, t.date);
         const mo = await history(token, { symbol: sym, periodType: "year", period: "10", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
@@ -304,6 +304,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             const cur = t.date.slice(0, 4) + "Q" + (Math.floor((+t.date.slice(5, 7) - 1) / 3) + 1);
             return modeLevels(qs.filter((x) => x.q < cur));
           })(),
+          // Saty "Time Warp": the DAILY Phase Oscillator (through yesterday) as the bigger-picture momentum for intraday trades
+          oscD: (() => { const o = phaseOsc(d.filter((c) => dailyDate(c) < t.date)); return o ? { value: o.value, compression: o.compression, zone: o.zone } : null; })(),
           ema200d: (() => { const cl = d.filter((c) => dailyDate(c) < t.date).map((c) => c.close); return cl.length > 200 ? Math.round(ema(cl, 200).at(-1) * 100) / 100 : null; })(),
           ema21w: (() => { const wk = []; for (const c of d.filter((c) => dailyDate(c) < t.date)) { const dt = new Date(Date.parse(dailyDate(c))), mon = new Date(dt); mon.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); const k = mon.toISOString().slice(0, 10), x = wk.at(-1); if (!x || x.k !== k) wk.push({ k, close: c.close }); else x.close = c.close; } return wk.length > 21 ? Math.round(ema(wk.map((x) => x.close), 21).at(-1) * 100) / 100 : null; })(),
         };
@@ -1073,6 +1075,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
         phase: f.track ? phaseCtx(osc10, f.track.dir) : null,
+        phaseD: f.track && st.daily[sym] ? phaseCtx(st.daily[sym].oscD, f.track.dir) : null,   // daily Phase Oscillator zone (Time Warp)
         mag7: f.track && (sym === "$SPX" || sym === "SPY") ? mag7Side(f.track.dir) : null,   // Mag 7 breadth with / against the trade   // 10m Phase Oscillator zone from the trade's side
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
         trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",
