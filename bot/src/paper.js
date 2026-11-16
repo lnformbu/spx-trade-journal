@@ -89,9 +89,10 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (cfg.window === "morning" && t.min >= 690) return "this style trades mornings only";
   if (cfg.window !== "all" && t.min >= 690 && t.min < 810 && !(cand.fam === "star" && (cand.grade === "A+" || cand.score >= 90))) return "midday 11:30-1:30: A-grade (90+) only";
   if (d.done) return d.done;
-  if (d.pnl <= -0.15 * sb) return (d.done = "daily loss limit (−15%) reached");
-  if (d.pnl >= 0.15 * sb) return (d.done = "daily target (+15%) reached");
-  if (d.best >= 0.10 * sb && d.pnl < d.best / 2) return (d.done = "profit lock: gave back half of the day's best");
+  const dp = d.pnl - (d.base || 0), best = Math.max(0, (d.best || 0) - (d.base || 0));   // P/L since today's budget (re)start
+  if (dp <= -0.15 * sb) return (d.done = "daily loss limit (−15%) reached");
+  if (dp >= 0.15 * sb) return (d.done = "daily target (+15%) reached");
+  if (best >= 0.10 * sb && dp < best / 2) return (d.done = "profit lock: gave back half of the day's best");
   if (d.trades >= 10) return "10 trades today";
   if (d.consecLoss >= 3) return (d.done = "3 losses in a row");
   if (now - d.lastLossAt < 15 * 60000) return "15-minute cooldown after a loss";
@@ -163,7 +164,7 @@ async function stepBook(b, cfg, X) {
     const share = (cfg.sizing === "edge" && (p.est == null || p.est < 0.2) ? 0.25 : 0.5) / MAX_OPEN;
     let qty = Math.floor((share * b.balance) / cost1);
     if (qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
-    qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl + 0.15 * b.day.startBal - openRisk()) / riskPer));
+    qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl - (b.day.base || 0) + 0.15 * b.day.startBal - openRisk()) / riskPer));
     if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the 15% limit left today (open positions included)"); return false; }
     qty = Math.min(qty, MAX_QTY);
     const pos = {
@@ -301,6 +302,14 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   // a challenger template added after this generation started gets its own fresh book
   for (const tp of TEMPLATES) if (!ch.books[tp.id]) { const cfg = tp.apply({ ...champ, params: { ...champ.params } }); ch.books[tp.id] = { cfg: { ...cfg, id: tp.id, name: tp.name, traits: [...(champ.traits || []), tp.name] }, book: newBook() }; }
   acct.shadow = acct.shadow || [];
+  // one-time "reset today's loss budget" (admin /paper/reset-day): start the day's 15% budget again from the current balance
+  const rs = await readJSON(env, "paper:reset");
+  if (rs && rs.date === t.date && !rs.done && acct.day && acct.day.date === t.date) {
+    const d = acct.day;
+    d.base = d.pnl; d.best = d.pnl; d.startBal = acct.balance; d.consecLoss = 0; d.lastLossAt = 0; d.done = null; d.stopOuts = [];
+    log(acct, t, "reset", "Daily loss budget", `restarted from ${usd(acct.balance)} (earlier loss ${usd(d.pnl)} came from the old sizing)`);
+    await writeJSON(env, "paper:reset", { ...rs, done: true, at: now });
+  }
   const token = await schwabToken(env);
 
   // one quote call for every book's open contract, the tickers, waiting contracts and the champion's after-exit shadows

@@ -424,6 +424,7 @@ export default {
     if (url.pathname === "/announce" && req.method === "POST") { const b = await req.json(); const r = await post(env, { title: String(b.title || "📚 Learning update").slice(0, 250), description: String(b.text || "").slice(0, 3900), color: 0x8b5cf6, footer: { text: "bot learning update" } }); return json({ ok: r.ok }); }
     if (url.pathname === "/swing") return json(url.searchParams.get("run") ? await runSwing(env, deps, { t: et(Date.now()) }) : await readJSON(env, "swing:book"));
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
+    if (url.pathname === "/paper/reset-day") { await writeJSON(env, "paper:reset", { date: et(Date.now()).date, done: false }); return json({ ok: true, note: "applied on the next paper run (within a minute)" }); }
     if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));
     // data pool as CSV: board (5-min greeks/gamma/flow rows), lb (top-10 0DTE contracts per 5 min), eod (daily close vs the
