@@ -75,8 +75,9 @@ export function exposures(chain, spot, nowMs) {
     }
     prev = { S, g };
   }
-  const callWall = strikes.reduce((b, r) => (!b || r.gex > b.gex ? r : b), null);
-  const putWall = strikes.reduce((b, r) => (!b || r.gex < b.gex ? r : b), null);
+  // call wall = biggest positive GEX strike ABOVE spot, put wall = most negative BELOW spot (a wall on the wrong side of price isn't one)
+  const callWall = strikes.filter((r) => r.strike >= spot && r.gex > 0).reduce((b, r) => (!b || r.gex > b.gex ? r : b), null);
+  const putWall = strikes.filter((r) => r.strike <= spot && r.gex < 0).reduce((b, r) => (!b || r.gex < b.gex ? r : b), null);
   const round = (x) => Math.round(x);
   return {
     at: nowMs, spot,
