@@ -83,7 +83,7 @@ def wilder_atr(bars, n=14):
     return a
 
 
-class Series:
+class BarSeries:
     """Bars of one timeframe (regular hours, continuous across days) with running EMAs."""
     def __init__(self, lengths, keep=2500):
         self.lengths, self.keep = lengths, keep
@@ -259,9 +259,9 @@ class SpxCore0DTE(QCAlgorithm):
         self.spxw = opt.symbol
         self.m7 = [self.add_equity(t, Resolution.MINUTE).symbol for t in MAG7]
         self.m7open, self.m7last = {}, {}
-        self.s1, self.s3, self.s10 = Series([8, 21, 48]), Series([8, 13, 21, 48]), Series([8, 21, 34, 50])
+        self.s1, self.s3, self.s10 = BarSeries([8, 21, 48]), BarSeries([8, 13, 21, 48]), BarSeries([8, 21, 34, 50])
         self.a3, self.a10 = Agg(3, self.s3), Agg(10, self.s10)
-        self.day, self.lv, self.A = None, None, None
+        self.day, self.lv, self.A, self.d20 = None, None, None, None
         self.trades, self.flips, self.nulls, self.open, self.no_chain, self.unclosed = [], [], [], [], 0, 0
         self.rng = random.Random(11)       # coin-flip control (fixed seed = repeatable)
         # warm the EMAs with the 10 days before the start
@@ -412,7 +412,7 @@ class SpxCore0DTE(QCAlgorithm):
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "d20": "with" if getattr(self, "d20", None) == d else "against", "tp": {}, "flip": flip_of is not None}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "d20": "with" if self.d20 == d else "against", "tp": {}, "flip": flip_of is not None}
         tr["null"] = null
         if flip_of is not None:
             tr["paper"] = flip_of["paper"]
