@@ -20,11 +20,13 @@ import math
 # Flip test: when SPX hits a signal's stop (failed move / fakeout), buy the other side ATM; stop = back through the
 #   original entry, target = 1R beyond the original stop, 30-minute limit. Scored with and without TP+20%.
 # Phase split: 10m Saty Phase Oscillator zone at entry, read from the trade's side (squeeze / launch / with / late / extended / against / reversal).
+# Mag 7 split: AAPL MSFT NVDA AMZN GOOGL META TSLA vs today's open at entry: with (5+ of 7 the trade's way) / mixed / against.
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
 START = (2016, 1, 1)
 END = (2026, 11, 13)
 FIBS = [0.236, 0.382, 0.618, 1.0]
+MAG7 = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
 TPS = [0.10, 0.20, 0.30, 0.50]     # take-profit levels tested on the option price (sell at the bid once it reaches entry x 1.2 etc.)
 
 
@@ -251,6 +253,8 @@ class SpxCore0DTE(QCAlgorithm):
         opt = self.add_index_option(self.spx, "SPXW", Resolution.MINUTE)
         opt.set_filter(lambda u: u.include_weeklys().strikes(-30, 30).expiration(0, 0))
         self.spxw = opt.symbol
+        self.m7 = [self.add_equity(t, Resolution.MINUTE).symbol for t in MAG7]
+        self.m7open, self.m7last = {}, {}
         self.s1, self.s3, self.s10 = Series([8, 21, 48]), Series([8, 13, 21, 48]), Series([8, 21, 34, 50])
         self.a3, self.a10 = Agg(3, self.s3), Agg(10, self.s10)
         self.day, self.lv, self.A = None, None, None
@@ -267,6 +271,7 @@ class SpxCore0DTE(QCAlgorithm):
             self.unclosed += len(self.open)
             self.open = []
         self.day, self.today, self.fired, self.gg_arm, self.bo_until = d, [], set(), {}, -1
+        self.m7open, self.m7last = {}, {}
         rows = [{"h": float(x.high), "l": float(x.low), "c": float(x.close)}
                 for x in self.history[TradeBar](self.spx, 300, Resolution.DAILY) if x.time.date() < d]
         if len(rows) < 30:
@@ -290,6 +295,11 @@ class SpxCore0DTE(QCAlgorithm):
             self.new_day(d)
         b = {"d": d, "m": m, "o": float(x.open), "h": float(x.high), "l": float(x.low), "c": float(x.close)}
         self.s1.add(b); self.today.append(b)
+        for sym in self.m7:                # Mag 7: today's open and latest price
+            if sym in data.bars:
+                eb = data.bars[sym]
+                self.m7open.setdefault(sym, float(eb.open))
+                self.m7last[sym] = float(eb.close)
         done3, done10 = self.a3.push(b), self.a10.push(b)
         if self.lv is None:
             return
@@ -393,10 +403,19 @@ class SpxCore0DTE(QCAlgorithm):
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "tp": {}, "flip": flip_of is not None}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "tp": {}, "flip": flip_of is not None}
         if flip_of is not None:
             tr["paper"] = flip_of["paper"]
         self.open.append(tr)
+
+    def mag7_side(self, d):
+        """'with' = 5+ of the Mag 7 above (calls) / below (puts) today's open, 'against' = 5+ the other way, else 'mixed'."""
+        ks = [k for k in self.m7last if self.m7open.get(k)]
+        if len(ks) < 5:
+            return None
+        up = sum(1 for k in ks if self.m7last[k] > self.m7open[k])
+        mine = up if d == "bull" else len(ks) - up
+        return "with" if mine >= 5 else "against" if len(ks) - mine >= 5 else "mixed"
 
     def manage(self, b, now_m, data):
         for tr in list(self.open):
@@ -467,6 +486,8 @@ class SpxCore0DTE(QCAlgorithm):
         for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
             out.append("FLIP %s %s | TP+20%% %s" % (fam, stats([t for t in self.flips if t["fam"] == fam]), stats(tpv([t for t in self.flips if t["fam"] == fam], 0.20))))
         out.append("CORE + FLIPS, both TP+20%% %s" % stats(tpv(core, 0.20) + tpv(fcore, 0.20)))
+        for z in ("with", "mixed", "against"):
+            out.append("MAG7 %-7s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("mag7") == z]), stats(tpv([t for t in core if t.get("mag7") == z], 0.20))))
         for z in ("squeeze", "launch", "with", "late", "extended", "against", "reversal"):
             out.append("PHASE %-8s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("phase") == z]), stats(tpv([t for t in core if t.get("phase") == z], 0.20))))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):

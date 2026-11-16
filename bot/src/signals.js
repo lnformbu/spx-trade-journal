@@ -198,6 +198,7 @@ export function resolveTracks(st, sym, rth, now, t) {
   return out;
 }
 
+export const MAG7 = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"];
 export async function runSignals(env, deps, { force = false, dry = false, half = null } = {}) {
   const { schwabToken, schwab, history, readJSON, writeJSON, plansByTicker } = deps;
   const now = Date.now();
@@ -211,7 +212,18 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   // half the tickers per run (Cloudflare's free plan allows 50 data calls per run)
   const group = TICKERS.filter((_, i) => i % 2 === (half ?? minuteNo % 2));
   const token = await schwabToken(env);
-  const quotes = await schwab(token, "/marketdata/v1/quotes?fields=quote&symbols=" + [...new Set([...group, "SPY", "$SPX"])].map(encodeURIComponent).join(","));
+  const quotes = await schwab(token, "/marketdata/v1/quotes?fields=quote&symbols=" + [...new Set([...group, "SPY", "$SPX", ...MAG7])].map(encodeURIComponent).join(","));
+  // Mag 7 breadth (about a third of the S&P 500): how many are above today's open, and their average % move since the open
+  const m7 = MAG7.map((s) => quotes[s] && quotes[s].quote).filter((q) => q && q.openPrice > 0 && q.lastPrice > 0);
+  st.mag7 = m7.length >= 5 ? { up: m7.filter((q) => q.lastPrice > q.openPrice).length, n: m7.length,
+    avg: r2((m7.reduce((s, q) => s + q.lastPrice / q.openPrice - 1, 0) / m7.length) * 100), at: now } : st.mag7;
+  // a trade's side vs the Mag 7: "with" = 5+ of 7 moving its way, "against" = 5+ the other way, else "mixed"
+  const mag7Side = (dir) => {
+    const M = st.mag7;
+    if (!M || now - M.at > 5 * 60000 || !dir) return null;
+    const mine = dir === "bull" ? M.up : M.n - M.up;
+    return mine >= 5 ? "with" : M.n - mine >= 5 ? "against" : "mixed";
+  };
   const ratio = quotes.SPY && quotes.$SPX ? quotes.$SPX.quote.lastPrice / quotes.SPY.quote.lastPrice : null;
 
   // today's plans from the plan channel (+ a plan pasted in the journal)
@@ -1060,7 +1072,8 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       }
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
-        phase: f.track ? phaseCtx(osc10, f.track.dir) : null,   // 10m Phase Oscillator zone from the trade's side
+        phase: f.track ? phaseCtx(osc10, f.track.dir) : null,
+        mag7: f.track && (sym === "$SPX" || sym === "SPY") ? mag7Side(f.track.dir) : null,   // Mag 7 breadth with / against the trade   // 10m Phase Oscillator zone from the trade's side
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
         trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",
         // PDF 12: 0DTE volume spiking on the trade's side (calls for a call trade) = with; the other side spiking = against

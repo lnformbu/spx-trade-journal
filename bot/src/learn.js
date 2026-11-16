@@ -66,6 +66,7 @@ export function features(x) {
     trend: c.trend || null,
     flow: c.flow || null,
     phase: c.phase || null,
+    mag7: c.mag7 || null,
   };
 }
 const shrunk = (sum, n) => sum / (n + PRIOR);
