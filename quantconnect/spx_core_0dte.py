@@ -11,12 +11,12 @@ from AlgorithmImports import *
 #   bo1m   1m breakout scalp: 9:35-12:00, close beyond the last 20 candles + 8>21>48, stop past the 1m 21 EMA, target 2R, 30-min limit
 # Each signal buys 1 SPXW contract expiring TODAY, strike nearest SPX (ATM), market order (fills at the ask, sells at the bid).
 # Exit when SPX hits the bot's stop or target, after 60 minutes (bo1m 30), or at 15:55: exactly the bot's scorecard rules.
-# "paper" = the paper account would have taken it (no entries 9:30-10:00 except ggo, none after 15:30, bo1m / atr1 calls are watch only).
+# "paper" = the paper account would have taken it (no entries 9:30-10:00 except ggo, none after 14:00, bo1m / atr1 calls are watch only).
 #
 # Output: a summary in the log at the end, and every trade in the Object Store as "spx_core_0dte_trades.csv".
 
-START = (2025, 1, 1)
-END = (2025, 12, 31)
+START = (2023, 1, 1)
+END = (2024, 12, 31)
 FIBS = [0.236, 0.382, 0.618, 1.0]
 
 
@@ -308,7 +308,7 @@ class SpxCore0DTE(QCAlgorithm):
         c = min(cs, key=lambda x: abs(x.strike - entry))
         t = self.market_order(c.symbol, 1, tag=fam)
         fill = float(t.average_fill_price) if t.average_fill_price else float(c.ask_price)
-        paper = now_m <= 930 and (now_m >= 600 or fam == "ggo") and fam != "bo1m" and not (fam == "atr1" and up)
+        paper = now_m < 840 and (now_m >= 600 or fam == "ggo") and fam != "bo1m" and not (fam == "atr1" and up)
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),

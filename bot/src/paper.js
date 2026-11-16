@@ -71,6 +71,8 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (t.min < 600 && cand.fam !== "orb" && cand.fam !== "ggo" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
   // PDF 16 check (replay): after 3:30 signals averaged −0.09R; only A/A+ cards held up (+0.13R, 49), the rest −0.17R (139)
   if (t.min >= 930 && cand.fam !== "star") return "end-of-day window (after 3:30): only A/A+ cards";
+  // QuantConnect 2025 on real SPXW 0DTE: core setups entered 2:00-4:00 lost 46% of the premium on average (29 trades, PF 0.47)
+  if (t.min >= 840 && cand.fam !== "star") return "afternoon window (after 2:00): only A/A+ cards (0DTE decay)";
   // Kill the Leaderboard risk rule: EOD trades come out of the day's profits only
   if (t.min >= 930 && !(d.pnl > 0)) return "end of day: profits only (this book is not green today)";
   // event days (your plan's "Event:" line): no entries 15 min either side; a pre-market event = A+ only until 9:45
