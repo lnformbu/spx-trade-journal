@@ -191,11 +191,18 @@ async function discordPosts(env, today, channel = env.DISCORD_CHANNEL_ID, allDat
   // every message from today: plans (Upside:/Downside:) and training posts (Setup: / Idea: / Lesson: / Result:)
   return msgs
     .filter((m) => allDates || et(Date.parse(m.timestamp)).date === today)
-    .map((m) => ({
-      id: m.id, source: "discord", raw: m.content || "", at: Date.parse(m.edited_timestamp || m.timestamp), postedAt: Date.parse(m.timestamp),
-      author: m.author && m.author.username, images: (m.attachments || []).filter((a) => /image/.test(a.content_type || "")).map((a) => a.url),
-      replyTo: m.message_reference && m.message_reference.message_id,
-    }))
+    .map((m) => {
+      // a FORWARDED message keeps its text / images in message_snapshots (its own content is empty, its reference is type 1)
+      const snap = (m.message_snapshots && m.message_snapshots[0] && m.message_snapshots[0].message) || null;
+      const fwd = !!snap || (m.message_reference && m.message_reference.type === 1);
+      const atts = [...(m.attachments || []), ...((snap && snap.attachments) || [])];
+      return {
+        id: m.id, source: "discord", raw: [m.content, snap && snap.content].filter(Boolean).join("\n"), at: Date.parse(m.edited_timestamp || m.timestamp), postedAt: Date.parse(m.timestamp),
+        author: m.author && m.author.username, forwarded: fwd || undefined,
+        images: atts.filter((a) => /image/.test(a.content_type || "") || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(a.url || "")).map((a) => a.url),
+        replyTo: !fwd && m.message_reference ? m.message_reference.message_id : undefined,
+      };
+    })
     .sort((a, b) => a.at - b.at);
 }
 // Today's plan per ticker: later posts override earlier ones for the same ticker; a plan pasted in the journal counts as a post.
@@ -352,7 +359,7 @@ async function run(env, { force = false } = {}) {
     if (env.TRAINING_CHANNEL_ID && (force || t.min % 5 === 0)) {
       try {
         const tp = await discordPosts(env, today, env.TRAINING_CHANNEL_ID, true);
-        if (tp) st.trainingPosts = [...(st.trainingPosts || []), ...tp.filter((p) => TRAINING.test(p.raw) || p.replyTo || (p.images && p.images.length)).map((p) => ({ ...p, training: true }))];
+        if (tp) st.trainingPosts = [...(st.trainingPosts || []), ...tp.filter((p) => TRAINING.test(p.raw) || p.replyTo || p.forwarded || (p.images && p.images.length)).map((p) => ({ ...p, training: true }))];
       } catch (e) { fail("training channel", e); }
     }
     // training posts -> setup library with a snapshot of the market at that moment
