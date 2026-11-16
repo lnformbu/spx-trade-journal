@@ -134,8 +134,9 @@ export function parsePlan(raw, ref, ticker = "SPY") {
       const then = cut > 0 ? s.slice(cut) : "";
       // "holds" (trend / support holds) is bullish unless it's resistance holding
       const holds = /\bholds?\b/i.test(cond) && !/resistance/i.test(cond) ? 1 : 0;
-      const bull = count(BULL, cond) + holds + count(/continuation up|\bhigher\b|\bup\b/gi, then);
-      const bear = count(BEAR, cond) + count(/continuation down|\bdown\b|\blower\b|weakness|\bbelow\b/gi, then);
+      // the "then" part also tells the side: "bearish Golden Gate", "retest of PM lows", "toward -1 ATR" = bear (and the mirror)
+      const bull = count(BULL, cond) + holds + count(/continuation up|\bhigher\b|\bup\b|\bbullish\b|\bhighs?\b|\+\s?1\s*ATR/gi, then);
+      const bear = count(BEAR, cond) + count(/continuation down|\bdown\b|\blower\b|weakness|\bbelow\b|\bbearish\b|\blows?\b|-\s?1\s*ATR/gi, then);
       const dir = bull > bear ? "bull" : bear > bull ? "bear" : null;
       const ct = tokens(cond, ref, ticker), tt = tokens(then, ref, ticker);
       plan.scenarios.push({ text: s, dir, condition: ct.map(strip), targets: tt.map(strip) });
