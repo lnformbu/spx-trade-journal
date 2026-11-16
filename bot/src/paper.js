@@ -101,7 +101,7 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (best >= 0.10 * sb && dp < best / 2) return (d.done = "profit lock: gave back half of the day's best");
   if (d.trades >= 20) return "20 trades today";
   if (d.consecLoss >= 4) return (d.done = "4 losses in a row");
-  if (now - d.lastLossAt < 5 * 60000) return "5-minute cooldown after a loss";
+  // no cooldown after a loss (user 2026-11-16, training: it blocked two +50-70% winners); the daily limit and 4-loss stop remain
   if (d.stopOuts.some((s) => s.sym === group(cand.sym) && s.dir === cand.dir && Math.abs(s.level - cand.uEntry) <= Math.abs(cand.uEntry) * 0.0008)) return "already stopped out at this level in this direction";
   return null;
 }

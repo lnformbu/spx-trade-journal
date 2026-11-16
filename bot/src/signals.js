@@ -1420,7 +1420,9 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (!dry) {
       const r = await post(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot` } })
         .catch((e) => ({ ok: false, status: e.message }));
-      const cp = await postCopy(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · SPX bot alert (copy)` } });
+      // the copy channel gets SPX alerts only (SPX signals, SPX plan / VIX alerts posted under SPY or $VIX included)
+      const spxOnly = a.sym === "$SPX" || /\bSPX\b/.test(a.title);
+      const cp = !spxOnly ? null : await postCopy(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · SPX bot alert (copy)` } });
       if (cp && !cp.ok) errors.push("copy channel post: " + cp.status + (cp.status === 403 ? " (bot can't post there: give it Send Messages + Embed Links)" : ""));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }

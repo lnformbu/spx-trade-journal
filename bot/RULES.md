@@ -17,7 +17,7 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 | Max trades per day | 20 | |
 | Max consecutive losses | 4, then done for the day | |
 | Max open positions | **3** at once, never calls and puts on SPX at the same time; each takes one slot: 50% ÷ 3 of the account in premium and 15% ÷ 3 risk, and all open risk counts against the day's 15% loss budget | ~$4,150 premium / $1,250 risk per position |
-| Cooldown after a loss | 5 minutes, no new entries | |
+| Cooldown after a loss | **none** (training: removed 2026-11-16) | |
 | **NEW** Same level after a stop-out | no second entry in the same direction at the same level that day | |
 | Never | average down, add to a loser, widen a stop, re-enter out of revenge | |
 
