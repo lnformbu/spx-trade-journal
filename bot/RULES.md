@@ -415,7 +415,9 @@ Run the pull at least once every ~6 weeks (the 1-minute candles expire after tha
 ## **NEW** Levels are zones, not exact prices
 * Your thesis levels count anywhere within **±5 SPX points** (7730 resistance → a rejection at 7728 counts). Per level or for the
   whole post: add `"zone": 3` to the level (or the thesis) to change it.
-* Take-profits sit **in front of** a level: your levels by 40% of the zone (7730 → TP 7728), the bot's own levels by 0.01 ATR.
+* Take-profits on **your** levels sit in front of them by 40% of the zone (7730 → TP 7728). The bot's own levels stay exact:
+  replay (2,322 trades) with TPs 0.01 ATR in front was slightly worse (all 0.191 → 0.187R, core 0.473 → 0.458R), because most
+  ATR levels get tagged anyway and the earlier exit gives up a little each time.
 * The bot's own levels already count within 0.05 ATR (~3 points) for the ⭐ cards; the EOD fakeout fade now uses its zone too.
 * Tested on 1-minute bounces at the bot's ATR / PDH / PDL / ORB levels (32 sessions): exact ±0 gross +0.02R, ±2 −0.02R, ±5 +0.02R.
   Wider zones did not make bounces better; they only found more of them (1.4 → 14.6 a day). So the zone is for **not missing a

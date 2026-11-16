@@ -100,7 +100,7 @@ async function spxContract(schwab, token, date, strike, type) {
 // Levels are zones, not exact prices: your thesis levels count within ±USER_ZONE SPX points (7730 → a bounce at 7728 counts);
 // take-profits sit slightly in front of the level so a near miss still fills.
 export const USER_ZONE = 5;
-export let FRONT = 0.01;
+export let FRONT = 0;   // bot levels: replay showed front-running them by 0.01 ATR cost 0.015R (core 0.473 → 0.458R)
 export const setFront = (x) => { FRONT = x; };
 export function tpLadder(dir, entry, stop, target, levels, A) {
   const bull = dir === "bull", R = Math.abs(entry - stop);
