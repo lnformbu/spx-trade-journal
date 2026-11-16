@@ -1132,8 +1132,11 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         // watch-only (the data collector trades it) until it has a record.
         if (sym === "$SPX" && GX && GX.lb && GX.lb.top && t.min >= OPEN + 15 && t.min < CLOSE - 20 && rib3 && osc3 && b3.length > 2) {
           const F = GX.lb.flow || {}, G0 = GX.lb.gamma0 || {}, tolW = D.atr * 0.05, e21 = rib3.ema[21], last3 = b3[b3.length - 1];
-          for (const c of GX.lb.top.slice(0, 5).filter((x) => x.pnlPct >= 15)) {
-            const calls = c.type === "C", sgn = calls ? 1 : -1;
+          // one alert per crowded SIDE (several crowded puts = one put crowd), led by the most crowded contract
+          for (const side of ["C", "P"]) {
+            const crowd = GX.lb.top.slice(0, 5).filter((x) => x.type === side && x.pnlPct >= 15).sort((x, y) => y.pnlPct - x.pnlPct);
+            if (!crowd.length) continue;
+            const c = crowd[0], calls = side === "C", sgn = calls ? 1 : -1;
             const stretched = (c0 - e21) * sgn >= D.atr * 0.12 || (calls ? osc3.value >= 61.8 : osc3.value <= -61.8);
             const stalling = (calls ? osc3.value < osc3.prev : osc3.value > osc3.prev) || (calls ? last3.close < last3.open : last3.close > last3.open);
             const walls = [[calls ? "call wall" : "put wall", calls ? GX.callWall : GX.putWall],
@@ -1151,10 +1154,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             const stop = calls ? Math.max(last3.high, c0) + D.atr * 0.03 : Math.min(last3.low, c0) - D.atr * 0.03;
             const tgt = (e21 - c0) * sgn < 0 ? e21 : calls ? c0 - D.atr * 0.1 : c0 + D.atr * 0.1;
             found.push({
-              kind: "setup", sym, key: `lbinc:${c.label}:${t.date}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
+              kind: "setup", sym, key: `lbinc:${side}:${t.date}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
               track: { dir, entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
               noTradeWhy: "LB shakeout incoming: watch only until it has a record (the data collector trades it)",
-              title: `⚠️ LB SHAKEOUT INCOMING: SPX ${c.label} holders +${c.pnlPct}% (${calls ? "calls" : "puts"} crowded)`,
+              title: `⚠️ LB SHAKEOUT INCOMING: SPX ${crowd.map((x) => `${x.label} +${x.pnlPct}%`).join(", ")} (${calls ? "calls" : "puts"} crowded)`,
               text: `**Expect a ${calls ? "DIP" : "POP"} against the ${calls ? "call" : "put"} holders soon.** ${signs.length}/4 warning signs: ${signs.join(" · ")}.`
                 + `\nSPX ${r2(c0)} · #${GX.lb.top.indexOf(c) + 1} on the leaderboard, ${Math.round(c.vol / 1000)}k traded, last $${c.last} vs VWAP $${c.vwap}`
                 + `\n**Play it:** quick ${calls ? "puts" : "calls"} toward the 3m 21 EMA ${r2(e21)} (stop ${r2(stop)}), or wait for the shakeout to finish and buy the crowd's side (${calls ? "calls" : "puts"}) on a reversal candle at support.`
