@@ -1,5 +1,5 @@
 <!--
-  90-Day Reset — Lenon SPY/SPX options
+  SPX Trade Journal — SPY/SPX options
   Served by server.js; every change is saved to trades.json (same format as before:
   id, date, ticker, strike, cp, exp, entry, exit, qty, mult, pattern, grade, notes).
 
@@ -423,9 +423,12 @@
   .lb .up{color:var(--win);} .lb .dn{color:var(--loss);}
   .lb .shk{display:block;font-size:10.5px;color:var(--accent);font-weight:600;}
   .lb-mp{margin-top:8px;font-size:12px;color:var(--ink-2);} .lb-mp b{color:var(--accent);}
-  .viewsw{display:flex;justify-content:flex-start;margin:0 0 14px;} .viewsw .seg{min-width:260px;}
+  .viewsw{display:flex;justify-content:flex-start;margin:0 0 14px;} .viewsw .seg{min-width:min(380px,100%);}
   .bstats{display:none;margin-bottom:14px;}
   body.view-bot .bstats{display:block;} body.view-bot .mine{display:none !important;}
+  /* three tabs: My journal | Bot (desk + scorecard) | Paper trading (paper account, learning, challengers) */
+  body.view-paper .mine{display:none !important;} body.view-paper #paperCard{display:block;}
+  body.view-bot #paperCard{display:none !important;}
   /* the Bot desk (levels, plan, signals, greek board, leaderboard) lives only on the Bot tab */
   body:not(.view-bot) #botCard{display:none !important;}
   .bs-body{padding:14px 18px 16px;display:flex;flex-direction:column;gap:12px;}
@@ -483,6 +486,7 @@
     <div class="seg" role="radiogroup" aria-label="Whose stats">
       <label><input type="radio" name="view" value="me" checked><span>My journal</span></label>
       <label><input type="radio" name="view" value="bot"><span>Bot</span></label>
+      <label><input type="radio" name="view" value="paper"><span>Paper trading</span></label>
     </div>
   </div>
 
@@ -983,7 +987,7 @@
     let res=null;
     try{ const r=await fetch("/api/bot"); res=r.ok?await r.json():null; }catch(e){}
     const card=$("#botCard"); card.hidden=!res; $("#viewSw").hidden=!res; if(!res) return;
-    if(!botRes){ let v="me"; try{ v=localStorage.getItem("journalView")||"me"; }catch(e){} if(v==="bot"){ document.querySelector('input[name="view"][value="bot"]').checked=true; setView("bot"); } }
+    if(!botRes){ let v="me"; try{ v=localStorage.getItem("journalView")||"me"; }catch(e){} if(v==="bot"||v==="paper"){ document.querySelector('input[name="view"][value="'+v+'"]').checked=true; setView(v); } }
     botRes=res; renderBot();
     if(!botTimer) botTimer=setInterval(()=>{ if(document.visibilityState==="visible") botLoad(); },60000);
   }
@@ -1121,8 +1125,9 @@
   const KIND_NAMES={star:"A / A+ setups",momentum:"Momentum breaks",phase:"Phase flips, squeezes, 10m boxes",setup:"SPX 1m/3m divergence & compression",plan:"Your plan triggers"};
   function setView(v){
     document.body.classList.toggle("view-bot",v==="bot");
+    document.body.classList.toggle("view-paper",v==="paper");
     try{ localStorage.setItem("journalView",v); }catch(e){}
-    if(v==="bot") bsLoad();
+    if(v==="bot"||v==="paper") bsLoad();
   }
   document.querySelectorAll('input[name="view"]').forEach(r=>r.addEventListener("change",()=>setView(r.value)));
   document.querySelectorAll('input[name="bsPeriod"]').forEach(r=>r.addEventListener("change",()=>{ bsPeriod=r.value; renderBotStats(); }));
