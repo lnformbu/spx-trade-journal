@@ -87,7 +87,16 @@ function priceBand(list, c, dir, band, atrLimit) {
   const bull = dir === "bull", mid = (band[0] + band[1]) / 2;
   const pool = list.filter((o) => o.exp === cur.exp && o.putCall === cur.putCall && o.bid > 0 && o.ask >= band[0] && o.ask <= band[1]
     && (atrLimit == null || (bull ? o.strikePrice <= atrLimit : o.strikePrice >= atrLimit)));
-  return pool.sort((a, b) => Math.abs(a.ask - mid) - Math.abs(b.ask - mid))[0] || null;
+  const best = pool.sort((a, b) => Math.abs(a.ask - mid) - Math.abs(b.ask - mid))[0];
+  if (best) return best;
+  // nothing priced in the band inside the limit (e.g. a trend day already near -1 ATR): the cheapest strike that IS inside
+  // the limit and still above the band floor, when it's cheaper than the signal's contract
+  if (c.ask > band[1]) {
+    const near = list.filter((o) => o.exp === cur.exp && o.putCall === cur.putCall && o.bid > 0 && o.ask >= band[0] && o.ask < c.ask
+      && (atrLimit == null || (bull ? o.strikePrice <= atrLimit : o.strikePrice >= atrLimit))).sort((a, b) => a.ask - b.ask)[0];
+    return near || null;
+  }
+  return null;
 }
 // the contract a signal shows, in a form the paper trader can buy
 const cobj = (o, sym) => (o ? { symbol: o.symbol, label: `${show(sym)} ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)}`, bid: o.bid, ask: o.ask, mark: o.mark, delta: o.delta } : null);
