@@ -1082,6 +1082,41 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
                 a3.low - tz, F != null && F > c0 ? F : nextLv("bull", c0));
           }
         }
+        // ---- LB SHAKEOUT INCOMING: spot the shakeout BEFORE it starts ----
+        // A crowded top-5 leaderboard contract (holders 15%+ in profit vs its own VWAP) plus at least 3 of 4 warning signs:
+        //   stretched  price far from the 3m 21 EMA (>= 0.12 ATR) or the 3m Phase Oscillator past +/-61.8 on the crowd's side
+        //   stalling   the 3m oscillator turning back (value below the previous bar) or the last 3m bar closing against the crowd
+        //   at a wall  a resistance (calls crowd) / support (puts crowd) within 0.05 ATR: GEX wall, gamma node or key level
+        //   flow fades no fresh volume spike on the crowd's side in the last ~5 minutes
+        // The expected shakeout runs AGAINST the crowd (calls crowded -> dip); scored as a short trade toward the 3m 21 EMA,
+        // watch-only (the data collector trades it) until it has a record.
+        if (sym === "$SPX" && GX && GX.lb && GX.lb.top && t.min >= OPEN + 15 && t.min < CLOSE - 20 && rib3 && osc3 && b3.length > 2) {
+          const F = GX.lb.flow || {}, G0 = GX.lb.gamma0 || {}, tolW = D.atr * 0.05, e21 = rib3.ema[21], last3 = b3[b3.length - 1];
+          for (const c of GX.lb.top.slice(0, 5).filter((x) => x.pnlPct >= 15)) {
+            const calls = c.type === "C", sgn = calls ? 1 : -1;
+            const stretched = (c0 - e21) * sgn >= D.atr * 0.12 || (calls ? osc3.value >= 61.8 : osc3.value <= -61.8);
+            const stalling = (calls ? osc3.value < osc3.prev : osc3.value > osc3.prev) || (calls ? last3.close < last3.open : last3.close > last3.open);
+            const walls = [[calls ? "call wall" : "put wall", calls ? GX.callWall : GX.putWall],
+              ...(calls ? (G0.posNodes || []).map((k) => ["gamma node", k]) : (G0.negNodes || []).map((k) => ["gamma node", k])),
+              ...keyLevels.filter(([, v]) => v != null)].filter(([, v]) => v != null && (calls ? v >= c0 - tolW && v - c0 <= tolW * 2 : v <= c0 + tolW && c0 - v <= tolW * 2));
+            const atWall = walls[0] || null;
+            const fading = calls ? !F.callSpike : !F.putSpike;
+            const signs = [stretched && "stretched", stalling && "momentum stalling", atWall && `at ${atWall[0]} ${r2(atWall[1])}`, fading && "crowd's flow fading"].filter(Boolean);
+            if (signs.length < 3) continue;
+            const dir = calls ? "bear" : "bull";
+            const stop = calls ? Math.max(last3.high, c0) + D.atr * 0.03 : Math.min(last3.low, c0) - D.atr * 0.03;
+            const tgt = (e21 - c0) * sgn < 0 ? e21 : calls ? c0 - D.atr * 0.1 : c0 + D.atr * 0.1;
+            found.push({
+              kind: "setup", sym, key: `lbinc:${c.label}:${t.date}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
+              track: { dir, entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
+              noTradeWhy: "LB shakeout incoming: watch only until it has a record (the data collector trades it)",
+              title: `⚠️ LB SHAKEOUT INCOMING: SPX ${c.label} holders +${c.pnlPct}% (${calls ? "calls" : "puts"} crowded)`,
+              text: `**Expect a ${calls ? "DIP" : "POP"} against the ${calls ? "call" : "put"} holders soon.** ${signs.length}/4 warning signs: ${signs.join(" · ")}.`
+                + `\nSPX ${r2(c0)} · #${GX.lb.top.indexOf(c) + 1} on the leaderboard, ${Math.round(c.vol / 1000)}k traded, last $${c.last} vs VWAP $${c.vwap}`
+                + `\n**Play it:** quick ${calls ? "puts" : "calls"} toward the 3m 21 EMA ${r2(e21)} (stop ${r2(stop)}), or wait for the shakeout to finish and buy the crowd's side (${calls ? "calls" : "puts"}) on a reversal candle at support.`,
+            });
+          }
+        }
         // LB shakeout watch: a top-5 leaderboard contract is 20%+ above its VWAP, so its holders are likely to be shaken out first
         if (GX && GX.lb && GX.lb.top && t.min >= OPEN + 15 && t.min < CLOSE - 20) {
           for (const c of GX.lb.top.slice(0, 5).filter((x) => x.shakeout)) {
@@ -1420,9 +1455,11 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (!dry) {
       const r = await post(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot` } })
         .catch((e) => ({ ok: false, status: e.message }));
-      // the copy channel gets SPX alerts only (SPX signals, SPX plan / VIX alerts posted under SPY or $VIX included)
-      const spxOnly = a.sym === "$SPX" || /\bSPX\b/.test(a.title);
-      const cp = !spxOnly ? null : await postCopy(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · SPX bot alert (copy)` } });
+      // what the copy channel gets (wrangler COPY_FILTER): "lb" = leaderboard shakeout alerts only (incoming + watch),
+      // "spx" = every SPX alert (SPX plan / VIX alerts included), "all" = everything
+      const copyMode = env.COPY_FILTER || "lb";
+      const copyOk = copyMode === "all" ? true : copyMode === "spx" ? a.sym === "$SPX" || /\bSPX\b/.test(a.title) : /^lb(inc|shake):/.test(a.key);
+      const cp = !copyOk ? null : await postCopy(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · SPX bot alert (copy)` } });
       if (cp && !cp.ok) errors.push("copy channel post: " + cp.status + (cp.status === 403 ? " (bot can't post there: give it Send Messages + Embed Links)" : ""));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }
