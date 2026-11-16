@@ -1,4 +1,4 @@
-// Signal scanner, 9:30-16:00 ET (own cron; half the tickers each minute = every ticker every 2 minutes):
+// Signal scanner, 9:30-16:00 ET (own cron; SPX + SPY every minute, the other tickers 2 per minute in rotation):
 //   (whale prints are not posted; they feed the options-flow check)
 //   📈 large moves   ±1/±2 ATR from yesterday's close, or half an ATR in 15 minutes
 //   🚀 momentum      fresh key-level break with VWAP, 3m Saty cloud and volume agreeing
@@ -230,8 +230,11 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   const st = (await readJSON(env, key)) || { date: t.date, alerts: [], fired: {}, vol: {}, daily: {}, flow: {}, planSt: {} };
   st.flow = st.flow || {}; st.planSt = st.planSt || {};
   const minuteNo = Math.floor(now / 60000);
-  // half the tickers per run (Cloudflare's free plan allows 50 data calls per run)
-  const group = TICKERS.filter((_, i) => i % 2 === (half ?? minuteNo % 2));
+  // SPX / SPY FOCUS: both every minute (the 1m scalps need it); the other tickers rotate 2 per run, so each is still scanned
+  // every few minutes and keeps posting (Cloudflare's free plan allows 50 data calls per run)
+  const others = TICKERS.filter((s) => s !== "$SPX" && s !== "SPY");
+  const slot = (half ?? minuteNo) % Math.ceil(others.length / 2);
+  const group = ["$SPX", "SPY", ...others.slice(slot * 2, slot * 2 + 2)];
   const token = await schwabToken(env);
   const quotes = await schwab(token, "/marketdata/v1/quotes?fields=quote&symbols=" + [...new Set([...group, "SPY", "$SPX", ...MAG7])].map(encodeURIComponent).join(","));
   // Mag 7 breadth (about a third of the S&P 500): how many are above today's open, and their average % move since the open
@@ -712,8 +715,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           }
         }
         // 1-MINUTE CLOUD FLIP SCALP (traded): the 1m 8/21 cloud flips after 5+ minutes the other way (downtrend -> uptrend
-        // for calls, the mirror for puts) while the 3m 8/21 cloud already agrees. 9:45-2:00, stop past the 5-bar low/high,
-        // target 2R. Test (scripts/flip1m-test.mjs, 32 days): 66 trades, 58% win, +0.49R; without the 3m check +0.09R.
+        // for calls, the mirror for puts) and the 3m 8/21 cloud agrees within 9 minutes. 9:45-2:00, stop past the 5-bar
+        // low/high, target 2R. Test (scripts/flip1m-test.mjs CONFIRM=1, 32 days): 134 trades, 53% win, +0.42R; without 3m +0.09R.
         if (sym === "$SPX" && t.min >= 586 && t.min <= 841) {
           const d1 = done.filter((c) => { const m = et(c.datetime).min; return m >= OPEN && m < CLOSE; });
           if (d1.length > 60) {
@@ -721,20 +724,22 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             const g3 = aggregate(d1, 3).filter((b) => b.datetime + 180000 <= now), c3 = g3.map((b) => b.close);
             const up3 = g3.length > 25 ? ema(c3, 8).at(-1) > ema(c3, 21).at(-1) : null;
             const nowUp = f8[n] > f21[n];
-            let run = 0; for (let j = n - 1; j >= 0 && (f8[j] > f21[j]) !== nowUp; j--) run++;
-            const prevSame = n >= 1 && (f8[n - 1] > f21[n - 1]) === nowUp;
-            if (!prevSame && run >= 5 && up3 === nowUp) {
+            // the 1m flip ARMS the trade; the entry comes once the 3m cloud agrees, within 9 minutes of the flip
+            // (test: 134 trades 53% +0.42R vs 66 trades +0.49R when both had to flip on the same minute; catches reversals)
+            let f = n; while (f > 0 && (f8[f - 1] > f21[f - 1]) === nowUp) f--;
+            let run = 0; for (let j = f - 1; j >= 0 && (f8[j] > f21[j]) !== nowUp; j--) run++;
+            if (n - f <= 9 && run >= 5 && up3 === nowUp) {
               const dir = nowUp ? "bull" : "bear", up = nowUp, last5 = d1.slice(-5), a = d1[n];
               const stop = up ? Math.min(...last5.map((c) => c.low)) - 0.25 : Math.max(...last5.map((c) => c.high)) + 0.25;
               const risk = Math.abs(a.close - stop);
               if (risk >= 0.75 && risk <= 12) {
                 const tgt = up ? a.close + 2 * risk : a.close - 2 * risk;
                 found.push({
-                  kind: "setup", sym, key: `flip1m:${a.datetime}:${dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+                  kind: "setup", sym, key: `flip1m:${d1[f].datetime}:${dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
                   track: { dir, entry: r2(a.close), stop: r2(stop), target: r2(tgt), needTrigger: false },
                   title: `⚡ SPX 1m CLOUD FLIP ${up ? "CALLS ▲" : "PUTS ▼"} · scalp`,
                   text: `**Entry:** now ~${r2(a.close)} · **Stop:** ${r2(stop)} · **Target:** ${r2(tgt)} (2R) · scalp, out within ~30 min`
-                    + `\n1m 8/21 cloud flipped ${up ? "UP after " + run + " min of downtrend" : "DOWN after " + run + " min of uptrend"}, 3m cloud already ${up ? "up" : "down"}.`,
+                    + `\n1m 8/21 cloud flipped ${up ? "UP after " + run + " min of downtrend" : "DOWN after " + run + " min of uptrend"}${n - f ? ` (${n - f} min ago)` : ""}, 3m cloud ${n - f ? "now confirms" : "already"} ${up ? "up" : "down"}.`,
                 });
               }
             }
@@ -1334,7 +1339,17 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (!r.ok) errors.push("follow-up post: " + r.status);
   }
   for (const a of found) {
-    if (a.drop) { st.dropKeys = st.dropKeys || {}; if (!st.dropKeys[a.key]) { st.dropKeys[a.key] = a.drop; st.dropped = st.dropped || {}; st.dropped[a.drop] = (st.dropped[a.drop] || 0) + 1; } continue; }
+    if (a.drop) {
+      st.dropKeys = st.dropKeys || {};
+      if (!st.dropKeys[a.key]) {
+        st.dropKeys[a.key] = a.drop; st.dropped = st.dropped || {}; st.dropped[a.drop] = (st.dropped[a.drop] || 0) + 1;
+        // not posted, but the data collector still trades it once (so we learn whether the filter that dropped it helps)
+        if (!dry && a.sym === "$SPX" && a.track && a.track.stop != null && a.contract && a.contract.symbol)
+          candidates.push({ key: a.key, fam: famOf(a.key), kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, et: hhmm(t.min), sym: a.sym,
+            blocked: "dropped: " + a.drop, contract: a.contract, dir: a.track.dir, uEntry: a.track.entry, uStop: a.track.stop, uTarget: a.track.target, needTrigger: !!a.track.needTrigger, why: "" });
+      }
+      continue;
+    }
     const last = st.fired[a.key];
     if (last && (a.once || now - last < (a.cooldown || 10) * 60000)) continue;
     const lastHour = st.alerts.filter((x) => x.sym === a.sym && (x.kind === "big" || x.kind === "momentum") && now - x.at < 3600e3).length;

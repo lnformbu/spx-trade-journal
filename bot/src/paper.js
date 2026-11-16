@@ -38,7 +38,7 @@ export const TEMPLATES = [
   { id: "d30", name: "Cheaper contracts (delta 0.30)", apply: (c) => ({ ...c, delta: 0.3 }) },
   { id: "d55", name: "At the money (delta 0.55)", apply: (c) => ({ ...c, delta: 0.55 }) },
   { id: "d70", name: "In the money (delta 0.70)", apply: (c) => ({ ...c, delta: 0.7 }) },
-  { id: "allday", name: "Trade midday too", apply: (c) => ({ ...c, window: "all" }) },
+  { id: "allday", name: "Skip midday (A-grade only 11:30-1:30)", apply: (c) => ({ ...c, window: "nomidday" }) },
   { id: "morning", name: "Mornings only (9:33-11:30)", apply: (c) => ({ ...c, window: "morning" }) },
   { id: "edge", name: "Size down weaker setups", apply: (c) => ({ ...c, sizing: "edge" }) },
   // replay with every rule, one position at a time: core playbook 162 trades 57% +0.32R PF 1.84 vs all families +0.16R PF 1.35
@@ -90,7 +90,8 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (pre && t.min < 585 && cand.grade !== "A+") return `${pre.name} day: A+ only until 9:45`;
   if (cfg.fams === "core" && !CORE.has(cand.fam)) return "this style trades the core playbook only";
   if (cfg.window === "morning" && t.min >= 690) return "this style trades mornings only";
-  if (cfg.window !== "all" && t.min >= 690 && t.min < 810 && !(cand.fam === "star" && (cand.grade === "A+" || cand.score >= 90))) return "midday 11:30-1:30: A-grade (90+) only";
+  // midday 11:30-1:30 is traded too (user 2026-11-16: "take them, we are training"); only a style that asks for it skips midday
+  if (cfg.window === "nomidday" && t.min >= 690 && t.min < 810 && !(cand.fam === "star" && (cand.grade === "A+" || cand.score >= 90))) return "midday 11:30-1:30: A-grade (90+) only";
   if (d.done) return d.done;
   const dp = d.pnl - (d.base || 0), best = Math.max(0, (d.best || 0) - (d.base || 0));   // P/L since today's budget (re)start
   if (dp <= -0.2 * sb) return (d.done = "daily loss limit (−20%) reached");
@@ -307,6 +308,8 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   if (!ch) ch = makeChallengers(champ, 1, t.date);
   // a challenger template added after this generation started gets its own fresh book
   for (const tp of TEMPLATES) if (!ch.books[tp.id]) { const cfg = tp.apply({ ...champ, params: { ...champ.params } }); ch.books[tp.id] = { cfg: { ...cfg, id: tp.id, name: tp.name, traits: [...(champ.traits || []), tp.name] }, book: newBook() }; }
+  // the "allday" challenger now tests the opposite: skipping midday (the champion trades it)
+  if (ch.books.allday && ch.books.allday.cfg.window === "all") { ch.books.allday.cfg.window = "nomidday"; ch.books.allday.cfg.name = "Skip midday (A-grade only 11:30-1:30)"; }
   acct.shadow = acct.shadow || [];
   // one-time "reset today's loss budget" (admin /paper/reset-day): start the day's 15% budget again from the current balance
   const rs = await readJSON(env, "paper:reset");

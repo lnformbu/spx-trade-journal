@@ -17,7 +17,7 @@ const s3 = []; { let cur = null; const out = []; bars.forEach((b, i) => { const 
 
 function run(V) {
   const res = [];
-  let pos = null, below = 0, above = 0;
+  let pos = null, below = 0, above = 0, armed = null;
   for (let i = 60; i < bars.length; i++) {
     const b = bars[i], up = E[8][i] > E[21][i];
     if (pos) {
@@ -28,7 +28,10 @@ function run(V) {
       else if (b.m - pos.m >= V.maxMin || b.m >= 955 || bars[i + 1]?.d !== b.d) x = b.c;
       if (x != null) { res.push({ R: ((x - pos.entry) * pos.dir) / pos.risk }); pos = null; }
     }
-    const flipUp = up && below >= V.prior, flipDn = !up && above >= V.prior;
+    let flipUp = up && below >= V.prior, flipDn = !up && above >= V.prior;
+    if (flipUp) armed = { dir: 1, at: i }; else if (flipDn) armed = { dir: -1, at: i };
+    if (V.k && armed && i - armed.at <= V.k && (armed.dir > 0) === up && s3[i] === up) { flipUp = armed.dir > 0; flipDn = armed.dir < 0; }
+    if (armed && (i - armed.at > (V.k || 0) || (armed.dir > 0) !== up)) armed = null;
     below = up ? 0 : below + 1; above = up ? above + 1 : 0;
     if (pos || b.m < V.from || b.m > V.to) continue;
     for (const [dir, f] of [[1, flipUp], [-1, flipDn]]) {
@@ -43,6 +46,14 @@ function run(V) {
   }
   const n = res.length, w = res.filter((r) => r.R > 0).length, R = res.reduce((s, r) => s + r.R, 0);
   return { n, win: n ? Math.round((w / n) * 100) : 0, avgR: n ? +(R / n).toFixed(2) : 0, totR: +R.toFixed(1) };
+}
+if (process.env.CONFIRM) {
+  console.log("=== 3m confirmation window (1m flip arms, entry when the 3m cloud agrees within K minutes), down>=5m, 2R ===");
+  for (const k of [0, 3, 6, 9, 12]) for (const win of [[585, 840], [575, 955]]) {
+    const r = run({ side: 0, prior: 5, e48: false, m3: true, R: 2, maxMin: 30, from: win[0], to: win[1], k });
+    console.log(`K=${String(k).padStart(2)} ${win[1] === 840 ? "9:45-2" : "all day"}`.padEnd(16), `n${String(r.n).padStart(4)} win${String(r.win).padStart(3)}% avgR ${r.avgR.toFixed(2).padStart(5)} totR ${r.totR}`);
+  }
+  process.exit(0);
 }
 const rows = [];
 for (const side of [1, 0]) for (const prior of [5, 15, 30]) for (const e48 of [false, true]) for (const m3 of [false, true])

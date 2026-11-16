@@ -474,6 +474,8 @@ export default {
       const img = url.searchParams.get("url") || (lib && lib.items.filter((x) => x.images && x.images.length).at(-1)?.images[0]);
       try { return json(await readChart(env, img)); } catch (e) { return json({ error: e.message, img }); }
     }
+    // today's signal log: every alert fired (time, title) and the trades still being scored
+    if (url.pathname === "/sigday") { const s = (await readJSON(env, "sig:day:" + (url.searchParams.get("date") || et(Date.now()).date))) || {}; return json({ alerts: (s.alerts || []).map((a) => ({ et: a.et, sym: a.sym, kind: a.kind, title: a.title })), track: (s.track || []).map((x) => ({ et: x.et, key: x.key, title: x.title, dir: x.dir, entry: x.entry, stop: x.stop, target: x.target })), dropped: s.dropped || null }); }
     if (url.pathname === "/stats") return json({ stats: await readJSON(env, "bot:stats"), reviews: await readJSON(env, "bot:reviews") });
     if (url.pathname === "/parse-setup") return json(parseSetup(url.searchParams.get("text") || ""));
     if (url.pathname === "/chainpeek") {

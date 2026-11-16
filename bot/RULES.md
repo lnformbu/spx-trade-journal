@@ -131,7 +131,7 @@ Add a line to your morning plan post: `Event: FOMC 2:00` or `Event: CPI 8:30` (s
 | 4:00-9:30 | Track premarket, compute levels |
 | 9:30-9:33 | Build the 3-minute opening range, no trades |
 | **9:33-11:30** | Main window |
-| 11:30-1:30 | A-grade setups only, tagged **midday** in the log so they can be compared |
+| 11:30-1:30 | **all setups traded** (training: user 2026-11-16), tagged **midday** in the log so they can be compared |
 | 1:30-3:55 | Second window, including power hour |
 | 3:55 | No new entries |
 | 3:59 | Close everything (0DTE never held into the 4:00 settlement) |
@@ -286,7 +286,7 @@ each with one change and its own $25,000 paper book (silent: no Discord posts, s
 | Runner | target 1 at +100%, trail keeps 70-75%, runner allowed 25 min without a new high |
 | Quick scalp | −20% stop, target 1 at +30%, breakeven at +15%, 6-minute time stop |
 | Delta 0.30 / 0.55 / 0.70 | buys the SPX 0DTE contract nearest that delta instead of the posted one |
-| Trade midday too | all setups 11:30-1:30, not only A-grade |
+| Skip midday | A-grade only 11:30-1:30 (the old rule), to compare with trading midday |
 | Mornings only | entries 9:33-11:30 only |
 | Size down weaker setups | 25% of the account instead of 50% when the learned edge is under +0.2R |
 
