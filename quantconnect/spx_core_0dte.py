@@ -27,7 +27,7 @@ import random
 # Mag 7 split: AAPL MSFT NVDA AMZN GOOGL META TSLA vs today's open at entry: with (5+ of 7 the trade's way) / mixed / against.
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
-START = (2016, 1, 1)
+START = (2022, 6, 1)
 END = (2026, 11, 13)
 FIBS = [0.236, 0.382, 0.618, 1.0]
 MAG7 = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
