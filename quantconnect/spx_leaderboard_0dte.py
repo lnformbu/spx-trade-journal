@@ -12,6 +12,8 @@ import math
 #   max pain     the SPX price where the top-10 holders' in-the-money value is smallest
 #   pin          growing node, else max pain, else biggest gamma strike
 #   kill dir     shake the biggest tax-list name (calls -> SPX down, puts -> up); empty board -> toward the pin
+# Also: GEX regime last half hour (from github.com/davidalmeida90/GEX-scalping-tradingbot): at 3:30, -GEX follow the day's move,
+#   +GEX fade it, 1 ATM 0DTE; with always-follow / always-fade baselines.
 # Scored against the 4:00 settlement:
 #   1. Which top-10 contracts got killed (expired worthless), split by volume, by ITM/OTM at 3:30 and by tax list
 #   2. Can the gamma pin call the kills better than "OTM at 3:30 stays OTM"?
@@ -84,6 +86,7 @@ class SpxLeaderboard0DTE(QCAlgorithm):
         if d != self.day:
             self.new_day(d)
         S, now_m, D = float(x.close), m + 1, self.cur
+        D.setdefault("open", float(x.open))
         chain = data.option_chains.get(self.spxw)
         quotes = {}
         if chain is not None:
@@ -170,6 +173,17 @@ class SpxLeaderboard0DTE(QCAlgorithm):
                      "pin": pin, "kd": kd, "victim": bool(victim)}
         if kd:
             self.buy(D, "kill 3:30", kd, S, now_m)
+        # GEX regime last half hour (idea from the GEX-scalping-tradingbot repo): day move open -> 3:30;
+        # dealers short gamma (-GEX) amplify -> FOLLOW the day, long gamma (+GEX) dampen -> FADE it. Flat day (< 0.1%) = no trade.
+        net = sum(D["g"].get(930, {}).values())
+        mv = S - D["open"]
+        if abs(mv) >= S * 0.001:
+            follow = "bull" if mv > 0 else "bear"
+            fade = "bear" if follow == "bull" else "bull"
+            D["gex"] = "+" if net >= 0 else "-"
+            self.buy(D, "regime 3:30", follow if net < 0 else fade, S, now_m)
+            self.buy(D, "follow 3:30", follow, S, now_m)
+            self.buy(D, "fade 3:30", fade, S, now_m)
 
     def final20(self, D, S, now_m):
         grow, big, pos = self.nodes(D, 940, 910)
@@ -258,7 +272,10 @@ class SpxLeaderboard0DTE(QCAlgorithm):
                 lab, len(ts), round(sum(p > 0 for p in pnl) / len(ts) * 100), gw - gl, (gw - gl) / len(ts), gw / gl if gl else 99,
                 sum(t["ask"] for t in ts) / len(ts) * 100))
         alltr = [t for D in days for t in D["trades"]]
-        for kind in ("kill 3:30", "pin 3:40"):
+        for kind in ("regime 3:30", "follow 3:30", "fade 3:30"):
+            for g in ("+", "-"):
+                tstats("%s %sGEX -> settle" % (kind, g), [t for D in days if D.get("gex") == g for t in D["trades"] if t["kind"] == kind], "settle")
+        for kind in ("regime 3:30", "follow 3:30", "fade 3:30", "kill 3:30", "pin 3:40"):
             ts = [t for t in alltr if t["kind"] == kind]
             tstats(kind + " -> hold to settle", ts, "settle")
             tstats(kind + " -> sell 3:55 bid", ts, "bid55")
