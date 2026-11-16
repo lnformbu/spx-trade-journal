@@ -189,7 +189,9 @@ class SpxLeaderboard0DTE(QCAlgorithm):
 
     # ---------------- report ----------------
     def on_end_of_algorithm(self):
-        L = self.log
+        def L(line):
+            self.debug(line)               # Console tab (not counted in the 10 KB log limit)
+            self.log(line)
         days = self.days
         L("=== Kill the Leaderboard on real SPXW 0DTE, %d full days ===" % len(days))
         # 1. fates of the top-10 at 3:30

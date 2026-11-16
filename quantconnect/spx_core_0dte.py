@@ -9,11 +9,11 @@ from AlgorithmImports import *
 #   ckl10  10m checklist pullback: armed by a 10m close beyond the trigger + 34/50 trend + <70% ATR used; pullback to 8/21 EMA; target midrange
 #   atr1   ±1 ATR snap-back: first 3m close back inside after touching ±1 ATR, target ±61.8% (calls side = watch only in the bot)
 #   bo1m   1m breakout scalp: 9:35-12:00, close beyond the last 20 candles + 8>21>48, stop past the 1m 21 EMA, target 2R, 30-min limit
-# Each signal buys 1 SPXW contract expiring TODAY, strike nearest SPX (ATM), market order (fills at the ask, sells at the bid).
+# Each signal buys 1 SPXW contract expiring TODAY, strike nearest SPX (ATM), priced from the quotes (buy at the ask, sell at the bid), no orders placed.
 # Exit when SPX hits the bot's stop or target, after 60 minutes (bo1m 30), or at 15:55: exactly the bot's scorecard rules.
 # "paper" = the paper account would have taken it (no entries 9:30-10:00 except ggo, none after 14:00, bo1m / atr1 calls are watch only).
 #
-# Output: a summary in the log at the end, and every trade in the Object Store as "spx_core_0dte_trades.csv".
+# Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
 START = (2016, 1, 1)
 END = (2026, 11, 13)
@@ -306,8 +306,7 @@ class SpxCore0DTE(QCAlgorithm):
             self.no_chain += 1
             return
         c = min(cs, key=lambda x: abs(x.strike - entry))
-        t = self.market_order(c.symbol, 1, tag=fam)
-        fill = float(t.average_fill_price) if t.average_fill_price else float(c.ask_price)
+        fill = float(c.ask_price)          # priced from the quote (buy at the ask), no order: no account balance to run out
         paper = now_m < 840 and (now_m >= 600 or fam == "ggo") and fam != "bo1m" and not (fam == "atr1" and up)
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
@@ -331,8 +330,7 @@ class SpxCore0DTE(QCAlgorithm):
                 why = "3:55"
             if not why:
                 continue
-            t = self.market_order(tr["sym"], -1, tag=tr["fam"] + " " + why)
-            out = float(t.average_fill_price) if t.average_fill_price else float(sec.bid_price)
+            out = float(sec.bid_price)         # sell at the bid
             tr.update({"exit": why, "et_out": "%d:%02d" % (now_m // 60, now_m % 60), "spx_R": r2(((px - tr["spx_entry"]) if up else (tr["spx_entry"] - px)) / tr["risk"]),
                        "opt_out": out, "opt_pct": round((out / tr["opt_in"] - 1) * 100, 1) if tr["opt_in"] > 0 else None,
                        "pnl": round((out - tr["opt_in"]) * 100, 2), "best_pct": round((tr["max_bid"] / tr["opt_in"] - 1) * 100, 1) if tr["opt_in"] > 0 else None})
@@ -347,29 +345,27 @@ class SpxCore0DTE(QCAlgorithm):
                 return "n 0"
             w = [t for t in ts if t["pnl"] > 0]
             gw, gl = sum(t["pnl"] for t in w), -sum(t["pnl"] for t in ts if t["pnl"] < 0)
-            return "n %d | win %d%% | avg option %+.1f%% | P/L $%+.0f (avg $%+.0f) | PF %.2f | SPX avg R %+.2f | days %d" % (
+            return "n%d w%d%% opt%+.0f%% $%+.0f avg%+.0f PF%.2f R%+.2f" % (
                 n, round(len(w) / n * 100), sum(t["opt_pct"] or 0 for t in ts) / n, gw - gl, (gw - gl) / n, gw / gl if gl else 99,
-                sum(t["spx_R"] for t in ts) / n, len(set(t["date"] for t in ts)))
-        self.log("=== SPX core setups on real SPXW 0DTE, 1 ATM contract per signal, before fees ===")
-        self.log("ALL      " + stats(self.trades))
-        self.log("PAPER    " + stats([t for t in self.trades if t["paper"]]))
+                sum(t["spx_R"] for t in ts) / n)
+        core = [t for t in self.trades if t["fam"] != "bo1m"]
+        out = ["=== SPX core on real SPXW 0DTE, 1 ATM, ask in / bid out, before fees ===",
+               "CORE (no bo1m) " + stats(core), "PAPER " + stats([t for t in core if t["paper"]])]
         for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
             ts = [t for t in self.trades if t["fam"] == fam]
-            self.log("%-6s   " % fam + stats(ts))
-            for d in ("bull", "bear"):
-                self.log("   %-5s " % d + stats([t for t in ts if t["dir"] == d]))
+            side = lambda d: " ".join(stats([t for t in ts if t["dir"] == d]).split(" ")[i] for i in (0, 1, 3, 5)) if any(t["dir"] == d for t in ts) else "n0"
+            out.append("%s %s | bull %s | bear %s" % (fam, stats(ts), side("bull"), side("bear")))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):
-            self.log("time %-8s" % lab + stats([t for t in self.trades if lo <= t["m"] < hi]))
-        core = [t for t in self.trades if t["fam"] != "bo1m"]
+            out.append("core %s " % lab + stats([t for t in core if lo <= t["m"] < hi]))
         for y in sorted(set(t["date"][:4] for t in self.trades)):
-            self.log("year %s CORE  " % y + stats([t for t in core if t["date"][:4] == y]))
-            self.log("year %s PAPER " % y + stats([t for t in core if t["paper"] and t["date"][:4] == y]))
-        self.log("signals skipped (no 0DTE quote): %d · left out (settled on a half day): %d" % (self.no_chain, self.unclosed))
-        cols = ["date", "et", "fam", "dir", "paper", "spx_entry", "stop", "target", "risk", "strike", "opt_in", "spread_in",
-                "exit", "et_out", "spx_R", "opt_out", "opt_pct", "best_pct", "pnl"]
-        csv = ",".join(cols) + "\n" + "\n".join(",".join(str(t.get(c, "")) for c in cols) for t in self.trades)
-        try:
-            self.object_store.save("spx_core_0dte_trades.csv", csv)
-            self.log("every trade saved to the Object Store: spx_core_0dte_trades.csv (%d rows)" % len(self.trades))
-        except Exception as e:
-            self.log("Object Store save failed (%s); the summary above is complete" % e)
+            out.append("%s CORE %s | PAPER %s" % (y, stats([t for t in core if t["date"][:4] == y]),
+                                                  stats([t for t in core if t["paper"] and t["date"][:4] == y])))
+        out.append("skipped (no 0DTE quote) %d, half-day leftovers %d" % (self.no_chain, self.unclosed))
+        for line in out:
+            self.debug(line)               # Console tab (not counted in the 10 KB log limit)
+            self.log(line)                 # Logs tab, if today's log allowance is left
+        for k, line in (("CORE", out[1]), ("PAPER", out[2])):
+            try:
+                self.set_summary_statistic(k, line)
+            except Exception:
+                pass
