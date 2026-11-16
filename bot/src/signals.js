@@ -45,6 +45,16 @@ export async function post(env, embed, replyTo = null) {
   });
 }
 
+// copy of an alert to a second channel (COPY_CHANNEL_ID); never a reply, failures don't affect the main post
+async function postCopy(env, embed) {
+  if (!env.COPY_CHANNEL_ID || !env.DISCORD_BOT_TOKEN) return null;
+  return fetch(`https://discord.com/api/v10/channels/${env.COPY_CHANNEL_ID}/messages`, {
+    method: "POST",
+    headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "Content-Type": "application/json", "User-Agent": "DiscordBot (spx-bot, 1.0)" },
+    body: JSON.stringify({ embeds: [embed] }),
+  }).catch(() => null);
+}
+
 function contracts(chain) {
   const out = [];
   for (const map of [chain.callExpDateMap, chain.putExpDateMap]) {
@@ -1410,6 +1420,8 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (!dry) {
       const r = await post(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot` } })
         .catch((e) => ({ ok: false, status: e.message }));
+      const cp = await postCopy(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · SPX bot alert (copy)` } });
+      if (cp && !cp.ok) errors.push("copy channel post: " + cp.status + (cp.status === 403 ? " (bot can't post there: give it Send Messages + Embed Links)" : ""));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }
       if (r.ok && a.tps && !a.noTrade && a.track) (st.mgmt = st.mgmt || []).push({ key: a.key, sym: a.sym, title: a.title, dir: a.track.dir, entry: a.track.entry, stop: a.track.stop, tps: a.tps, at: now, mid: alert.mid || null, stage: a.track.needTrigger ? "wait" : "open", enteredAt: a.track.needTrigger ? null : now });

@@ -516,7 +516,7 @@ export default {
       return json(await schwab(token, "/marketdata/v1/quotes?fields=quote,reference&symbols=" + encodeURIComponent(url.searchParams.get("symbols") || "SPY")));
     }
     if (url.pathname === "/discord") {
-      const chId = url.searchParams.get("ch") === "training" ? env.TRAINING_CHANNEL_ID : url.searchParams.get("ch") === "signals" ? env.SIGNALS_CHANNEL_ID : env.DISCORD_CHANNEL_ID;
+      const chId = url.searchParams.get("ch") === "training" ? env.TRAINING_CHANNEL_ID : url.searchParams.get("ch") === "signals" ? env.SIGNALS_CHANNEL_ID : url.searchParams.get("ch") === "copy" ? env.COPY_CHANNEL_ID : env.DISCORD_CHANNEL_ID;
       const r = await fetch(`https://discord.com/api/v10/channels/${chId}/messages?limit=10`, {
         headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)" },
       });
@@ -529,7 +529,7 @@ export default {
         const member = await get(`/guilds/${ch.guild_id}/members/${me.id}`);
         const roles = await get(`/guilds/${ch.guild_id}/roles`);
         const name = (id) => (roles.find((r) => r.id === id) || {}).name || id;
-        const bits = (p) => ({ view: !!(BigInt(p) & 1024n), history: !!(BigInt(p) & 65536n), admin: !!(BigInt(p) & 8n) });
+        const bits = (p) => ({ view: !!(BigInt(p) & 1024n), history: !!(BigInt(p) & 65536n), send: !!(BigInt(p) & 2048n), embed: !!(BigInt(p) & 16384n), admin: !!(BigInt(p) & 8n) });
         return json({
           bot: me.username, botId: me.id, channel: ch.name, botRoles: (member.roles || []).map(name), memberError: member.message,
           rolePerms: roles.filter((r) => r.name === "@everyone" || (member.roles || []).includes(r.id)).map((r) => ({ role: r.name, ...bits(r.permissions) })),
