@@ -1154,11 +1154,11 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
               kind: "setup", sym, key: `lbinc:${c.label}:${t.date}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
               track: { dir, entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
               noTradeWhy: "LB shakeout incoming: watch only until it has a record (the data collector trades it)",
-              ...(crowdTrendNeg ? { drop: "crowd has trend mode + negative GEX behind it" } : {}),
               title: `⚠️ LB SHAKEOUT INCOMING: SPX ${c.label} holders +${c.pnlPct}% (${calls ? "calls" : "puts"} crowded)`,
               text: `**Expect a ${calls ? "DIP" : "POP"} against the ${calls ? "call" : "put"} holders soon.** ${signs.length}/4 warning signs: ${signs.join(" · ")}.`
                 + `\nSPX ${r2(c0)} · #${GX.lb.top.indexOf(c) + 1} on the leaderboard, ${Math.round(c.vol / 1000)}k traded, last $${c.last} vs VWAP $${c.vwap}`
-                + `\n**Play it:** quick ${calls ? "puts" : "calls"} toward the 3m 21 EMA ${r2(e21)} (stop ${r2(stop)}), or wait for the shakeout to finish and buy the crowd's side (${calls ? "calls" : "puts"}) on a reversal candle at support.`,
+                + `\n**Play it:** quick ${calls ? "puts" : "calls"} toward the 3m 21 EMA ${r2(e21)} (stop ${r2(stop)}), or wait for the shakeout to finish and buy the crowd's side (${calls ? "calls" : "puts"}) on a reversal candle at support.`
+                + (crowdTrendNeg ? `\n⚠️ **Low odds today:** trend mode ${calls ? "up" : "down"} and negative GEX are on the crowd's side; the crowd may simply be right (11/16: 0 of 4 such pops came). Size down or wait.` : ""),
             });
           }
         }
