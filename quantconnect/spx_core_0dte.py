@@ -20,6 +20,7 @@ import math
 # Flip test: when SPX hits a signal's stop (failed move / fakeout), buy the other side ATM; stop = back through the
 #   original entry, target = 1R beyond the original stop, 30-minute limit. Scored with and without TP+20%.
 # Phase split: 10m Saty Phase Oscillator zone at entry, read from the trade's side (squeeze / launch / with / late / extended / against / reversal).
+# Daily 20 EMA split: trade with / against yesterday's SPX close vs its daily 20 EMA.
 # Mag 7 split: AAPL MSFT NVDA AMZN GOOGL META TSLA vs today's open at entry: with (5+ of 7 the trade's way) / mixed / against.
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
@@ -278,6 +279,10 @@ class SpxCore0DTE(QCAlgorithm):
             self.lv = None
             return
         pdc, A = rows[-1]["c"], r2(wilder_atr(rows))
+        e20 = None                         # daily 20 EMA regime at yesterday's close (idea from spx-xsp-option-trade-bot)
+        for r in rows:
+            e20 = ema_next(e20, r["c"], 20)
+        self.d20 = "bull" if pdc > e20 else "bear"
         self.A, self.lv = A, {}
         for f in FIBS:
             self.lv["+%s" % f] = r2(pdc + A * f)
@@ -403,7 +408,7 @@ class SpxCore0DTE(QCAlgorithm):
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "tp": {}, "flip": flip_of is not None}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "d20": "with" if getattr(self, "d20", None) == d else "against", "tp": {}, "flip": flip_of is not None}
         if flip_of is not None:
             tr["paper"] = flip_of["paper"]
         self.open.append(tr)
@@ -486,6 +491,8 @@ class SpxCore0DTE(QCAlgorithm):
         for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
             out.append("FLIP %s %s | TP+20%% %s" % (fam, stats([t for t in self.flips if t["fam"] == fam]), stats(tpv([t for t in self.flips if t["fam"] == fam], 0.20))))
         out.append("CORE + FLIPS, both TP+20%% %s" % stats(tpv(core, 0.20) + tpv(fcore, 0.20)))
+        for z in ("with", "against"):
+            out.append("DAILY20 %-7s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("d20") == z]), stats(tpv([t for t in core if t.get("d20") == z], 0.20))))
         for z in ("with", "mixed", "against"):
             out.append("MAG7 %-7s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("mag7") == z]), stats(tpv([t for t in core if t.get("mag7") == z], 0.20))))
         for z in ("squeeze", "launch", "with", "late", "extended", "against", "reversal"):
