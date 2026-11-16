@@ -34,6 +34,8 @@ const paperTicker = (env, contract) => String(env.PAPER_TICKERS || "$SPX").split
 export const BASE_STYLE = { name: "Your rules", traits: [], delta: null, window: "rules", sizing: "full" };
 export const TEMPLATES = [
   { id: "runner", name: "Runner: hold for bigger wins", apply: (c) => ({ ...c, params: { ...c.params, t1Pct: 1.0, keep1: 0.75, keep2: 0.7, stallMin: 25, timeStopMin: 15 } }) },
+  // exits like the signal scorecard: hold to the signal's SPX target / stop (or 60 min); only a -30% safety stop on the option
+  { id: "hold", name: "Hold to the signal's target (scorecard exits)", apply: (c) => ({ ...c, params: { ...c.params, stopPct: 0.3, t1Pct: 5, bePct: 9, lockPct: 9, trailFrom: 9, timeStopMin: 60, timeStopGain: 0, stallMin: 60, keep1: 0.7, keep2: 0.65 } }) },
   { id: "scalp", name: "Quick scalp: small fast wins", apply: (c) => ({ ...c, params: { ...c.params, t1Pct: 0.3, stopPct: 0.2, bePct: 0.15, lockPct: 0.25, lockTo: 0.1, timeStopMin: 6, keep1: 0.8, keep2: 0.75 } }) },
   { id: "d30", name: "Cheaper contracts (delta 0.30)", apply: (c) => ({ ...c, delta: 0.3 }) },
   { id: "d55", name: "At the money (delta 0.55)", apply: (c) => ({ ...c, delta: 0.55 }) },
