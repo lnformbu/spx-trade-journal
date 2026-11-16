@@ -1,5 +1,5 @@
 <!--
-  SPX Trade Journal — SPY/SPX options
+  90-Day Reset — Lenon SPY/SPX options
   Served by server.js; every change is saved to trades.json (same format as before:
   id, date, ticker, strike, cp, exp, entry, exit, qty, mult, pattern, grade, notes).
 
@@ -1141,7 +1141,7 @@
     const body=rows.filter(([,s])=>s.n+s.nt>0).map(([k,s])=>`<tr><td>${esc(k)}</td><td>${s.n}</td><td>${pct(s.win)}</td><td class="${s.avg>0?"up":s.avg<0?"dn":""}">${rr(s.avg)}</td><td class="${s.total>0?"up":s.total<0?"dn":""}">${rr(s.total)}</td></tr>`).join("");
     $(el).innerHTML=`<tr><th>${label}</th><th>Scored</th><th>Win</th><th>Avg</th><th>Total</th></tr>`+(body||`<tr><td colspan="5" class="hint">No scored signals yet</td></tr>`);
   }
-  const FAM={star:"A/A+ setups",mom:"Momentum",flip:"Phase flip",squeeze:"Squeeze",box:"10m compression breakout",div1m:"1m divergence",div3m:"3m divergence",cbox1m:"1m compression breakout",cbox3m:"3m compression breakout","plan-trigger":"Your plan triggers","plan-scenario":"Plan scenarios",pb21:"21 EMA pullback",vomy:"Vomy / iVomy",orb:"Opening range break",pb8:"8 EMA ride",ggo:"Golden Gate go",ggpb:"Golden Gate pullback",atr1:"±1 ATR snap-back",bo1m:"1m breakout scalp (AM)",eodfade:"EOD fakeout fade",ckl10:"10m checklist pullback",you:"Your training setups"};
+  const FAM={star:"A/A+ setups",mom:"Momentum",flip:"Phase flip",squeeze:"Squeeze",box:"10m compression breakout",div1m:"1m divergence",div3m:"3m divergence",cbox1m:"1m compression breakout",cbox3m:"3m compression breakout","plan-trigger":"Your plan triggers","plan-scenario":"Plan scenarios",pb21:"21 EMA pullback",vomy:"Vomy / iVomy",orb:"Opening range break",orb1m:"1m ORB break (open)",pb8:"8 EMA ride",ggo:"Golden Gate go",ggpb:"Golden Gate pullback",atr1:"±1 ATR snap-back",bo1m:"1m breakout scalp (AM)",eodfade:"EOD fakeout fade",ckl10:"10m checklist pullback",you:"Your training setups"};
   function renderPaper(){
     const P=bsData&&bsData.paper; if(!P) return;
     const A=P.acct||{start:2000,balance:2000,log:[]}, M=P.model||{fams:{},changes:[],params:{}}, T=P.trades||[];

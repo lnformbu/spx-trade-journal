@@ -41,7 +41,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 export const FAM_NAMES = {
   star: "A/A+ setups", mom: "Momentum", flip: "Phase flip", squeeze: "Squeeze", box: "10m compression breakout",
   div1m: "1m divergence", div3m: "3m divergence", cbox1m: "1m compression breakout", cbox3m: "3m compression breakout",
-  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch", pb21: "21 EMA pullback", vomy: "Vomy / iVomy", orb: "Opening range break", pb8: "8 EMA ride", trend: "Trend day alerts", gg: "Golden Gate", ggo: "Golden Gate go", ggpb: "Golden Gate pullback", atr1: "±1 ATR snap-back", bo1m: "1m breakout scalp (AM)", eodfade: "EOD fakeout fade", ckl10: "10m checklist pullback", highlander: "Highlander", open: "Opening read",
+  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch", pb21: "21 EMA pullback", vomy: "Vomy / iVomy", orb: "Opening range break", orb1m: "1m ORB break (open)", pb8: "8 EMA ride", trend: "Trend day alerts", gg: "Golden Gate", ggo: "Golden Gate go", ggpb: "Golden Gate pullback", atr1: "±1 ATR snap-back", bo1m: "1m breakout scalp (AM)", eodfade: "EOD fakeout fade", ckl10: "10m checklist pullback", highlander: "Highlander", open: "Opening read",
 };
 export const famOf = (key) => {
   const [p, a, b] = String(key).split(":");

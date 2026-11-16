@@ -662,6 +662,32 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
               + `\nTwo 3m closes ${up ? "above" : "below"} the opening range ${ob.orbl}–${ob.orbh} with the 10m ribbon ${rib10 ? rib10.state : "—"}.`,
           });
         }
+        // 1-MINUTE ORB (open, traded): 9:30-9:35 range, two 1m closes beyond it, on the same side of yesterday's close.
+        // Stop = middle of the range, target 2R, entries 9:37-10:30, once per side per day.
+        // Test (scripts/orb-test.mjs): 1m Oct-Nov 25 trades 60% win +0.48R; 5m version over 8 months 163 trades +0.11R.
+        if (sym === "$SPX" && t.min >= 577 && t.min < 630 && D.pdc != null) {
+          const or5 = rth.filter((c) => c.t.min < OPEN + 5);
+          const aft = rth.filter((c) => c.t.min >= OPEN + 5);
+          if (or5.length >= 4 && aft.length >= 2) {
+            const oh = Math.max(...or5.map((c) => c.high)), ol = Math.min(...or5.map((c) => c.low)), mid = (oh + ol) / 2;
+            const a = aft.at(-1), p = aft.at(-2), pp = aft.at(-3);
+            for (const [dir, beyond] of [["bull", (c) => c.close > oh], ["bear", (c) => c.close < ol]]) {
+              const up = dir === "bull";
+              if (!(beyond(a) && beyond(p) && !(pp && beyond(pp)))) continue;          // exactly the 2nd close beyond
+              if (up ? a.close <= D.pdc : a.close >= D.pdc) continue;                   // with yesterday's close
+              const risk = Math.abs(a.close - mid);
+              if (risk < 0.5 || risk > 30) continue;
+              const tgt = up ? a.close + 2 * risk : a.close - 2 * risk;
+              found.push({
+                kind: "setup", sym, key: `orb1m:${t.date}:${dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+                track: { dir, entry: r2(a.close), stop: r2(mid), target: r2(tgt), needTrigger: false },
+                title: `🚪 SPX 1m ORB BREAK ${up ? "CALLS ▲" : "PUTS ▼"} · open`,
+                text: `**Entry:** now ~${r2(a.close)} · **Stop:** ${r2(mid)} (middle of the opening range) · **Target:** ${r2(tgt)} (2R)`
+                  + `\nTwo 1m closes ${up ? "above" : "below"} the 9:30-9:35 range ${r2(ol)}–${r2(oh)}, ${up ? "above" : "below"} yesterday's close ${D.pdc}.`,
+              });
+            }
+          }
+        }
         // Vomy / iVomy (3m): stacked ribbon breaks and holds the 48 EMA
         // Vomy, Saty's way (replay: 20 trades, 75% wins, +0.72R; 3m-only version −0.08R):
         // 1) the 10m chart confirms a Vomy / iVomy (stacked ribbon, 2 closes through the 48) → heads-up
@@ -1108,7 +1134,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           // core playbook (best after every rule; the paper "Core playbook only" challenger trades just these): ⭐ in the title
           if (CORE_FAMS.has(fam) && !f.noTrade && !/^⭐/.test(f.title)) f.title = "⭐ " + f.title;
           // opening window 9:33-10:00 (replay: 9:40-10:00 −0.22R): only ORB breaks and A+ cards are traded; the rest is watch-only
-          const openWin = t.min < 600 && fam !== "orb" && fam !== "ggo" && !(fam === "star" && f.grade === "A+");
+          const openWin = t.min < 600 && fam !== "orb" && fam !== "orb1m" && fam !== "ggo" && !(fam === "star" && f.grade === "A+");
           if (openWin) f.noTrade = "opening window";
           // end of day (PDF 16 check): after 3:30 only A/A+ cards held up in the replay (+0.13R vs −0.17R for the rest)
           const eodWin = t.min >= 930 && fam !== "star";

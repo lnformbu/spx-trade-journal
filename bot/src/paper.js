@@ -19,7 +19,7 @@ const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
 // best families after every rule (replay): Vomy, 8 EMA ride, 10m checklist, ±1 ATR snap-back, 1m divergence, Golden Gate pullback/go, 21 EMA pullback
 export const CORE = new Set(["vomy", "pb8", "ckl10", "atr1", "div1m", "ggpb", "ggo", "pb21"]);
-const TRADED = new Set(["star", "flip", "squeeze", "box", "div1m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy", "orb", "pb8", "ggo", "ggpb", "atr1", "ckl10"]);
+const TRADED = new Set(["star", "flip", "squeeze", "box", "div1m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy", "orb", "orb1m", "pb8", "ggo", "ggpb", "atr1", "ckl10"]);
 const group = (sym) => (sym === "SPY" || sym === "$SPX" ? "SPX" : sym);   // SPY and SPX count as one market
 const rootOf = (contract) => String((contract && contract.symbol) || "").split(" ")[0].replace(/^SPXW$/, "SPX");
 // which option underlyings get paper traded: wrangler.toml PAPER_TICKERS (default "$SPX"; add e.g. ",TSLA" later)
@@ -68,7 +68,7 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (!TRADED.has(cand.fam)) return "not a tradable setup";
   if (t.min < 573) return "before 9:33 (opening range)";
   if (t.min >= 955) return "no new entries after 3:55";
-  if (t.min < 600 && cand.fam !== "orb" && cand.fam !== "ggo" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
+  if (t.min < 600 && cand.fam !== "orb" && cand.fam !== "orb1m" && cand.fam !== "ggo" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
   // PDF 16 check (replay): after 3:30 signals averaged −0.09R; only A/A+ cards held up (+0.13R, 49), the rest −0.17R (139)
   if (t.min >= 930 && cand.fam !== "star") return "end-of-day window (after 3:30): only A/A+ cards";
   // QuantConnect 2025 on real SPXW 0DTE: core setups entered 2:00-4:00 lost 46% of the premium on average (29 trades, PF 0.47)
