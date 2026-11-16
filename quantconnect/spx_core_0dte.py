@@ -360,6 +360,10 @@ class SpxCore0DTE(QCAlgorithm):
                 self.log("   %-5s " % d + stats([t for t in ts if t["dir"] == d]))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):
             self.log("time %-8s" % lab + stats([t for t in self.trades if lo <= t["m"] < hi]))
+        core = [t for t in self.trades if t["fam"] != "bo1m"]
+        for y in sorted(set(t["date"][:4] for t in self.trades)):
+            self.log("year %s CORE  " % y + stats([t for t in core if t["date"][:4] == y]))
+            self.log("year %s PAPER " % y + stats([t for t in core if t["paper"] and t["date"][:4] == y]))
         self.log("signals skipped (no 0DTE quote): %d · left out (settled on a half day): %d" % (self.no_chain, self.unclosed))
         cols = ["date", "et", "fam", "dir", "paper", "spx_entry", "stop", "target", "risk", "strike", "opt_in", "spread_in",
                 "exit", "et_out", "spx_R", "opt_out", "opt_pct", "best_pct", "pnl"]
