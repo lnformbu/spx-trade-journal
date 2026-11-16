@@ -70,6 +70,9 @@ const log = (b, t, action, title, why) => { b.log.push({ et: hhmm(t.min), action
 // hard rules (every style) + the style's trading hours
 function gate(b, cfg, cand, t, now, events = []) {
   const d = b.day, sb = d.startBal;
+  // DATA COLLECTOR: every signal with a contract, 9:32-3:55, no risk / count / window rules (training + forward-test data)
+  if (cfg.collect) return t.min < 572 ? "before 9:32" : t.min >= 955 ? "no new entries after 3:55" : null;
+  if (cand.blocked) return cand.blocked;
   if (!TRADED.has(cand.fam)) return "not a tradable setup";
   if (t.min < 573) return "before 9:33 (opening range)";
   if (t.min >= 955) return "no new entries after 3:55";
@@ -90,12 +93,12 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (cfg.window !== "all" && t.min >= 690 && t.min < 810 && !(cand.fam === "star" && (cand.grade === "A+" || cand.score >= 90))) return "midday 11:30-1:30: A-grade (90+) only";
   if (d.done) return d.done;
   const dp = d.pnl - (d.base || 0), best = Math.max(0, (d.best || 0) - (d.base || 0));   // P/L since today's budget (re)start
-  if (dp <= -0.15 * sb) return (d.done = "daily loss limit (−15%) reached");
-  if (dp >= 0.15 * sb) return (d.done = "daily target (+15%) reached");
+  if (dp <= -0.2 * sb) return (d.done = "daily loss limit (−20%) reached");
+  if (dp >= 0.25 * sb) return (d.done = "daily target (+25%) reached");
   if (best >= 0.10 * sb && dp < best / 2) return (d.done = "profit lock: gave back half of the day's best");
-  if (d.trades >= 10) return "10 trades today";
-  if (d.consecLoss >= 3) return (d.done = "3 losses in a row");
-  if (now - d.lastLossAt < 15 * 60000) return "15-minute cooldown after a loss";
+  if (d.trades >= 20) return "20 trades today";
+  if (d.consecLoss >= 4) return (d.done = "4 losses in a row");
+  if (now - d.lastLossAt < 5 * 60000) return "5-minute cooldown after a loss";
   if (d.stopOuts.some((s) => s.sym === group(cand.sym) && s.dir === cand.dir && Math.abs(s.level - cand.uEntry) <= Math.abs(cand.uEntry) * 0.0008)) return "already stopped out at this level in this direction";
   return null;
 }
@@ -118,8 +121,9 @@ async function stepBook(b, cfg, X) {
   P.stopPct = Math.min(0.3, P.stopPct || 0.3);
   if (!b.day || b.day.date !== t.date) freshDay(b, t);
   b.positions = b.positions || (b.open ? [b.open] : []);
+  const SLOTS = cfg.collect ? 12 : MAX_OPEN;
   const openRisk = () => b.positions.reduce((s, x) => s + (x.risk || 0), 0);
-  const conflict = (sym, dir) => b.positions.find((x) => group(x.under) === group(sym) && x.dir !== dir);
+  const conflict = (sym, dir) => (cfg.collect ? null : b.positions.find((x) => group(x.under) === group(sym) && x.dir !== dir));
 
   // the contract this style buys for a signal: the signal's own, or (delta styles, SPX) the SPX 0DTE contract nearest its delta
   async function contractFor(c) {
@@ -148,6 +152,7 @@ async function stepBook(b, cfg, X) {
     b.positions = b.positions.filter((x) => x !== p);
     b.open = b.positions[0] || null;
     log(b, t, pnl >= 0 ? "win" : "loss", p.label, `${why} · ${usd(pnl)}`);
+    if (cfg.collect) X.dataClosed.push({ ...trade, blocked: p.blocked || null });
     if (!champion) { b.recent = [{ date: t.date, et: p.et, label: p.label, signal: p.signal, pnl, R: trade.R, why }, ...(b.recent || [])].slice(0, 30); return; }
     X.closed.push(trade);
     X.shadow.push({ id: p.id, symbol: p.symbol, until: now + 30 * 60000 });
@@ -162,17 +167,17 @@ async function stepBook(b, cfg, X) {
     const ask = k.ask, bid = k.bid;
     const cost1 = ask * 100, riskPer = cost1 * P.stopPct + 2 * FEE;
     const share = (cfg.sizing === "edge" && (p.est == null || p.est < 0.2) ? 0.25 : 0.5) / MAX_OPEN;
-    let qty = Math.floor((share * b.balance) / cost1);
-    if (qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
-    qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl - (b.day.base || 0) + 0.15 * b.day.startBal - openRisk()) / riskPer));
-    if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the 15% limit left today (open positions included)"); return false; }
+    let qty = cfg.collect ? 1 : Math.floor((share * b.balance) / cost1);
+    if (!cfg.collect && qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
+    if (!cfg.collect) qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl - (b.day.base || 0) + 0.2 * b.day.startBal - openRisk()) / riskPer));
+    if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the daily loss limit left (open positions included)"); return false; }
     qty = Math.min(qty, MAX_QTY);
     const pos = {
       id: now + ":" + k.symbol, date: t.date, symbol: k.symbol, label: k.label, under: p.sym, delta: k.delta, dir: p.dir,
       qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
       at: now, et: hhmm(t.min), stop: r2(ask * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,
       uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer), bestU: underPx ?? p.uEntry, rib0: X.tf10[p.sym] || null,
-      fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est,
+      fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est, blocked: p.blocked || null,
       exits: [], realized: 0, path: [r3((bid || ask) / ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct }, style: cfg.name,
     };
     b.positions.push(pos);
@@ -203,6 +208,7 @@ async function stepBook(b, cfg, X) {
       if (bid > pos.bestBid) { pos.bestBid = bid; pos.bestAt = now; }
       const pct = bid / E - 1, bestPct = pos.bestBid / E - 1;
       if (bestPct >= P.bePct) pos.stop = Math.max(pos.stop, E);
+      if (bestPct >= (P.trailFrom ?? 9)) pos.stop = Math.max(pos.stop, E + (P.trailKeep ?? 0.6) * (pos.bestBid - E));   // trailing from +20%
       if (bestPct >= P.lockPct) pos.stop = Math.max(pos.stop, E * (1 + P.lockTo));
       const uHit = pos.uTarget != null && u != null && (bull ? u >= pos.uTarget : u <= pos.uTarget);
       if (!pos.t1 && (pct >= P.t1Pct || (uHit && pct >= 0.15))) {
@@ -214,7 +220,7 @@ async function stepBook(b, cfg, X) {
         if (champion) X.messages.push({ title: `📄 PAPER target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
       }
       if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
-      const opp = candidates.find((c) => group(c.sym) === group(pos.under) && c.dir !== pos.dir && decide(model, c).ok);
+      const opp = cfg.collect ? null : candidates.find((c) => !c.blocked && group(c.sym) === group(pos.under) && c.dir !== pos.dir && decide(model, c).ok);
       // rejected at a level: the ticker reached a key level beyond the entry, then gave back half the move while the option is green
       if (u != null) pos.bestU = bull ? Math.max(pos.bestU ?? u, u) : Math.min(pos.bestU ?? u, u);
       const tol = Math.abs(pos.uEntry) * 0.0004, run = bull ? pos.bestU - pos.uEntry : pos.uEntry - pos.bestU;
@@ -225,7 +231,7 @@ async function stepBook(b, cfg, X) {
       const cloud = X.tf10[pos.under], flipped = cloud && cloud === (bull ? "bearish" : "bullish") && pos.rib0 !== cloud;
       const evSoon = X.events.find((e) => e.min >= 570 && t.min >= e.min - 5 && t.min < e.min);
       let why = null;
-      if (bid <= pos.stop) why = pos.stop > E ? (pos.t1 ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
+      if (bid <= pos.stop) why = pos.stop > E ? (pos.t1 || pos.bestBid / E - 1 >= (P.trailFrom ?? 9) ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
       else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
       else if (rejected) why = `rejected at ${lvl[0]} ${lvl[1]}`;
       else if (flipped) why = "10m Saty cloud flipped against the trade";
@@ -241,9 +247,9 @@ async function stepBook(b, cfg, X) {
   }
 
   // ---- signals waiting for their entry level ----
-  if (b.positions.length < MAX_OPEN) {
+  if (b.positions.length < SLOTS) {
     for (const p of b.pending) {
-      if (p.done || b.positions.length >= MAX_OPEN) continue;
+      if (p.done || b.positions.length >= SLOTS) continue;
       if (conflict(p.sym, p.dir)) continue;   // keeps waiting while the opposite side is open
       const bull = p.dir === "bull", u = px(p.sym);
       const g = gate(b, cfg, p, t, now, X.events);
@@ -265,9 +271,9 @@ async function stepBook(b, cfg, X) {
   for (const c of candidates) {
     const g = gate(b, cfg, c, t, now, X.events);
     if (g) { log(b, t, "skipped", c.title, g); continue; }
-    if (b.positions.length >= MAX_OPEN) { log(b, t, "skipped", c.title, `${MAX_OPEN} positions already open`); continue; }
+    if (b.positions.length >= SLOTS) { log(b, t, "skipped", c.title, `${SLOTS} positions already open`); continue; }
     if (conflict(c.sym, c.dir)) { log(b, t, "skipped", c.title, `opposite side already open (${conflict(c.sym, c.dir).label})`); continue; }
-    const d = decide(model, c);
+    const d = cfg.collect ? { ok: true, est: null, why: "" } : decide(model, c);
     if (!d.ok) { log(b, t, "skipped", c.title, d.why); continue; }
     if (c.needTrigger) {
       if (b.pending.some((p) => group(p.sym) === group(c.sym) && p.dir === c.dir)) continue;
@@ -286,14 +292,14 @@ async function stepBook(b, cfg, X) {
 // candidates = this minute's new signals that were posted with a contract (from runSignals)
 export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, now = Date.now(), t }) {
   const { schwabToken, schwab, readJSON, writeJSON } = deps;
-  candidates = candidates.filter((c) => TRADED.has(c.fam) && paperTicker(env, c.contract));
+  candidates = candidates.filter((c) => paperTicker(env, c.contract));   // blocked / watch-only ones still reach the data collector
   const acct = (await readJSON(env, "paper:acct")) || newBook();
   const model = (await readJSON(env, "paper:model")) || DEFAULT_MODEL;
   // one-time switch of the champion to scalp exits (the learned params were the old swing defaults)
   if ((model.scalpV || 0) < SCALP_V) {
     model.params = { ...(model.params || {}), ...DEFAULT_PARAMS };
     model.scalpV = SCALP_V;
-    model.changes = [...(model.changes || []), { date: t.date, what: "exits switched to scalp mode (stop -20%, target 1 +30%, 6-min time stop), max 3 contracts" }].slice(-50);
+    model.changes = [...(model.changes || []), { date: t.date, what: "exits: stop -15%, trailing stop from +20% (keeps 60%), bank 1 of 3 at +40%, 6-min time stop, max 3 contracts" }].slice(-50);
     await writeJSON(env, "paper:model", model);
   }
   const champ = championCfg(model);
@@ -313,7 +319,9 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   const token = await schwabToken(env);
 
   // one quote call for every book's open contract, the tickers, waiting contracts and the champion's after-exit shadows
-  const books = [acct, ...Object.values(ch.books).map((x) => x.book)];
+  const data = (await readJSON(env, "paper:data")) || newBook();
+  const dataCfg = { ...champ, id: "data", name: "Data collector (every signal, 1 contract)", collect: true, window: "all" };
+  const books = [acct, ...Object.values(ch.books).map((x) => x.book), data];
   // one-time move to the new size: a book that never traded at the old $2,000 start starts over at START
   for (const b of books) if (b.start !== START && b.balance === b.start && !b.open && !(b.positions || []).length && !(b.recent || []).length) {
     b.start = START; b.balance = START; if (b.day) b.day.startBal = START;
@@ -325,7 +333,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   const Q = await quotes(schwab, token, syms);
   const chains = {};
   const X = {
-    env, candidates, events, kl, tf10, Q, model, now, t, closed: [], messages: [], shadow: acct.shadow,
+    env, candidates, events, kl, tf10, Q, model, now, t, closed: [], dataClosed: [], messages: [], shadow: acct.shadow,
     px: (sym) => (Q[sym] ? Q[sym].last ?? Q[sym].mark : null),
     // SPX 0DTE chain for the delta styles, fetched at most once per side per minute
     chain: (dir) => (chains[dir] = chains[dir] || (async () => {
@@ -353,6 +361,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   for (const x of Object.values(ch.books)) {
     try { await stepBook(x.book, x.cfg, { ...X, champion: false }); } catch (e) { console.error("challenger", x.cfg.id, e); }
   }
+  try { await stepBook(data, dataCfg, X.dataClosed ? { ...X, champion: false } : X); } catch (e) { console.error("data collector", e); }
   // per-session results for the champion-vs-challenger comparison
   const rec = (id, b) => { const h = (ch.hist[id] = ch.hist[id] || {}); h[t.date] = { pnl: b.day.pnl, trades: b.day.trades, gw: b.day.gw, gl: b.day.gl }; };
   rec("champion", acct);
@@ -361,6 +370,14 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   acct.updatedAt = now;
   await writeJSON(env, "paper:acct", acct);
   await writeJSON(env, "paper:challengers", ch);
+  data.updatedAt = now;
+  await writeJSON(env, "paper:data", data);
+  if (X.dataClosed.length) {
+    const dt = (await readJSON(env, "paper:datatrades")) || { items: [] };
+    dt.items.push(...X.dataClosed);
+    dt.items = dt.items.slice(-4000);
+    await writeJSON(env, "paper:datatrades", dt);
+  }
   if (X.closed.length) {
     const tr = (await readJSON(env, "paper:trades")) || { items: [] };
     tr.items.push(...X.closed);
@@ -404,6 +421,7 @@ export async function runLearning(env, deps, { force = false, report = false, qu
   if (!force && prev.lastRun === t.date) return { skipped: "already trained today" };
   const stats = (await readJSON(env, "bot:stats")) || { items: [] };
   const trades = (await readJSON(env, "paper:trades")) || { items: [] };
+  const dataTrades = (await readJSON(env, "paper:datatrades")) || { items: [] };
   const fbRes = await collectFeedback(env, readJSON, writeJSON, t).catch((e) => ({ err: e.message, items: [] }));
   const replayData = (await readJSON(env, "bot:replay")) || { items: [] };
   const lib = (await readJSON(env, "lib:setups")) || { items: [] };
@@ -430,7 +448,7 @@ export async function runLearning(env, deps, { force = false, report = false, qu
       }
     }
   } catch (e) { console.error("lb hist", e); }
-  const { model, changes } = learn(prev, stats.items, trades.items, t.date, {
+  const { model, changes } = learn(prev, stats.items, [...trades.items, ...dataTrades.items.map((x) => ({ ...x, data: true }))], t.date, {
     replay: replayData.items, training: lib.items.filter((x) => x.result), feedback: fbRes.items || [],
   });
 

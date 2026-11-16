@@ -1348,9 +1348,11 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         // signals that enter right away are priced now; "entry on a 1m close" ones when they trigger
         optEntry: !a.track.needTrigger && a.contract && a.contract.ask > 0 ? a.contract.ask : null });
     }
-    // every signal posted with a contract is a paper-trade candidate: that contract, that entry, that stop (in the signal's own ticker)
-    if (!dry && !a.vixAgainst && !a.noTrade && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
+    // every signal posted with a contract is a paper-trade candidate: that contract, that entry, that stop (in the signal's own ticker).
+    // Watch-only / VIX-against / window-blocked ones go too, marked "blocked": only the data collector book takes those.
+    if (!dry && a.track && a.track.stop != null && a.contract && a.contract.symbol) {
       candidates.push({ key: a.key, fam: famOf(a.key), kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, et: hhmm(t.min), sym: a.sym,
+        blocked: a.vixAgainst ? "VIX trending against the trade" : a.noTrade || null,
         contract: a.contract, dir: a.track.dir, uEntry: a.track.entry, uStop: a.track.stop, uTarget: a.track.target, needTrigger: !!a.track.needTrigger,
         why: (String(a.text).split("**Why:** ")[1] || "").trim() });
     }

@@ -15,23 +15,26 @@ import { phaseCtx } from "./levels.js";
 //      a change is kept only if it is better on both
 // Hard limits it can never change: stop at most -30% (max loss 15% of the account), sizing, daily limits, entry window.
 
-// SCALP exits (user 2026-11-16: "focus on scalps"): small fast wins, tight stop, quick time stop.
-// The old swing-style exits (stop -30%, target 1 +60%, 10-min time stop) live on as the "runner"-type challengers.
+// SCALP exits (user 2026-11-16): "focus on scalps", then "cut losers fast, let winners run, trailing stop once above +20%".
+// Losers: -15% premium stop + 6-minute time stop. Winners: breakeven at +15%, a trailing stop from +20% that keeps 60% of
+// the best gain, 1 of 3 banked at +40%, then the trail tightens to 75-80%; a runner can sit 15 min without a new high.
 export const DEFAULT_PARAMS = {
-  stopPct: 0.20,      // premium stop
-  t1Pct: 0.30,        // target 1 (sell 1 of 3, rest trails)
+  stopPct: 0.15,      // premium stop (cut losers fast)
+  t1Pct: 0.40,        // target 1: bank 1 of 3, the rest trails
   bePct: 0.15,        // stop to breakeven
   lockPct: 0.25,      // at +25% ...
-  lockTo: 0.10,       // ... stop to +10%
+  lockTo: 0.10,       // ... stop at least +10%
+  trailFrom: 0.20,    // trailing stop starts once the option is +20%
+  trailKeep: 0.60,    // ... keeping 60% of the best gain (before target 1)
   runnerStop2: 0.20,  // 2+ contracts: runner stop after target 1
   runnerStop1: 0.25,  // 1 contract: stop after target 1
-  keep2: 0.75,        // trail keeps 75% of the best gain (80% with 1 contract)
+  keep2: 0.75,        // after target 1 the trail keeps 75% of the best gain (80% with 1 contract)
   keep1: 0.80,
   timeStopMin: 6,     // no +10% within 6 minutes: out
   timeStopGain: 0.10,
-  stallMin: 8,        // runner makes no new high for 8 minutes: out
+  stallMin: 15,       // runner makes no new high for 15 minutes: out (let winners run)
 };
-export const SCALP_V = 1;   // bump to re-apply the scalp exits over learned params
+export const SCALP_V = 2;   // bump to re-apply the scalp exits over learned params
 export const DEFAULT_MODEL = { v: 0, updated: null, lastRun: null, fams: {}, feats: {}, minScore: 70, threshold: -0.15, params: { ...DEFAULT_PARAMS }, changes: [] };
 
 const PRIOR = 10;      // results worth of "0R" every average starts from
@@ -102,6 +105,7 @@ export function replay(path, P, two) {
     const pct = path[i];
     if (pct > best) { best = pct; bestAt = i; }
     if (best >= P.bePct) stop = Math.max(stop, 0);
+    if (best >= (P.trailFrom ?? 9)) stop = Math.max(stop, (P.trailKeep ?? 0.6) * best);
     if (best >= P.lockPct) stop = Math.max(stop, P.lockTo);
     if (!t1 && pct >= P.t1Pct) {
       t1 = true;
@@ -127,7 +131,7 @@ export function learn(prev, statsItems, trades, today, extra = {}) {
   // samples: live signals graded in R (last 1500, weight 1), paper trades in R of their dollar risk (weight 2)
   const sig = (statsItems || []).filter((x) => x.R != null).slice(-1500)
     .map((x) => ({ date: x.date, fam: x.fam || famOf(x.key || "") || kindFam(x), kind: x.kind, grade: x.grade, score: x.score, et: x.et, ctx: x.ctx, R: clampR(x.R), w: 1 }));
-  const pt = (trades || []).filter((x) => x.R != null).map((x) => ({ ...x, R: clampR(x.R), w: 2, paper: true }));
+  const pt = (trades || []).filter((x) => x.R != null).map((x) => ({ ...x, R: clampR(x.R), w: x.data ? 1 : 2, paper: true }));   // data-collector trades: weight 1
   const rp = (extra.replay || []).filter((x) => x.R != null).map((x) => ({ ...x, R: clampR(x.R), w: 0.5 }));
   // your own setups: result % on the option ÷ 30% (a full stop) = R; context from the snapshot taken when you posted
   const tp = (extra.training || []).map(trainingSample).filter(Boolean);
@@ -175,7 +179,7 @@ export function learn(prev, statsItems, trades, today, extra = {}) {
     const cut = Math.floor(withPath.length * 0.7), fit = withPath.slice(0, cut), check = withPath.slice(cut);
     const cur = m.params;
     let best = cur, bestFit = avgReplay(fit, cur);
-    for (const stopPct of [0.15, 0.2, 0.25]) for (const t1Pct of [0.2, 0.3, 0.4, 0.6]) for (const timeStopMin of [4, 6, 10]) {   // scalp-centred grid (user: focus on scalps)
+    for (const stopPct of [0.1, 0.15, 0.2]) for (const t1Pct of [0.3, 0.4, 0.6, 0.8]) for (const timeStopMin of [4, 6, 10]) {   // scalp-centred grid (user: focus on scalps)
       const P = { ...cur, stopPct, t1Pct, timeStopMin };
       const s = avgReplay(fit, P);
       if (s > bestFit) { bestFit = s; best = P; }

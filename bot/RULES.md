@@ -10,14 +10,14 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 |---|---|---|
 | Account | paper account (your starting amount; example $25,000), follows the bot's own P/L (one 0DTE SPX contract costs ~$1,700-2,500) | $25,000 |
 | Position size | **50% of the account ÷ 3 slots** in premium: contracts = account × 16.7% ÷ (price × 100), at least 1 | ~$4,150 (e.g. 6 × $7.00) |
-| Max loss per trade | **15% of the account ÷ 3 slots** (premium stop at about −20%), including fees and slippage | $1,250 cap (3 × $7 contracts risk ~$420) |
+| Max loss per trade | **15% of the account ÷ 3 slots** (premium stop at **−15%**: cut losers fast), including fees and slippage | $1,250 cap (3 × $7 contracts risk ~$420) |
 | **Max contracts per trade** | **3** (user 2026-11-16) | |
-| Daily loss lockout | **15% of the account**, realized + open risk; checked *before* each entry | $3,750 (one full loss ends the day) |
+| Daily loss lockout | **20% of the account**, realized + open risk; checked *before* each entry (daily profit stop +25%) | $5,000 |
 | If one contract alone costs more than 50% or risks more than 15% | skip the trade | |
-| Max trades per day | 10 | |
-| Max consecutive losses | 3, then done for the day | |
+| Max trades per day | 20 | |
+| Max consecutive losses | 4, then done for the day | |
 | Max open positions | **3** at once, never calls and puts on SPX at the same time; each takes one slot: 50% ÷ 3 of the account in premium and 15% ÷ 3 risk, and all open risk counts against the day's 15% loss budget | ~$4,150 premium / $1,250 risk per position |
-| **NEW** Cooldown after a loss | 15 minutes, no new entries *(start)* | |
+| Cooldown after a loss | 5 minutes, no new entries | |
 | **NEW** Same level after a stop-out | no second entry in the same direction at the same level that day | |
 | Never | average down, add to a loser, widen a stop, re-enter out of revenge | |
 
@@ -205,7 +205,8 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 |---|---|
 | Premium stop | about −30%, so a full loss = 15% of the account |
 | Structure stop | SPY back through the retest level / confirmation swing |
-| Target 1 | **SCALP MODE: +30%** on the option or the signal's target level: **sell 1 of 3** (half when 2); the rest trails on the ladder below |
+| Trailing stop | **once the option is +20%**, the stop trails the best price keeping 60% of the gain (breakeven already at +15%) |
+| Target 1 | **+40%** on the option or the signal's target level: **sell 1 of 3** (half when 2); the rest trails keeping 75-80% of the best gain, out after 15 min with no new high (let winners run) |
 | Target 2 | the level after that (the 2 ATR extension if momentum continues): runner exit |
 | Trailing stop | see the profit ladder below |
 | Rejection | price reaches a level and gets rejected: exit, don't wait for the next one |
@@ -269,7 +270,7 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 | Setup families on/off | off after 15+ results from 3+ different days averaging below −0.15R (averages are shrunk toward 0 so a few results can't decide); back on above 0R |
 | Context adjustments | time window, chop, gamma regime, with/against your plan, VIX agreement: each adds or subtracts expected R (8+ results needed, at most ±0.5R) |
 | Minimum A/A+ score | 70 → 80 → 90 when lower score bands lose money; lowered again when they recover |
-| Exit settings | stop (−15/−20/−25%), target 1 (+20/30/40/60%), time stop (4/6/10 min), scalp-centred: fitted on the older 70% of trades, kept only if also better on the newest 30% (needs 20+ trades) |
+| Exit settings | stop (−10/−15/−20%), target 1 (+30/40/60/80%), time stop (4/6/10 min), scalp-centred: fitted on the older 70% of trades, kept only if also better on the newest 30% (needs 20+ trades) |
 
 - It can **never** change: the −30% maximum stop, 15% maximum loss, sizing, daily limits, entry window.
 - Changes are posted to #signals (🧠 Bot learning) and listed in the journal; a weekly paper report posts on Fridays.
@@ -710,3 +711,12 @@ The bot reads the ticker, contract, direction, entry time, result and #tags, and
 (clouds, Phase Oscillator, VIX, chop, DTR, nearest levels, VWAP side, your plan's side, gamma levels). Once there are enough
 results, the weekly report compares winners with losers and suggests scoring changes; nothing changes without your OK.
 The bot can't read the chart image itself; the words and #tags carry the setup.
+
+## Data collector (training + forward-test data)
+
+A separate paper book (D1 `paper:data`, trades in `paper:datatrades`) takes **every** SPX signal that has a contract, from 9:32 to
+3:55, with **1 contract**, including watch-only setups, VIX-against signals and opening/afternoon-window ones (they are marked
+`blocked` with the reason). No daily loss limit, trade count, cooldown or learning filter; up to 12 open at once; calls and puts
+may be open together. Same exits as the main account. Its trades feed the nightly learning at weight 1 (main paper trades weight 2)
+and the exit tuning, and export with `/export?kind=data` (pulled into `data/data.csv` by `scripts/pull-history.mjs`): a real
+option-price record of every setup for backtesting. Silent: no Discord posts.

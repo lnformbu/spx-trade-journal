@@ -9,6 +9,7 @@
 //   eod.csv       each day at the close: top-3 contracts ITM or not, the EOD plan (kill direction, pin, walls) vs the close
 //   signals.csv   every scored signal (entry, stop, target, outcome, R, context)
 //   paper.csv     every paper trade
+//   data.csv      the data collector: EVERY signal traded with 1 contract (watch-only too), option path per minute
 //   spx_1m.csv / spy_1m.csv   1-minute candles (regular hours, Schwab keeps ~48 days), spx_5m.csv / spx_10m.csv (from ~March 2026),
 //   spx_daily.csv / spx_monthly.csv   20 years
 import fs from "fs";
@@ -66,7 +67,7 @@ const merge = (file, fresh, from) => {
 const lastDate = (file, fallback) => { const r = readCSV(file); return r.length ? r.reduce((m, x) => (x.date > m ? x.date : m), "") : fallback; };
 
 // --- bot records ---
-for (const kind of ["board", "lb", "eod", "signals", "paper"]) {
+for (const kind of ["board", "lb", "eod", "signals", "paper", "data"]) {
   const file = path.join(DATA, kind + ".csv");
   const from = lastDate(file, "2026-11-01");
   const text = await get("/export", { kind, from, to: today });

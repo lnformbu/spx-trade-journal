@@ -457,7 +457,11 @@ export default {
       } else if (kind === "paper") {
         rows = (((await readJSON(env, "paper:trades")) || {}).items || []).map((x) => ({ date: x.date || (x.closedAt ? et(x.closedAt).date : ""), ...x }))
           .filter((x) => x.date >= from && x.date <= to);
-      } else return new Response("kind must be board, lb, eod, signals or paper", { status: 400 });
+      } else if (kind === "data") {
+        // data collector: every signal traded with 1 contract (watch-only ones too), with its option price path
+        rows = (((await readJSON(env, "paper:datatrades")) || {}).items || []).map((x) => ({ date: x.date || (x.closedAt ? et(x.closedAt).date : ""), ...x, path: (x.path || []).join(" ") }))
+          .filter((x) => x.date >= from && x.date <= to);
+      } else return new Response("kind must be board, lb, eod, signals, paper or data", { status: 400 });
       return new Response(csv(rows), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${kind}_${from}_${to}.csv"` } });
     }
     // your weekly bigger-picture thesis from #spx-training: { date, text, levels: [{ name, price, role }], scenarios: [..] }
