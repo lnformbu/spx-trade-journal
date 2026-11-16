@@ -1144,12 +1144,17 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             const signs = [stretched && "stretched", stalling && "momentum stalling", atWall && `at ${atWall[0]} ${r2(atWall[1])}`, fading && "crowd's flow fading"].filter(Boolean);
             if (signs.length < 3) continue;
             const dir = calls ? "bear" : "bull";
+            // no shakeout against a crowd that has the trend AND negative GEX behind it (11/16: trend-down day, -GEX: put crowds
+            // were right all day, 0 of 4 "incoming" pops came). Not posted; the data collector still measures it.
+            const tdS = st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active ? st.trendDay.$SPX.dir : null;
+            const crowdTrendNeg = tdS === (calls ? "bull" : "bear") && gexReg(c0) === "-";
             const stop = calls ? Math.max(last3.high, c0) + D.atr * 0.03 : Math.min(last3.low, c0) - D.atr * 0.03;
             const tgt = (e21 - c0) * sgn < 0 ? e21 : calls ? c0 - D.atr * 0.1 : c0 + D.atr * 0.1;
             found.push({
               kind: "setup", sym, key: `lbinc:${c.label}:${t.date}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
               track: { dir, entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
               noTradeWhy: "LB shakeout incoming: watch only until it has a record (the data collector trades it)",
+              ...(crowdTrendNeg ? { drop: "crowd has trend mode + negative GEX behind it" } : {}),
               title: `⚠️ LB SHAKEOUT INCOMING: SPX ${c.label} holders +${c.pnlPct}% (${calls ? "calls" : "puts"} crowded)`,
               text: `**Expect a ${calls ? "DIP" : "POP"} against the ${calls ? "call" : "put"} holders soon.** ${signs.length}/4 warning signs: ${signs.join(" · ")}.`
                 + `\nSPX ${r2(c0)} · #${GX.lb.top.indexOf(c) + 1} on the leaderboard, ${Math.round(c.vol / 1000)}k traded, last $${c.last} vs VWAP $${c.vwap}`
