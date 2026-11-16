@@ -702,6 +702,35 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             }
           }
         }
+        // 1-MINUTE CLOUD FLIP SCALP (traded): the 1m 8/21 cloud flips after 5+ minutes the other way (downtrend -> uptrend
+        // for calls, the mirror for puts) while the 3m 8/21 cloud already agrees. 9:45-2:00, stop past the 5-bar low/high,
+        // target 2R. Test (scripts/flip1m-test.mjs, 32 days): 66 trades, 58% win, +0.49R; without the 3m check +0.09R.
+        if (sym === "$SPX" && t.min >= 586 && t.min <= 841) {
+          const d1 = done.filter((c) => { const m = et(c.datetime).min; return m >= OPEN && m < CLOSE; });
+          if (d1.length > 60) {
+            const cl = d1.map((c) => c.close), f8 = ema(cl, 8), f21 = ema(cl, 21), n = d1.length - 1;
+            const g3 = aggregate(d1, 3).filter((b) => b.datetime + 180000 <= now), c3 = g3.map((b) => b.close);
+            const up3 = g3.length > 25 ? ema(c3, 8).at(-1) > ema(c3, 21).at(-1) : null;
+            const nowUp = f8[n] > f21[n];
+            let run = 0; for (let j = n - 1; j >= 0 && (f8[j] > f21[j]) !== nowUp; j--) run++;
+            const prevSame = n >= 1 && (f8[n - 1] > f21[n - 1]) === nowUp;
+            if (!prevSame && run >= 5 && up3 === nowUp) {
+              const dir = nowUp ? "bull" : "bear", up = nowUp, last5 = d1.slice(-5), a = d1[n];
+              const stop = up ? Math.min(...last5.map((c) => c.low)) - 0.25 : Math.max(...last5.map((c) => c.high)) + 0.25;
+              const risk = Math.abs(a.close - stop);
+              if (risk >= 0.75 && risk <= 12) {
+                const tgt = up ? a.close + 2 * risk : a.close - 2 * risk;
+                found.push({
+                  kind: "setup", sym, key: `flip1m:${a.datetime}:${dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+                  track: { dir, entry: r2(a.close), stop: r2(stop), target: r2(tgt), needTrigger: false },
+                  title: `⚡ SPX 1m CLOUD FLIP ${up ? "CALLS ▲" : "PUTS ▼"} · scalp`,
+                  text: `**Entry:** now ~${r2(a.close)} · **Stop:** ${r2(stop)} · **Target:** ${r2(tgt)} (2R) · scalp, out within ~30 min`
+                    + `\n1m 8/21 cloud flipped ${up ? "UP after " + run + " min of downtrend" : "DOWN after " + run + " min of uptrend"}, 3m cloud already ${up ? "up" : "down"}.`,
+                });
+              }
+            }
+          }
+        }
         // Vomy / iVomy (3m): stacked ribbon breaks and holds the 48 EMA
         // Vomy, Saty's way (replay: 20 trades, 75% wins, +0.72R; 3m-only version −0.08R):
         // 1) the 10m chart confirms a Vomy / iVomy (stacked ribbon, 2 closes through the 48) → heads-up
