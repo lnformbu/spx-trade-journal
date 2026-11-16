@@ -745,6 +745,41 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             }
           }
         }
+        // EARLY REVERSAL (watch-only, data collector trades it): the 1m 8/21 flips after 10+ minutes the other way, within 10
+        // minutes price reclaims the session VWAP (typical-price mean) and the 1m Phase Oscillator had been at an extreme
+        // (<= -61.8 before a call flip, >= +61.8 before a put flip). No 3m wait, so it catches V-reversals early.
+        // Test (scripts/reversal-test.mjs, 32 days): 74 trades, 45% win, +0.13R (the 3m-confirmed flip: +0.42R).
+        if (sym === "$SPX" && t.min >= 586 && t.min <= 955) {
+          const d1 = done.filter((c) => { const m = et(c.datetime).min; return m >= OPEN && m < CLOSE; });
+          const today1 = d1.filter((c) => et(c.datetime).date === t.date);
+          if (d1.length > 80 && today1.length > 15) {
+            const cl = d1.map((c) => c.close), f8 = ema(cl, 8), f21 = ema(cl, 21), n = d1.length - 1, po1 = phaseOsc(d1.slice(-400));
+            const oscArr = po1 ? po1._osc : null, off = d1.length - Math.min(400, d1.length);
+            const nowUp = f8[n] > f21[n];
+            let f = n; while (f > 0 && (f8[f - 1] > f21[f - 1]) === nowUp) f--;
+            let run = 0; for (let j = f - 1; j >= 0 && (f8[j] > f21[j]) !== nowUp; j--) run++;
+            const vwapT = today1.reduce((s, c) => s + (c.high + c.low + c.close) / 3, 0) / today1.length, a = d1[n];
+            const before = d1.slice(Math.max(0, f - 10), f);
+            const prevOsc = oscArr ? oscArr.slice(Math.max(0, f - run - off), Math.max(0, f - off)) : [];
+            const extreme = prevOsc.length && (nowUp ? Math.min(...prevOsc) <= -61.8 : Math.max(...prevOsc) >= 61.8);
+            const reclaim = nowUp ? a.close > vwapT && before.some((c) => c.close < vwapT) : a.close < vwapT && before.some((c) => c.close > vwapT);
+            if (n - f <= 10 && run >= 10 && extreme && reclaim) {
+              const up = nowUp, dir = up ? "bull" : "bear", last5 = d1.slice(-5);
+              const stop = up ? Math.min(...last5.map((c) => c.low)) - 0.25 : Math.max(...last5.map((c) => c.high)) + 0.25, risk = Math.abs(a.close - stop);
+              if (risk >= 0.75 && risk <= 15) {
+                const tgt = up ? a.close + 2 * risk : a.close - 2 * risk;
+                found.push({
+                  kind: "setup", sym, key: `rev1m:${d1[f].datetime}:${dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+                  track: { dir, entry: r2(a.close), stop: r2(stop), target: r2(tgt), needTrigger: false },
+                  noTradeWhy: "early reversal (no 3m confirmation): watch only, the data collector measures it (test +0.13R)",
+                  title: `↩️ SPX EARLY REVERSAL ${up ? "CALLS ▲" : "PUTS ▼"} · 1m (watch only)`,
+                  text: `**Entry:** ~${r2(a.close)} · **Stop:** ${r2(stop)} · **Target:** ${r2(tgt)} (2R)`
+                    + `\n1m cloud flipped ${up ? "UP" : "DOWN"} after ${run} min, price ${up ? "reclaimed" : "lost"} VWAP ${r2(vwapT)}, Phase Oscillator was ${up ? "oversold" : "overbought"}. The 3m cloud hasn't confirmed yet: early and riskier.`,
+                });
+              }
+            }
+          }
+        }
         // Vomy / iVomy (3m): stacked ribbon breaks and holds the 48 EMA
         // Vomy, Saty's way (replay: 20 trades, 75% wins, +0.72R; 3m-only version −0.08R):
         // 1) the 10m chart confirms a Vomy / iVomy (stacked ribbon, 2 closes through the 48) → heads-up
