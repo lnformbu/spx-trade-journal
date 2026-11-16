@@ -1,3 +1,4 @@
+import { phaseCtx } from "./levels.js";
 // Self-training: after every close the bot re-scores what worked and adjusts what it trades and how it exits.
 //
 // Data it learns from:
@@ -64,6 +65,7 @@ export function features(x) {
     vix: c.vix == null ? null : c.vix ? "agrees" : "disagrees",
     trend: c.trend || null,
     flow: c.flow || null,
+    phase: c.phase || null,
   };
 }
 const shrunk = (sum, n) => sum / (n + PRIOR);
@@ -214,7 +216,8 @@ function trainingSample(x) {
   const vixAgree = c.vixDir && dir ? (dir === "bull") === (c.vixDir === "falling") : null;
   return { date: x.date, fam: "you", kind: "you", et: t, R: Math.max(-1.5, Math.min(4, R)), w: 1.5,
     ctx: fresh ? { chop: c.choppy ?? null, gex: c.gamma ? (c.gamma.aboveFlip ? "positive" : "negative") : null, vix: vixAgree,
-      plan: c.planSide && dir ? (c.planSide === "range" ? "between" : (c.planSide === "calls") === (dir === "bull") ? "with" : "against") : null } : {} };
+      plan: c.planSide && dir ? (c.planSide === "range" ? "between" : (c.planSide === "calls") === (dir === "bull") ? "with" : "against") : null,
+      phase: c.osc10 && dir ? phaseCtx(c.osc10, dir) : null } : {} };
 }
 export function kindFam(x) {
   if (x.kind === "star") return "star";

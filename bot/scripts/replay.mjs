@@ -10,7 +10,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { et, OPEN, CLOSE, dayLevels, aggregate, intradayLevels, ribbon, phaseOsc, cloud2021, compressionBox, chop, vwapCrosses, divergence, dtrPct } from "../src/levels.js";
+import { phaseCtx, et, OPEN, CLOSE, dayLevels, aggregate, intradayLevels, ribbon, phaseOsc, cloud2021, compressionBox, chop, vwapCrosses, divergence, dtrPct } from "../src/levels.js";
 import { patterns, atLevel } from "../src/patterns.js";
 import { resolveTracks, tpLadder, setFront } from "../src/signals.js";
 if (process.env.FRONT != null) setFront(+process.env.FRONT);
@@ -105,7 +105,7 @@ for (const date of days) {
       if (fired.has(key)) return; fired.add(key);
       const trend = trendDir ? (trendDir === track.dir ? "with" : "against") : "none";
       const tps = tpLadder(track.dir, track.entry, track.stop, track.target, [...keyLevels, ["high of day", intra.hod], ["low of day", intra.lod]], D.atr);
-      found.push({ key, kind, track: { ...track, at: nowMs }, et: et0, ctx: { chop: choppy, gex: null, vix: null, plan: "none", trend }, ...extra, tps });
+      found.push({ key, kind, track: { ...track, at: nowMs }, et: et0, ctx: { chop: choppy, gex: null, vix: null, plan: "none", trend, phase: phaseCtx(osc10, track.dir) }, ...extra, tps });
     };
     // 21 EMA pullback and Vomy (src/setups.js, same as live)
     {
@@ -293,6 +293,10 @@ const byTrend = {};
 for (const x of out) { const k = x.ctx.trend; const f = (byTrend[k] = byTrend[k] || { n: 0, R: 0, w: 0 }); f.n++; f.R += x.R; if (x.R > 0) f.w++; }
 console.log("\nvs trend day   results  win%   avg R");
 for (const [k, f] of Object.entries(byTrend)) console.log(k.padEnd(14), String(f.n).padStart(6), String(Math.round((f.w / f.n) * 100)).padStart(5) + "%", (f.R / f.n).toFixed(2).padStart(7));
+const byPhase = {};
+for (const x of out) { const k = x.ctx.phase || "—"; const f = (byPhase[k] = byPhase[k] || { n: 0, R: 0, w: 0 }); f.n++; f.R += x.R; if (x.R > 0) f.w++; }
+console.log("\n10m phase zone results  win%   avg R   (zone read from the trade's side)");
+for (const [k, f] of Object.entries(byPhase).sort((a, b) => b[1].R / b[1].n - a[1].R / a[1].n)) console.log(k.padEnd(14), String(f.n).padStart(6), String(Math.round((f.w / f.n) * 100)).padStart(5) + "%", (f.R / f.n).toFixed(2).padStart(7));
 const trendDays = new Set(out.filter((x) => x.ctx.trend !== "none").map((x) => x.date)).size;
 console.log(`trend days detected: ${trendDays} of ${days.length}`);
 // keep a local copy (git-ignored), then upload with retries

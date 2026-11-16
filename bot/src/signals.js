@@ -5,7 +5,7 @@
 //   🗺️ your plan     trigger crossed / failed, scenario set up, targets reached (any ticker you post a plan for)
 //   ⭐ A / A+        Candlestick Bible pattern at a Saty level + 3m/10m Saty cloud + Phase Oscillator + VWAP + volume + options flow + your plan
 // Posts to #signals (bot login, or a webhook if SIGNALS_WEBHOOK is set).
-import { et, hhmm, OPEN, CLOSE, dayLevels, aggregate, ema, intradayLevels, ribbon, phaseOsc, modeLevels, cloud2021, compressionBox, volumeStack, avwap, dtrPct, dailyDate, chop, vwapCrosses, divergence } from "./levels.js";
+import { phaseCtx, et, hhmm, OPEN, CLOSE, dayLevels, aggregate, ema, intradayLevels, ribbon, phaseOsc, modeLevels, cloud2021, compressionBox, volumeStack, avwap, dtrPct, dailyDate, chop, vwapCrosses, divergence } from "./levels.js";
 import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
@@ -1060,6 +1060,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       }
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
+        phase: f.track ? phaseCtx(osc10, f.track.dir) : null,   // 10m Phase Oscillator zone from the trade's side
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
         trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",
         // PDF 12: 0DTE volume spiking on the trade's side (calls for a call trade) = with; the other side spiking = against

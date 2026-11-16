@@ -19,6 +19,7 @@ import math
 # Take-profit test: each trade also scored as if sold at the bid the first minute it was up +10/20/30/50%.
 # Flip test: when SPX hits a signal's stop (failed move / fakeout), buy the other side ATM; stop = back through the
 #   original entry, target = 1R beyond the original stop, 30-minute limit. Scored with and without TP+20%.
+# Phase split: 10m Saty Phase Oscillator zone at entry, read from the trade's side (squeeze / launch / with / late / extended / against / reversal).
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
 START = (2016, 1, 1)
@@ -112,6 +113,47 @@ class Agg:
             self.cur = None
             return True
         return False
+
+
+def phase_zone(s, d):
+    """Saty Phase Oscillator on the 10m bars (same math as the bot's levels.js) -> zone read from the trade's side."""
+    bars = s.bars[-200:]
+    if len(bars) < 40:
+        return None
+    k0 = len(s.bars) - len(bars)
+    piv = s.e[21][k0:]
+    at, a, sm = [], None, 0.0
+    for i, b in enumerate(bars):
+        tr = max(b["h"] - b["l"], abs(b["h"] - bars[i - 1]["c"]), abs(b["l"] - bars[i - 1]["c"])) if i else b["h"] - b["l"]
+        if i < 14:
+            sm += tr; a = sm / 14 if i == 13 else None
+        else:
+            a = (a * 13 + tr) / 14
+        at.append(a)
+    osc, prev = [], None
+    for i, b in enumerate(bars):
+        raw = (b["c"] - piv[i]) / (3 * at[i]) * 100 if at[i] else 0.0
+        prev = raw if prev is None else raw * 0.5 + prev * 0.5
+        osc.append(prev)
+    # compression tracker (Bollinger 2 sd inside 2 ATR around the 21 EMA)
+    comp_prev, track = None, 0
+    for i in range(20, len(bars)):
+        if at[i] is None:
+            continue
+        cl = [x["c"] for x in bars[i - 20:i + 1]]
+        mu = sum(cl) / 21
+        off = 2 * math.sqrt(sum((x - mu) ** 2 for x in cl) / 21)
+        above = bars[i]["c"] >= piv[i]
+        c = (piv[i] + off) - (piv[i] + 2 * at[i]) if above else (piv[i] - 2 * at[i]) - (piv[i] - off)
+        ez = (piv[i] + off) - (piv[i] + 1.854 * at[i]) if above else (piv[i] - 1.854 * at[i]) - (piv[i] - off)
+        expansion = comp_prev is not None and comp_prev <= c
+        track = 0 if (expansion and ez > 0) else (1 if c <= 0 else 0)
+        comp_prev = c
+    v = osc[-1]
+    if track == 1:
+        return "squeeze"
+    sv = v if d == "bull" else -v
+    return "launch" if abs(v) <= 23.6 else "extended" if sv >= 100 else "late" if sv >= 61.8 else "with" if sv > 0 else "reversal" if sv <= -61.8 else "against"
 
 
 def rib_state(s):
@@ -351,7 +393,7 @@ class SpxCore0DTE(QCAlgorithm):
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "tp": {}, "flip": flip_of is not None}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "tp": {}, "flip": flip_of is not None}
         if flip_of is not None:
             tr["paper"] = flip_of["paper"]
         self.open.append(tr)
@@ -425,6 +467,8 @@ class SpxCore0DTE(QCAlgorithm):
         for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
             out.append("FLIP %s %s | TP+20%% %s" % (fam, stats([t for t in self.flips if t["fam"] == fam]), stats(tpv([t for t in self.flips if t["fam"] == fam], 0.20))))
         out.append("CORE + FLIPS, both TP+20%% %s" % stats(tpv(core, 0.20) + tpv(fcore, 0.20)))
+        for z in ("squeeze", "launch", "with", "late", "extended", "against", "reversal"):
+            out.append("PHASE %-8s core %s | TP+20%% %s" % (z, stats([t for t in core if t.get("phase") == z]), stats(tpv([t for t in core if t.get("phase") == z], 0.20))))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):
             out.append("core %s " % lab + stats([t for t in core if lo <= t["m"] < hi]))
         for y in sorted(set(t["date"][:4] for t in self.trades)):

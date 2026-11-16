@@ -174,6 +174,21 @@ export function phaseOsc(bars) {
   };
 }
 
+// Where a trade sits on the Phase Oscillator, read from the trade's side (Saty's zones):
+//   squeeze   in compression (Bollinger squeeze): coiling before a likely big move
+//   launch    neutral / launch box (within ±23.6): the ideal spot to enter squeeze plays
+//   with      momentum already on the trade's side (0 to 61.8), the zero line defines momentum
+//   late      distribution / re-accumulation zone (61.8 to 100) on the trade's side: move is mature
+//   extended  beyond ±100 on the trade's side: strong momentum, consolidation / pullback / reversal likely when it ends
+//   against   momentum on the other side of zero (−61.8 to 0)
+//   reversal  the other side's extreme (≤ −61.8 for a call trade): buying out of accumulation / selling out of distribution
+export function phaseCtx(osc, dir) {
+  if (!osc || osc.value == null || !dir) return null;
+  if (osc.compression) return "squeeze";
+  const s = dir === "bull" ? osc.value : -osc.value;
+  return Math.abs(osc.value) <= 23.6 ? "launch" : s >= 100 ? "extended" : s >= 61.8 ? "late" : s > 0 ? "with" : s <= -61.8 ? "reversal" : "against";
+}
+
 // ---- Saty Compression Bangerz: box = high/low of the first 3 compression candles of the current run ----
 export function compressionBox(bars, track, len = 3) {
   let box = null, run = null;

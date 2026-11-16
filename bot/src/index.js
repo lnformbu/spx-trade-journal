@@ -74,6 +74,7 @@ function snapshot(st, g) {
     cloud: { m3: st.r3 && st.r3.state, m10: st.r10 && st.r10.state, h1: st.r1h && st.r1h.state }, conviction10: st.r10 && st.r10.conviction,
     osc: { m3: o(st.osc3), m10: o(st.osc10), h1: o(st.osc1h) }, choppy: st.choppy, chop10: st.chop10, dtr: st.dtr, vwapSide: L.vwap && price ? (price >= L.vwap ? "above" : "below") : null,
     nearestAbove: above && { name: above[0], dist: Math.round((above[1] - price) * 100) / 100 }, nearestBelow: below && { name: below[0], dist: Math.round((price - below[1]) * 100) / 100 },
+    osc10: st.osc10 ? { value: st.osc10.value, compression: st.osc10.compression } : null,   // 10m Phase Oscillator when you posted
     planSide: st.plan && st.plan.parsed && price != null ? (price > st.plan.parsed.callTrigger ? "calls" : price < st.plan.parsed.putTrigger ? "puts" : "range") : null,
     gamma: g && g.date === st.date ? { flip: g.flip, callWall: g.callWall, putWall: g.putWall, eye: g.eye && g.eye.strike, aboveFlip: st.quote && st.quote.spx > g.flip } : null,
   };
