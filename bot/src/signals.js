@@ -755,6 +755,46 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
             }
           }
         }
+        // 15-MINUTE OPENING RANGE (9:30-9:45) on 3m bars (user's chart, scripts/or-setups-test.mjs):
+        //  BREAK-AND-RETEST (traded): an earlier 3m close beyond the OR edge, now a 3m bar tags the edge (within 1.5 pts) and
+        //   closes back outside with a body in the break direction. Stop 1.5 pts inside the edge, target = measured move
+        //   (the OR height again from the entry). Test: 3m 30 trades 27% win +0.99R; 5m 152 trades 28% win +0.21R.
+        //  SWEEP + ENGULFING (watch only): a 3m bar takes out the OR low/high, then an engulfing 3m bar closes back inside;
+        //   stop 2 pts past the sweep, target 2R. Test: 3m 12 trades +0.20R, 5m 68 trades +0.09R: small edge, measured first.
+        if (sym === "$SPX" && t.min >= 588 && t.min <= 721) {
+          const r1 = done.filter((c) => { const x = et(c.datetime); return x.date === t.date && x.min >= OPEN && x.min < CLOSE; });
+          const or15 = r1.filter((c) => et(c.datetime).min < OPEN + 15);
+          const g3o = aggregate(r1, 3).filter((b) => b.datetime + 180000 <= now && et(b.datetime).min >= OPEN + 15);
+          if (or15.length >= 14 && g3o.length >= 2) {
+            const H = Math.max(...or15.map((c) => c.high)), L = Math.min(...or15.map((c) => c.low)), b = g3o.at(-1), p = g3o.at(-2);
+            const earlier = g3o.slice(0, -1);
+            const bo = { bull: earlier.some((x) => x.close > H), bear: earlier.some((x) => x.close < L) };
+            const sig = (setup, dir, stop, target, title, why, watch) => {
+              const up = dir === "bull", risk = (b.close - stop) * (up ? 1 : -1);
+              if (risk <= 0.5 || risk > 25 || (target - b.close) * (up ? 1 : -1) <= 0) return;
+              found.push({
+                kind: "setup", sym, key: `${setup}:${t.date}:${dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+                track: { dir, entry: r2(b.close), stop: r2(stop), target: r2(target), needTrigger: false },
+                ...(watch ? { noTradeWhy: watch } : {}),
+                title, text: `**Entry:** ~${r2(b.close)} · **Stop:** ${r2(stop)} · **Target:** ${r2(target)}\n${why} Opening range (9:30-9:45) ${r2(L)}–${r2(H)}.`,
+              });
+            };
+            if (bo.bull && b.low <= H + 1.5 && b.close > H && b.close > b.open)
+              sig("orrt", "bull", H - 1.5, b.close + (H - L), `🔁 SPX OR BREAK & RETEST CALLS ▲ · 15-min range`, `Broke above the OR high ${r2(H)}, came back to test it and held. Target = the range height again (measured move): wins ~1 in 4 but the winners are big.`);
+            if (bo.bear && b.high >= L - 1.5 && b.close < L && b.close < b.open)
+              sig("orrt", "bear", L + 1.5, b.close - (H - L), `🔁 SPX OR BREAK & RETEST PUTS ▼ · 15-min range`, `Broke below the OR low ${r2(L)}, came back to test it and held. Target = the range height again (measured move): wins ~1 in 4 but the winners are big.`);
+            const engUp = b.close > b.open && b.close >= Math.max(p.open, p.close) && b.open <= Math.min(p.open, p.close);
+            const engDn = b.close < b.open && b.close <= Math.min(p.open, p.close) && b.open >= Math.max(p.open, p.close);
+            if (Math.min(p.low, b.low) < L && b.close > L && engUp) {
+              const st = Math.min(p.low, b.low) - 2;
+              sig("orsw", "bull", st, b.close + 2 * (b.close - st), `🧹 SPX OR SWEEP + ENGULFING CALLS ▲ (watch only)`, `Swept the OR low ${r2(L)} (to ${r2(Math.min(p.low, b.low))}) and a bullish engulfing 3m bar closed back inside.`, "OR sweep + engulfing: small edge in the test, the data collector measures it");
+            }
+            if (Math.max(p.high, b.high) > H && b.close < H && engDn) {
+              const st = Math.max(p.high, b.high) + 2;
+              sig("orsw", "bear", st, b.close - 2 * (st - b.close), `🧹 SPX OR SWEEP + ENGULFING PUTS ▼ (watch only)`, `Swept the OR high ${r2(H)} (to ${r2(Math.max(p.high, b.high))}) and a bearish engulfing 3m bar closed back inside.`, "OR sweep + engulfing: small edge in the test, the data collector measures it");
+            }
+          }
+        }
         // EARLY REVERSAL (watch-only, data collector trades it): the 1m 8/21 flips after 10+ minutes the other way, within 10
         // minutes price reclaims the session VWAP (typical-price mean) and the 1m Phase Oscillator had been at an extreme
         // (<= -61.8 before a call flip, >= +61.8 before a put flip). No 3m wait, so it catches V-reversals early.
