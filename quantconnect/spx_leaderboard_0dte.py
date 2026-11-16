@@ -71,6 +71,8 @@ class SpxLeaderboard0DTE(QCAlgorithm):
 
     # ---------------- per day ----------------
     def new_day(self, d):
+        if self.day is None or d.month != self.day.month:   # progress line in the Console once a month
+            self.debug("progress %s: %d full days scored" % (d.strftime("%Y-%m"), len(self.days)))
         self.day = d
         self.cur = {"date": str(d), "c": {}, "g": {}, "snaps": [900, 910, 930, 940], "plan": None, "p40": None,
                     "trades": [], "spot": {}}
