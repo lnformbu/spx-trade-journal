@@ -15,8 +15,8 @@ from AlgorithmImports import *
 #
 # Output: a summary in the log at the end, and every trade in the Object Store as "spx_core_0dte_trades.csv".
 
-START = (2023, 1, 1)
-END = (2024, 12, 31)
+START = (2016, 1, 1)
+END = (2026, 11, 13)
 FIBS = [0.236, 0.382, 0.618, 1.0]
 
 

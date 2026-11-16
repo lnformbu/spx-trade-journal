@@ -19,8 +19,8 @@ import math
 #   4. Kill direction hit rate (3:30 -> settlement)
 #   5. Trades, 1 ATM contract bought at the ask: 3:30 in the kill direction, 3:40 toward the pin ("final 20");
 #      exit = settlement value, or the 3:55 bid
-START = (2023, 1, 1)
-END = (2024, 12, 31)
+START = (2022, 6, 1)
+END = (2026, 11, 13)
 BIG = 100000
 
 
