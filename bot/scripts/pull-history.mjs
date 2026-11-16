@@ -9,7 +9,8 @@
 //   eod.csv       each day at the close: top-3 contracts ITM or not, the EOD plan (kill direction, pin, walls) vs the close
 //   signals.csv   every scored signal (entry, stop, target, outcome, R, context)
 //   paper.csv     every paper trade
-//   spx_1m.csv / spy_1m.csv   1-minute candles (regular hours), spx_daily.csv   daily candles (3 years)
+//   spx_1m.csv / spy_1m.csv   1-minute candles (regular hours, Schwab keeps ~48 days), spx_5m.csv / spx_10m.csv (from ~March 2026),
+//   spx_daily.csv / spx_monthly.csv   20 years
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -77,8 +78,8 @@ for (const kind of ["board", "lb", "eod", "signals", "paper"]) {
 }
 
 // --- candles ---
-const candles = async (symbol, file, extra = {}) => {
-  const from = lastDate(file, ny(Date.now() - 45 * 864e5).slice(0, 10));
+const candles = async (symbol, file, extra = {}, firstDay = ny(Date.now() - 45 * 864e5).slice(0, 10)) => {
+  const from = lastDate(file, firstDay);
   const start = new Date(from + "T00:00:00-05:00").getTime();
   let all = [];
   for (let s = start; s < Date.now(); s += 9 * 864e5) {
@@ -93,9 +94,15 @@ const candles = async (symbol, file, extra = {}) => {
 };
 await candles("$SPX", path.join(DATA, "spx_1m.csv"));
 await candles("SPY", path.join(DATA, "spy_1m.csv"));
-const d = await get("/history", { symbol: "$SPX", periodType: "year", period: "3", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
-const daily = (Array.isArray(d) ? d : d.candles || []).map((c) => ({ date: new Date(c.datetime + 12 * 3600e3).toISOString().slice(0, 10), open: c.open, high: c.high, low: c.low, close: c.close }));
-const keepD = readCSV(path.join(DATA, "spx_daily.csv")).filter((r) => r.date < (daily[0] && daily[0].date));
-writeCSV(path.join(DATA, "spx_daily.csv"), [...keepD, ...daily]);
-console.log(`spx_daily.csv: ${keepD.length + daily.length} days`);
+// 5m / 10m: Schwab keeps these from about March 2026 (~8 months)
+await candles("$SPX", path.join(DATA, "spx_5m.csv"), { frequency: "5" }, "2026-01-01");
+await candles("$SPX", path.join(DATA, "spx_10m.csv"), { frequency: "10" }, "2026-01-01");
+// daily and monthly: 20 years
+for (const [ft, file] of [["daily", "spx_daily.csv"], ["monthly", "spx_monthly.csv"]]) {
+  const d = await get("/history", { symbol: "$SPX", periodType: "year", period: "20", frequencyType: ft, frequency: "1", needExtendedHoursData: "false" });
+  const rows = (Array.isArray(d) ? d : d.candles || []).map((c) => ({ date: new Date(c.datetime + 12 * 3600e3).toISOString().slice(0, 10), open: c.open, high: c.high, low: c.low, close: c.close }));
+  const keep = readCSV(path.join(DATA, file)).filter((r) => r.date < (rows[0] && rows[0].date));
+  writeCSV(path.join(DATA, file), [...keep, ...rows]);
+  console.log(`${file}: ${keep.length + rows.length} candles`);
+}
 console.log("data folder:", DATA);
