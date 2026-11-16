@@ -1,6 +1,7 @@
 # region imports
 from AlgorithmImports import *
 import math
+import random
 # endregion
 # SPX bot core setups on REAL SPXW 0DTE option prices (QuantConnect cloud, free tier: backtests with their data are free).
 #
@@ -20,6 +21,8 @@ import math
 # Flip test: when SPX hits a signal's stop (failed move / fakeout), buy the other side ATM; stop = back through the
 #   original entry, target = 1R beyond the original stop, 30-minute limit. Scored with and without TP+20%.
 # Phase split: 10m Saty Phase Oscillator zone at entry, read from the trade's side (squeeze / launch / with / late / extended / against / reversal).
+# NULL control: every real signal also gets a coin-flip-direction twin (same moment, same exits, mirrored stop/target).
+#   The real setups only have an edge if they beat their own null.
 # Daily 20 EMA split: trade with / against yesterday's SPX close vs its daily 20 EMA.
 # Mag 7 split: AAPL MSFT NVDA AMZN GOOGL META TSLA vs today's open at entry: with (5+ of 7 the trade's way) / mixed / against.
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
@@ -259,7 +262,8 @@ class SpxCore0DTE(QCAlgorithm):
         self.s1, self.s3, self.s10 = Series([8, 21, 48]), Series([8, 13, 21, 48]), Series([8, 21, 34, 50])
         self.a3, self.a10 = Agg(3, self.s3), Agg(10, self.s10)
         self.day, self.lv, self.A = None, None, None
-        self.trades, self.flips, self.open, self.no_chain, self.unclosed = [], [], [], 0, 0
+        self.trades, self.flips, self.nulls, self.open, self.no_chain, self.unclosed = [], [], [], [], 0, 0
+        self.rng = random.Random(11)       # coin-flip control (fixed seed = repeatable)
         # warm the EMAs with the 10 days before the start
         for x in self.history[TradeBar](self.spx, timedelta(days=14), Resolution.MINUTE):
             m = x.time.hour * 60 + x.time.minute
@@ -379,7 +383,7 @@ class SpxCore0DTE(QCAlgorithm):
                     self.enter("bo1m", sig[0], c0, sig[1], tgt, now_m, data, 30)
 
     # ---------------- trades ----------------
-    def enter(self, fam, d, entry, stop, target, now_m, data, limit, flip_of=None):
+    def enter(self, fam, d, entry, stop, target, now_m, data, limit, flip_of=None, null=False):
         up = d == "bull"
         risk = (entry - stop) if up else (stop - entry)
         if risk <= 0 or ((target - entry) if up else (entry - target)) <= 0:
@@ -409,9 +413,19 @@ class SpxCore0DTE(QCAlgorithm):
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
               "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "phase": phase_zone(self.s10, d), "mag7": self.mag7_side(d), "d20": "with" if getattr(self, "d20", None) == d else "against", "tp": {}, "flip": flip_of is not None}
+        tr["null"] = null
         if flip_of is not None:
             tr["paper"] = flip_of["paper"]
         self.open.append(tr)
+        # RANDOM-DIRECTION CONTROL: same moment, same contract type, same exits, but the side is a coin flip
+        # (mirrored stop / target when it lands on the other side). If this makes as much as the real signal,
+        # the setup isn't calling direction, it's just catching moves.
+        if flip_of is None and not null:
+            nd = "bull" if self.rng.random() < 0.5 else "bear"
+            if nd == d:
+                self.enter(fam, nd, entry, stop, target, now_m, data, limit, null=True)
+            else:
+                self.enter(fam, nd, entry, 2 * entry - stop, 2 * entry - target, now_m, data, limit, null=True)
 
     def mag7_side(self, d):
         """'with' = 5+ of the Mag 7 above (calls) / below (puts) today's open, 'against' = 5+ the other way, else 'mixed'."""
@@ -447,10 +461,10 @@ class SpxCore0DTE(QCAlgorithm):
                        "opt_out": out, "opt_pct": round((out / tr["opt_in"] - 1) * 100, 1) if tr["opt_in"] > 0 else None,
                        "pnl": round((out - tr["opt_in"]) * 100, 2), "best_pct": round((tr["max_bid"] / tr["opt_in"] - 1) * 100, 1) if tr["opt_in"] > 0 else None})
             self.open.remove(tr)
-            (self.flips if tr["flip"] else self.trades).append(tr)
+            (self.nulls if tr.get("null") else self.flips if tr["flip"] else self.trades).append(tr)
             # FLIP: the signal failed (SPX hit its stop) = possible fakeout -> buy the other side right away.
             # Flip stop = back through the original entry (fakeout thesis wrong), target = 1R past the original stop, 30 min max.
-            if why == "stop" and not tr["flip"] and now_m < 940:
+            if why == "stop" and not tr["flip"] and not tr.get("null") and now_m < 940:
                 r = tr["risk"]
                 self.enter(tr["fam"], "bear" if up else "bull", tr["stop"], tr["spx_entry"],
                            tr["stop"] - r if up else tr["stop"] + r, now_m, data, 30, flip_of=tr)
@@ -478,6 +492,10 @@ class SpxCore0DTE(QCAlgorithm):
             out.append("GEX %s | +GEX %s | -GEX %s" % (fam, stats([t for t in ts if t["gex"] == "+"]), stats([t for t in ts if t["gex"] == "-"])))
         def tpv(ts, L):                    # the same trades with a +L take-profit
             return [dict(t, pnl=round((t["tp"][L] - t["opt_in"]) * 100, 2), opt_pct=L * 100) if L in t["tp"] else t for t in ts]
+        ncore = [t for t in self.nulls if t["fam"] != "bo1m"]
+        out.append("NULL coin-flip side, core %s | TP+20%% %s   <- the real signals must beat this" % (stats(ncore), stats(tpv(ncore, 0.20))))
+        for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
+            out.append("NULL %s %s" % (fam, stats([t for t in self.nulls if t["fam"] == fam])))
         n = len(core)
         if n:
             out.append("CORE reached at any point: " + " ".join("+%d%% %d%%" % (L * 100, round(sum(1 for t in core if L in t["tp"]) / n * 100)) for L in TPS)
