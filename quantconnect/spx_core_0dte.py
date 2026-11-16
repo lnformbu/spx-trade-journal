@@ -16,11 +16,15 @@ import math
 #
 # GEX split: each trade tagged +GEX / -GEX (0DTE dealer gamma near SPX at entry, calls +, puts -).
 #   Theory: +GEX dealers dampen moves (pullbacks / snap-backs should work better), -GEX they amplify (breakouts should).
+# Take-profit test: each trade also scored as if sold at the bid the first minute it was up +10/20/30/50%.
+# Flip test: when SPX hits a signal's stop (failed move / fakeout), buy the other side ATM; stop = back through the
+#   original entry, target = 1R beyond the original stop, 30-minute limit. Scored with and without TP+20%.
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
 START = (2016, 1, 1)
 END = (2026, 11, 13)
 FIBS = [0.236, 0.382, 0.618, 1.0]
+TPS = [0.10, 0.20, 0.30, 0.50]     # take-profit levels tested on the option price (sell at the bid once it reaches entry x 1.2 etc.)
 
 
 def r2(x):
@@ -208,7 +212,7 @@ class SpxCore0DTE(QCAlgorithm):
         self.s1, self.s3, self.s10 = Series([8, 21, 48]), Series([8, 13, 21, 48]), Series([8, 21, 34, 50])
         self.a3, self.a10 = Agg(3, self.s3), Agg(10, self.s10)
         self.day, self.lv, self.A = None, None, None
-        self.trades, self.open, self.no_chain, self.unclosed = [], [], 0, 0
+        self.trades, self.flips, self.open, self.no_chain, self.unclosed = [], [], [], 0, 0
         # warm the EMAs with the 10 days before the start
         for x in self.history[TradeBar](self.spx, timedelta(days=14), Resolution.MINUTE):
             m = x.time.hour * 60 + x.time.minute
@@ -248,7 +252,7 @@ class SpxCore0DTE(QCAlgorithm):
         if self.lv is None:
             return
         now_m = m + 1                      # the bot's clock: the minute this candle closed
-        self.manage(b, now_m)
+        self.manage(b, now_m, data)
         if now_m < 950:
             self.signals(b, now_m, done3, done10, data)
 
@@ -318,7 +322,7 @@ class SpxCore0DTE(QCAlgorithm):
                     self.enter("bo1m", sig[0], c0, sig[1], tgt, now_m, data, 30)
 
     # ---------------- trades ----------------
-    def enter(self, fam, d, entry, stop, target, now_m, data, limit):
+    def enter(self, fam, d, entry, stop, target, now_m, data, limit, flip_of=None):
         up = d == "bull"
         risk = (entry - stop) if up else (stop - entry)
         if risk <= 0 or ((target - entry) if up else (entry - target)) <= 0:
@@ -347,14 +351,20 @@ class SpxCore0DTE(QCAlgorithm):
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-"}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-", "tp": {}, "flip": flip_of is not None}
+        if flip_of is not None:
+            tr["paper"] = flip_of["paper"]
         self.open.append(tr)
 
-    def manage(self, b, now_m):
+    def manage(self, b, now_m, data):
         for tr in list(self.open):
             up = tr["dir"] == "bull"
             sec = self.securities[tr["sym"]]
-            tr["max_bid"] = max(tr["max_bid"], float(sec.bid_price))
+            bid = float(sec.bid_price)
+            tr["max_bid"] = max(tr["max_bid"], bid)
+            for L in TPS:                      # first minute the bid reached +L: that variant sells there
+                if L not in tr["tp"] and tr["opt_in"] > 0 and bid >= tr["opt_in"] * (1 + L):
+                    tr["tp"][L] = bid
             why, px = None, b["c"]
             if (b["l"] <= tr["stop"]) if up else (b["h"] >= tr["stop"]):
                 why, px = "stop", tr["stop"]
@@ -371,7 +381,13 @@ class SpxCore0DTE(QCAlgorithm):
                        "opt_out": out, "opt_pct": round((out / tr["opt_in"] - 1) * 100, 1) if tr["opt_in"] > 0 else None,
                        "pnl": round((out - tr["opt_in"]) * 100, 2), "best_pct": round((tr["max_bid"] / tr["opt_in"] - 1) * 100, 1) if tr["opt_in"] > 0 else None})
             self.open.remove(tr)
-            self.trades.append(tr)
+            (self.flips if tr["flip"] else self.trades).append(tr)
+            # FLIP: the signal failed (SPX hit its stop) = possible fakeout -> buy the other side right away.
+            # Flip stop = back through the original entry (fakeout thesis wrong), target = 1R past the original stop, 30 min max.
+            if why == "stop" and not tr["flip"] and now_m < 940:
+                r = tr["risk"]
+                self.enter(tr["fam"], "bear" if up else "bull", tr["stop"], tr["spx_entry"],
+                           tr["stop"] - r if up else tr["stop"] + r, now_m, data, 30, flip_of=tr)
 
     # ---------------- report ----------------
     def on_end_of_algorithm(self):
@@ -394,6 +410,21 @@ class SpxCore0DTE(QCAlgorithm):
         for fam in ("ALL core", "ggo", "ggpb", "ckl10", "atr1", "bo1m"):
             ts = core if fam == "ALL core" else [t for t in self.trades if t["fam"] == fam]
             out.append("GEX %s | +GEX %s | -GEX %s" % (fam, stats([t for t in ts if t["gex"] == "+"]), stats([t for t in ts if t["gex"] == "-"])))
+        def tpv(ts, L):                    # the same trades with a +L take-profit
+            return [dict(t, pnl=round((t["tp"][L] - t["opt_in"]) * 100, 2), opt_pct=L * 100) if L in t["tp"] else t for t in ts]
+        n = len(core)
+        if n:
+            out.append("CORE reached at any point: " + " ".join("+%d%% %d%%" % (L * 100, round(sum(1 for t in core if L in t["tp"]) / n * 100)) for L in TPS)
+                       + " | green at all %d%%" % round(sum(1 for t in core if t["max_bid"] > t["opt_in"]) / n * 100))
+        for L in TPS:
+            out.append("TP+%d%% CORE %s | PAPER %s" % (L * 100, stats(tpv(core, L)), stats(tpv([t for t in core if t["paper"]], L))))
+        for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
+            out.append("TP+20%% %s %s" % (fam, stats(tpv([t for t in self.trades if t["fam"] == fam], 0.20))))
+        fcore = [t for t in self.flips if t["fam"] != "bo1m"]
+        out.append("FLIP after a stop (core) %s | with TP+20%% %s" % (stats(fcore), stats(tpv(fcore, 0.20))))
+        for fam in ("ggo", "ggpb", "ckl10", "atr1", "bo1m"):
+            out.append("FLIP %s %s | TP+20%% %s" % (fam, stats([t for t in self.flips if t["fam"] == fam]), stats(tpv([t for t in self.flips if t["fam"] == fam], 0.20))))
+        out.append("CORE + FLIPS, both TP+20%% %s" % stats(tpv(core, 0.20) + tpv(fcore, 0.20)))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):
             out.append("core %s " % lab + stats([t for t in core if lo <= t["m"] < hi]))
         for y in sorted(set(t["date"][:4] for t in self.trades)):
