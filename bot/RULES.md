@@ -10,7 +10,8 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 |---|---|---|
 | Account | paper account (your starting amount; example $25,000), follows the bot's own P/L (one 0DTE SPX contract costs ~$1,700-2,500) | $25,000 |
 | Position size | **50% of the account ÷ 3 slots** in premium: contracts = account × 16.7% ÷ (price × 100), at least 1 | ~$4,150 (e.g. 6 × $7.00) |
-| Max loss per trade | **15% of the account ÷ 3 slots** (premium stop at about −30%), including fees and slippage | $1,250 |
+| Max loss per trade | **15% of the account ÷ 3 slots** (premium stop at about −20%), including fees and slippage | $1,250 cap (3 × $7 contracts risk ~$420) |
+| **Max contracts per trade** | **3** (user 2026-11-16) | |
 | Daily loss lockout | **15% of the account**, realized + open risk; checked *before* each entry | $3,750 (one full loss ends the day) |
 | If one contract alone costs more than 50% or risks more than 15% | skip the trade | |
 | Max trades per day | 10 | |
@@ -204,12 +205,12 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 |---|---|
 | Premium stop | about −30%, so a full loss = 15% of the account |
 | Structure stop | SPY back through the retest level / confirmation swing |
-| Target 1 | next key level, at least +60% on the option (2× the stop): **sell half** (1 of 2); the runner continues on the profit ladder below |
+| Target 1 | **SCALP MODE: +30%** on the option or the signal's target level: **sell 1 of 3** (half when 2); the rest trails on the ladder below |
 | Target 2 | the level after that (the 2 ATR extension if momentum continues): runner exit |
 | Trailing stop | see the profit ladder below |
 | Rejection | price reaches a level and gets rejected: exit, don't wait for the next one |
 | Invalidated | the setup's reason is gone (e.g. ribbon flips against the trade) |
-| **NEW** Scalp time stop | not at least +10% within 10 minutes: exit; 0DTE time decay works against a trade that doesn't move *(start)* |
+| Scalp time stop | not at least +10% within **6 minutes**: exit; 0DTE time decay works against a trade that doesn't move. Breakeven stop at +15%, at +25% the stop goes to +10%, trail keeps 75-80% of the best gain, runner out after 8 min with no new high |
 | **NEW** Runner stall | runner makes no new high for 15 minutes: exit *(start)* |
 | Time | 3:59 |
 
@@ -268,7 +269,7 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 | Setup families on/off | off after 15+ results from 3+ different days averaging below −0.15R (averages are shrunk toward 0 so a few results can't decide); back on above 0R |
 | Context adjustments | time window, chop, gamma regime, with/against your plan, VIX agreement: each adds or subtracts expected R (8+ results needed, at most ±0.5R) |
 | Minimum A/A+ score | 70 → 80 → 90 when lower score bands lose money; lowered again when they recover |
-| Exit settings | stop (−20/−25/−30%), target 1 (+40/60/80/100%), time stop (10/15/20 min): fitted on the older 70% of trades, kept only if also better on the newest 30% (needs 20+ trades) |
+| Exit settings | stop (−15/−20/−25%), target 1 (+20/30/40/60%), time stop (4/6/10 min), scalp-centred: fitted on the older 70% of trades, kept only if also better on the newest 30% (needs 20+ trades) |
 
 - It can **never** change: the −30% maximum stop, 15% maximum loss, sizing, daily limits, entry window.
 - Changes are posted to #signals (🧠 Bot learning) and listed in the journal; a weekly paper report posts on Fridays.

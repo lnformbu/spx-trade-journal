@@ -10,7 +10,7 @@
 // Hard limits every style keeps: max loss 15% of the account per trade, −30% stop at most, daily limits, one position, 3:59 close.
 import { hhmm } from "./levels.js";
 import { post } from "./signals.js";
-import { decide, learn, famOf, kindFam, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES } from "./learn.js";
+import { decide, learn, famOf, kindFam, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES, SCALP_V } from "./learn.js";
 
 const FEE = 0.65;            // Schwab, per contract per side
 // paper account size: one 0DTE SPX contract costs ~$1,700-2,500, so $2,000 could never buy one under the 50% rule
@@ -18,6 +18,7 @@ const START = 25000;
 // several positions at once (user 2026-11-16): up to MAX_OPEN, never two opposite sides of the same ticker; the 50% premium
 // and 15% risk-per-trade limits are split between the slots, and all open risk counts against the day's 15% loss budget
 const MAX_OPEN = 3;
+const MAX_QTY = 3;   // never more than 3 contracts per trade (user 2026-11-16)
 const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
@@ -164,6 +165,7 @@ async function stepBook(b, cfg, X) {
     if (qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
     qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl + 0.15 * b.day.startBal - openRisk()) / riskPer));
     if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the 15% limit left today (open positions included)"); return false; }
+    qty = Math.min(qty, MAX_QTY);
     const pos = {
       id: now + ":" + k.symbol, date: t.date, symbol: k.symbol, label: k.label, under: p.sym, delta: k.delta, dir: p.dir,
       qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
@@ -286,6 +288,13 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   candidates = candidates.filter((c) => TRADED.has(c.fam) && paperTicker(env, c.contract));
   const acct = (await readJSON(env, "paper:acct")) || newBook();
   const model = (await readJSON(env, "paper:model")) || DEFAULT_MODEL;
+  // one-time switch of the champion to scalp exits (the learned params were the old swing defaults)
+  if ((model.scalpV || 0) < SCALP_V) {
+    model.params = { ...(model.params || {}), ...DEFAULT_PARAMS };
+    model.scalpV = SCALP_V;
+    model.changes = [...(model.changes || []), { date: t.date, what: "exits switched to scalp mode (stop -20%, target 1 +30%, 6-min time stop), max 3 contracts" }].slice(-50);
+    await writeJSON(env, "paper:model", model);
+  }
   const champ = championCfg(model);
   let ch = await readJSON(env, "paper:challengers");
   if (!ch) ch = makeChallengers(champ, 1, t.date);
