@@ -291,6 +291,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   st.chop = st.chop || {};
   const G = await readJSON(env, "greeks:spx");
   const GX = G && G.date === t.date ? G : null;
+  // dealer gamma regime at a price: "+" (long gamma, moves dampened) / "-" (short gamma, moves amplified) / null
+  const gexReg = (px) => (!GX ? null : GX.flip != null ? (px >= GX.flip ? "+" : "-") : GX.totals && GX.totals.gex ? (GX.totals.gex > 0 ? "+" : "-") : null);
 
   for (const sym of group) {
     try {
@@ -771,7 +773,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           // GEX REGIME (dealer gamma): above the flip dealers are long gamma and DAMPEN moves (pins hold, fades work);
           // below it they are short gamma and AMPLIFY moves (pins break, the day's move runs toward the wall).
           // Last half hour rule (Baltussen et al.; GEX-scalping-tradingbot): -GEX follow the move since the open, +GEX fade it.
-          const regime = GX.flip != null ? (c0 >= GX.flip ? "+" : "-") : GX.totals && GX.totals.gex != null ? (GX.totals.gex >= 0 ? "+" : "-") : null;
+          const regime = gexReg(c0);
           const nearFlip = GX.flip != null && Math.abs(c0 - GX.flip) <= D.atr * 0.05;
           const open0 = rth[0] && rth[0].open, dayMv = open0 ? c0 - open0 : 0;
           const flatDay = !open0 || Math.abs(dayMv) < c0 * 0.001;
@@ -952,13 +954,54 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             + `\n• ${c0 > GX.lb.maxPainZone.high ? "SPX is above the zone: favor puts / take call profits now" : c0 < GX.lb.maxPainZone.low ? "SPX is below the zone: favor calls / take put profits now" : "SPX is inside the zone: expect a pin; take profits, avoid new 0DTE trades"}.`
             + `\n• Don't hold a 0DTE position against the pull; exit by 3:59.`,
         });
+        // ---- GEX PLAYS during the day (SPX, 3m closes, 9:45-3:30), scored and posted; not paper traded until measured ----
+        //  flip cross   = the regime changes: above the flip dealers dampen (fade extremes), below they amplify (follow breaks)
+        //  wall break   = NEGATIVE GEX: a 3m close through the put / call wall tends to run (follow it)
+        //  wall reject  = POSITIVE GEX: a 3m bar tags the call / put wall and closes back inside (fade it toward the flip)
+        if (sym === "$SPX" && GX && t.min >= 585 && t.min < 930) {
+          const g3 = aggregate(rth, 3).filter((b) => b.datetime + 180000 <= now);
+          const a3 = g3.at(-1), p3 = g3.at(-2), rg = gexReg(c0), tz = D.atr * 0.03;
+          const nextLv = (dir, from) => Object.values(lv).filter((v) => (dir === "bull" ? v > from : v < from)).sort((x, y) => (dir === "bull" ? x - y : y - x))[0] ?? null;
+          const play = (key, dir, title, text, stop, target) => found.push({
+            kind: "setup", sym, key, once: true, color: dir === "bull" ? COLORS.bull : COLORS.bear,
+            track: { dir, entry: r2(c0), stop: r2(stop), target: target != null ? r2(target) : null, needTrigger: false },
+            noTradeWhy: "GEX intraday play: measured before the paper account trades it", title, text });
+          if (a3 && p3) {
+            const F = GX.flip;
+            if (F != null && ((p3.close < F && a3.close >= F) || (p3.close > F && a3.close <= F))) {
+              const upX = a3.close >= F;
+              found.push({ kind: "phase", sym, key: `gexflip:${upX}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.star,
+                title: `🧲 GEX REGIME ${upX ? "POSITIVE" : "NEGATIVE"} · SPX ${upX ? "back above" : "fell below"} the gamma flip ${F}`,
+                text: upX ? "Dealers now long gamma: they sell rips and buy dips. Expect chop and pins; fade the extremes, take profits faster."
+                          : "Dealers now short gamma: they sell into drops and buy into rips. Moves can run; follow breaks, don't fade, size down." });
+            }
+            const PW = GX.putWall, CW = GX.callWall;
+            if (rg === "-" && PW != null && p3.close >= PW && a3.close < PW)
+              play(`gexbreak:${t.date}:bear`, "bear", `💥 GEX WALL BREAK PUTS ▼ · SPX closed below the put wall ${PW}`,
+                `Negative GEX: dealers short gamma sell into the drop, so a break of the put wall tends to run. **Follow it.** Stop back above ${r2(PW + tz)} · target ${nextLv("bear", c0) ?? "next level"}.`,
+                PW + tz, nextLv("bear", c0));
+            if (rg === "-" && CW != null && p3.close <= CW && a3.close > CW)
+              play(`gexbreak:${t.date}:bull`, "bull", `💥 GEX WALL BREAK CALLS ▲ · SPX closed above the call wall ${CW}`,
+                `Negative GEX: dealers short gamma buy into the rip, so a break of the call wall tends to run. **Follow it.** Stop back below ${r2(CW - tz)} · target ${nextLv("bull", c0) ?? "next level"}.`,
+                CW - tz, nextLv("bull", c0));
+            if (rg === "+" && CW != null && a3.high >= CW - tz && a3.close < CW && a3.close < a3.open)
+              play(`gexreject:${t.date}:bear`, "bear", `🧱 GEX WALL REJECTION PUTS ▼ · SPX rejected the call wall ${CW}`,
+                `Positive GEX: dealers long gamma sell into the rally at the call wall. **Fade it** toward the flip ${F ?? "—"}. Stop above ${r2(a3.high + tz)}.`,
+                a3.high + tz, F != null && F < c0 ? F : nextLv("bear", c0));
+            if (rg === "+" && PW != null && a3.low <= PW + tz && a3.close > PW && a3.close > a3.open)
+              play(`gexreject:${t.date}:bull`, "bull", `🧱 GEX WALL REJECTION CALLS ▲ · SPX held the put wall ${PW}`,
+                `Positive GEX: dealers long gamma buy the dip at the put wall. **Fade it** toward the flip ${F ?? "—"}. Stop below ${r2(a3.low - tz)}.`,
+                a3.low - tz, F != null && F > c0 ? F : nextLv("bull", c0));
+          }
+        }
         // LB shakeout watch: a top-5 leaderboard contract is 20%+ above its VWAP, so its holders are likely to be shaken out first
         if (GX && GX.lb && GX.lb.top && t.min >= OPEN + 15 && t.min < CLOSE - 20) {
           for (const c of GX.lb.top.slice(0, 5).filter((x) => x.shakeout)) {
             const calls = c.type === "C";
             const stack = keyLevels.filter(([, v]) => v != null && (calls ? v < c0 : v > c0))
               .sort((a, b) => (calls ? b[1] - a[1] : a[1] - b[1])).slice(0, 3).map(([n, v]) => `${n} ${r2(v)}`);
-            const regime = GX.flip != null ? (c0 >= GX.flip ? "above the gamma flip: shakeouts usually stay shallow" : "below the gamma flip: shakeouts can run deeper, size down") : null;
+            const rg = gexReg(c0);
+            const regime = rg === "+" ? "positive GEX (dealers dampen): shakeouts usually stay shallow" : rg === "-" ? "negative GEX (dealers amplify): shakeouts can run deeper, size down" : null;
             found.push({
               kind: "setup", sym, key: `lbshake:${c.label}:${t.date}`, once: true, color: COLORS.big,
               title: `🏁 LB SHAKEOUT WATCH: SPX ${c.label} +${c.pnlPct}% vs VWAP (${calls ? "calls" : "puts"} crowded)`,
@@ -1111,7 +1154,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         });
       }
       // market context of every signal from this ticker (the learning run compares winners and losers by it)
-      const gexSide = GX && GX.flip != null && (sym === "$SPX" || (sym === "SPY" && ratio)) ? ((sym === "SPY" ? c0 * ratio : c0) >= GX.flip ? "positive" : "negative") : null;
+      const gexSide = (sym === "$SPX" || (sym === "SPY" && ratio)) ? ({ "+": "positive", "-": "negative" }[gexReg(sym === "SPY" ? c0 * ratio : c0)] || null) : null;
       for (const f of found) if (f.sym === sym && f.track && f.contract === undefined) {
         // SPX ideas use the paper account's current style delta (it can change when a challenger takes over)
         const tgt = sym === "$SPX" && paperStyle && paperStyle.delta ? paperStyle.delta : 0.4;
