@@ -1,5 +1,6 @@
 # region imports
 from AlgorithmImports import *
+import math
 # endregion
 # SPX bot core setups on REAL SPXW 0DTE option prices (QuantConnect cloud, free tier: backtests with their data are free).
 #
@@ -13,6 +14,8 @@ from AlgorithmImports import *
 # Exit when SPX hits the bot's stop or target, after 60 minutes (bo1m 30), or at 15:55: exactly the bot's scorecard rules.
 # "paper" = the paper account would have taken it (no entries 9:30-10:00 except ggo, none after 14:00, bo1m / atr1 calls are watch only).
 #
+# GEX split: each trade tagged +GEX / -GEX (0DTE dealer gamma near SPX at entry, calls +, puts -).
+#   Theory: +GEX dealers dampen moves (pullbacks / snap-backs should work better), -GEX they amplify (breakouts should).
 # Output: a short summary at the end in the Console tab (and Logs tab), plus CORE / PAPER in the results statistics.
 
 START = (2016, 1, 1)
@@ -27,6 +30,30 @@ def r2(x):
 def ema_next(prev, x, n):
     k = 2.0 / (n + 1)
     return x if prev is None else x * k + prev * (1 - k)
+
+
+def ncdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def gamma_of(px, S, K, T, call):
+    """Black-Scholes gamma from the option's mid price (implied vol by bisection); 0 when there is no time value."""
+    intr = max(0.0, S - K) if call else max(0.0, K - S)
+    if px <= intr + 0.02:
+        return 0.0
+    lo, hi = 0.01, 6.0
+    for _ in range(40):
+        v = (lo + hi) / 2
+        sd = v * math.sqrt(T)
+        d1 = (math.log(S / K) + 0.5 * sd * sd) / sd
+        val = S * ncdf(d1) - K * ncdf(d1 - sd) if call else K * ncdf(sd - d1) - S * ncdf(-d1)
+        if val > px:
+            hi = v
+        else:
+            lo = v
+    sd = (lo + hi) / 2 * math.sqrt(T)
+    d1 = (math.log(S / K) + 0.5 * sd * sd) / sd
+    return math.exp(-d1 * d1 / 2) / math.sqrt(2 * math.pi) / (S * sd)
 
 
 def wilder_atr(bars, n=14):
@@ -306,12 +333,21 @@ class SpxCore0DTE(QCAlgorithm):
             self.no_chain += 1
             return
         c = min(cs, key=lambda x: abs(x.strike - entry))
+        # dealer gamma regime (0DTE, strikes within 60 pts): sum of gamma x open interest x 100, calls +, puts -
+        T = max(960 - now_m, 2) / 525600.0
+        gex = 0.0
+        for o in chain:
+            if o.expiry.date() != self.day or abs(float(o.strike) - entry) > 60 or o.bid_price <= 0:
+                continue
+            mid = float(o.bid_price + o.ask_price) / 2
+            iscall = o.right == OptionRight.CALL
+            gex += (1 if iscall else -1) * gamma_of(mid, entry, float(o.strike), T, iscall) * float(o.open_interest) * 100
         fill = float(c.ask_price)          # priced from the quote (buy at the ask), no order: no account balance to run out
         paper = now_m < 840 and (now_m >= 600 or fam == "ggo") and fam != "bo1m" and not (fam == "atr1" and up)
         tr = {"date": str(self.day), "et": "%d:%02d" % (now_m // 60, now_m % 60), "fam": fam, "dir": d, "paper": paper,
               "spx_entry": r2(entry), "stop": r2(stop), "target": r2(target), "risk": r2(risk), "strike": float(c.strike),
               "sym": c.symbol, "opt_in": fill, "spread_in": r2(float(c.ask_price - c.bid_price)), "max_bid": float(c.bid_price),
-              "m": now_m, "limit": limit}
+              "m": now_m, "limit": limit, "gex": "+" if gex >= 0 else "-"}
         self.open.append(tr)
 
     def manage(self, b, now_m):
@@ -355,6 +391,9 @@ class SpxCore0DTE(QCAlgorithm):
             ts = [t for t in self.trades if t["fam"] == fam]
             side = lambda d: " ".join(stats([t for t in ts if t["dir"] == d]).split(" ")[i] for i in (0, 1, 3, 5)) if any(t["dir"] == d for t in ts) else "n0"
             out.append("%s %s | bull %s | bear %s" % (fam, stats(ts), side("bull"), side("bear")))
+        for fam in ("ALL core", "ggo", "ggpb", "ckl10", "atr1", "bo1m"):
+            ts = core if fam == "ALL core" else [t for t in self.trades if t["fam"] == fam]
+            out.append("GEX %s | +GEX %s | -GEX %s" % (fam, stats([t for t in ts if t["gex"] == "+"]), stats([t for t in ts if t["gex"] == "-"])))
         for lab, lo, hi in (("9:30-10", 570, 600), ("10-12", 600, 720), ("12-14", 720, 840), ("14-16", 840, 960)):
             out.append("core %s " % lab + stats([t for t in core if lo <= t["m"] < hi]))
         for y in sorted(set(t["date"][:4] for t in self.trades)):
