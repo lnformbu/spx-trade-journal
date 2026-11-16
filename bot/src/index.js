@@ -396,7 +396,16 @@ const deps = { schwabToken, schwab, history, readJSON, writeJSON, plansByTicker 
 export default {
   async scheduled(event, env, ctx) {
     if (event.cron === SIGNALS_CRON) ctx.waitUntil(runSignals(env, deps)
-      .then((r) => r && r.paper ? runPaper(env, deps, { ...r.paper, t: et(Date.now()) }) : null)
+      .then(async (r) => {
+        if (!(r && r.paper)) return null;
+        await runPaper(env, deps, { ...r.paper, t: et(Date.now()) });
+        // second check 30 s later: no new signals (they come from completed 1m candles), but open positions get their stops,
+        // trailing stops and targets checked again, and A/A+ entries waiting for a price can fill 30 seconds sooner.
+        // The scan takes ~35 s, so this lands around :05 of the next minute, well before that minute's paper run (~:35).
+        await new Promise((res) => setTimeout(res, 30000));
+        await runPaper(env, deps, { ...r.paper, candidates: [], t: et(Date.now()) }).catch((e) => console.error("paper +30s", e));
+        return null;
+      })
       .catch((e) => console.error("signals/paper", e)));
     else if (event.cron === GREEKS_CRON) ctx.waitUntil(greekJob(env, deps).catch((e) => console.error("greeks", e)));
     else {
