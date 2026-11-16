@@ -23,3 +23,7 @@ bot/.dev.vars
 bot/.replay.json
 d_*.json
 swing_*.json
+
+# local market-data pool (CSV) and the local pull shortcut
+data/
+pull-data.cmd

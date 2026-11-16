@@ -119,5 +119,20 @@ export async function runGreeks(env, deps, { force = false } = {}) {
   g.date = t.date; g.et = hhmm(t.min);
   g.expiries = Object.keys(chain.callExpDateMap || {}).map((x) => x.split(":")[0]);
   await writeJSON(env, "greeks:spx", g);
+
+  // ---- history (data pool): one board row + the top-10 leaderboard contracts every 5 minutes in market hours,
+  // kept forever per day in "hist:day:<date>"; GET /export?kind=board|lb|eod returns it as CSV ----
+  if (t.min >= OPEN && t.min <= CLOSE) {
+    const hk = "hist:day:" + t.date, H = (await readJSON(env, hk)) || { board: [], lb: [] }, at = hhmm(t.min);
+    if (!H.board.some((x) => x.at === at)) {
+      H.board.push({ at, spot: r2(spot), src: spxOI > 0 ? "SPX" : "SPY", flip: g.flip ?? null, callWall: g.callWall ?? null, putWall: g.putWall ?? null,
+        eye: g.eye ? g.eye.strike : null, maxPain: g.lb.maxPain ?? null, mpLo: zone ? zone.low : null, mpHi: zone ? zone.high : null,
+        g0Max: gamma0.maxStrike, g0Grow: gamma0.growing, posNodes: gamma0.posNodes.join(" "), negNodes: gamma0.negNodes.join(" "),
+        flowC: lb.flow ? lb.flow.calls : null, flowP: lb.flow ? lb.flow.puts : null, callSpike: lb.flow ? lb.flow.callSpike : null, putSpike: lb.flow ? lb.flow.putSpike : null,
+        tax: tax.map((c) => c.label).join(" ") });
+      for (const c of top) H.lb.push({ at, label: c.label, strike: c.strike, type: c.type, vol: c.vol, last: c.last, vwap: c.vwap, pnlPct: c.pnlPct, itm: c.itm });
+      await writeJSON(env, hk, H);
+    }
+  }
   return g;
 }

@@ -269,3 +269,16 @@ export function checklist10(bars, start, minOf, lv, A, dir) {
   }
   return null;
 }
+
+// 1-minute breakout scalp (your 1m scalping test, 2026-11-15): the last closed 1m candle closes beyond the previous 20 candles'
+// high (low) with the 1m EMAs stacked 8 > 21 > 48 (8 < 21 < 48). Stop: past the 21 EMA / the candle, 1 point beyond. Target 2R.
+// Tested 10/1-11/13 (scripts/scalp-test.mjs, 0.6 pt cost): before noon 99 trades +0.24R, PF 1.55; after noon it fails.
+// `bars` = continuous regular-hours 1m candles (a few days, so the EMAs are warmed up), last one closed.
+export function breakout1m(bars) {
+  if (!bars || bars.length < 80) return null;
+  const c = bars.map((b) => b.close), i = bars.length - 1, b = bars[i];
+  const e8 = ema(c, 8), e21 = ema(c, 21), e48 = ema(c, 48), w = bars.slice(i - 20, i);
+  if (b.close > Math.max(...w.map((x) => x.high)) && e8[i] > e21[i] && e21[i] > e48[i]) return { dir: "bull", entry: b.close, stop: Math.min(e21[i], b.low) - 1, ema21: e21[i] };
+  if (b.close < Math.min(...w.map((x) => x.low)) && e8[i] < e21[i] && e21[i] < e48[i]) return { dir: "bear", entry: b.close, stop: Math.max(e21[i], b.high) + 1, ema21: e21[i] };
+  return null;
+}

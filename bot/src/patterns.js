@@ -42,9 +42,10 @@ export function patterns(bars) {
 export function atLevel(pat, levels, tol) {
   const b = pat.bar;
   let best = null;
-  for (const [name, v] of levels) {
+  for (const [name, v, zone] of levels) {
     if (v == null) continue;
-    const touch = pat.dir === "bull" ? b.low <= v + tol && b.close >= v - tol : b.high >= v - tol && b.close <= v + tol;
+    const tl = Math.max(tol, zone || 0);   // a level with its own zone (your thesis levels) counts anywhere inside it
+    const touch = pat.dir === "bull" ? b.low <= v + tl && b.close >= v - tl : b.high >= v - tl && b.close <= v + tl;
     if (!touch) continue;
     const d = Math.abs((pat.dir === "bull" ? b.low : b.high) - v);
     if (!best || d < best.d) best = { name, v, d };

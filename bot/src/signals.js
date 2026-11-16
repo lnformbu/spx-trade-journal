@@ -10,7 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
-import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10 } from "./setups.js";
+import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10, breakout1m } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -97,12 +97,18 @@ async function spxContract(schwab, token, date, strike, type) {
 
 // ---- take-profit ladder: the trade's own target, then the next real levels in its path (ATR levels, your thesis,
 // quarterly levels, 21/200 EMAs, HOD/LOD). TP1 sell ½ and move the stop to entry, TP2 sell ¼, the runner rides to TP3.
+// Levels are zones, not exact prices: your thesis levels count within ±USER_ZONE SPX points (7730 → a bounce at 7728 counts);
+// take-profits sit slightly in front of the level so a near miss still fills.
+export const USER_ZONE = 5;
+export let FRONT = 0.01;
+export const setFront = (x) => { FRONT = x; };
 export function tpLadder(dir, entry, stop, target, levels, A) {
   const bull = dir === "bull", R = Math.abs(entry - stop);
   if (!(R > 0) || !A) return null;
   const ahead = (v) => (bull ? v - entry : entry - v);
   const minGap = Math.max(R * 0.5, A * 0.03);
-  const cands = levels.filter(([, v]) => v != null && isFinite(v) && ahead(v) >= minGap).sort((x, y) => ahead(x[1]) - ahead(y[1]));
+  const front = (v, z) => (bull ? v - (z ? z * 0.4 : A * FRONT) : v + (z ? z * 0.4 : A * FRONT));
+  const cands = levels.filter(([, v]) => v != null && isFinite(v)).map(([n, v, z]) => [n, front(v, z)]).filter(([, v]) => ahead(v) >= minGap).sort((x, y) => ahead(x[1]) - ahead(y[1]));
   const uniq = [];
   for (const c of cands) if (!uniq.length || ahead(c[1]) - ahead(uniq[uniq.length - 1][1]) >= A * 0.05) uniq.push(c);
   let first = target != null && ahead(target) >= minGap ? ["signal target", target] : uniq.shift();
@@ -448,7 +454,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
           ["Quarterly Golden Gate up", D.position.atrLevels["+0.382"]], ["Quarterly Golden Gate down", D.position.atrLevels["-0.382"]],
           ["Quarterly midrange up", D.position.atrLevels["+0.618"]], ["Quarterly midrange down", D.position.atrLevels["-0.618"]]] : []),
         // your posted weekly thesis levels (#spx-training bigger-picture post), SPX only
-        ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price]) : []),
+        ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price, x.zone ?? thesis.zone ?? USER_ZONE]) : []),
       ];
       // SPX gamma levels (call wall, put wall, flip, Eye of Sauron, biggest nodes); SPY gets them divided by the SPX/SPY ratio
       const gconv = sym === "$SPX" ? 1 : sym === "SPY" && ratio ? 1 / ratio : null;
@@ -597,6 +603,24 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
               + `\nSPX stretched to the ${up ? "−" : "+"}1 ATR ${sn.full} (a full day's range) and the 3m just closed back inside: the move is exhausted, fade it back toward the midrange.`,
           });
         }
+        // 1m breakout scalp (your 1m scalping test): 9:35-12:00 only, watch-only until the scorecard confirms it on new days
+        if (t.min >= 575 && t.min < 720 && !(st.bo1mUntil > now)) {
+          const all1 = done.map((c) => ({ ...c, t: et(c.datetime) })).filter((c) => c.t.min >= OPEN && c.t.min < CLOSE);
+          const bo = breakout1m(all1);
+          const risk = bo ? Math.abs(c0 - bo.stop) : 0;
+          if (bo && risk >= 1.5 && risk <= 15) {
+            const up = bo.dir === "bull", tgt = up ? c0 + 2 * risk : c0 - 2 * risk;
+            st.bo1mUntil = now + 10 * 60000;
+            found.push({
+              kind: "setup", sym, key: `bo1m:${t.date}:${t.min}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+              track: { dir: bo.dir, entry: r2(c0), stop: r2(bo.stop), target: r2(tgt), needTrigger: false },
+              noTradeWhy: "new 1m scalp: watch only until it proves itself on new days (test: +0.24R before noon)",
+              title: `⚡ SPX 1m BREAKOUT SCALP ${up ? "CALLS ▲" : "PUTS ▼"} · ${r2(c0)} (watch only)`,
+              text: `**Entry:** now ~${r2(c0)} · **Stop:** ${r2(bo.stop)} (past the 1m 21 EMA, ${r2(risk)} pts) · **Target:** 2R **${r2(tgt)}** · out within 30 min`
+                + `\n1m close ${up ? "above the last 20 candles' high" : "below the last 20 candles' low"} with the 1m 8/21/48 EMAs stacked ${up ? "up" : "down"}. Quick scalp: entries and exits on the 1m chart.`,
+            });
+          }
+        }
         // 8 EMA ride (PDF 5): in trend mode, a 3m test of the top of the ribbon that holds (replay: 212 trades, +0.51R; +0.10R without the 3 best days)
         const p8 = tdNow ? pullback8(b3, tdNow) : null;
         if (p8) {
@@ -713,7 +737,7 @@ ${riskTxt}`,
           if (killDir && t.min < 945) {
             const lvls = [...(G0.posNodes || []).map((k) => ["positive-gamma node " + k, k]), ...keyLevels.filter(([, v]) => v != null)];
             const b = rth[rth.length - 1], pb = rth[rth.length - 2];
-            const hit = b && lvls.find(([, v]) => (killDir === "bear" ? b.high >= v && b.close < v && pb && pb.close < v : b.low <= v && b.close > v && pb && pb.close > v) && Math.abs(v - c0) <= D.atr * 0.08);
+            const hit = b && lvls.find(([, v, z]) => { const tz = Math.max(z || 0, D.atr * 0.03); return (killDir === "bear" ? b.high >= v - tz && b.close < v && pb && pb.close < v : b.low <= v + tz && b.close > v && pb && pb.close > v) && Math.abs(v - c0) <= D.atr * 0.08 + tz; });
             const ranAgainst = rth.length > 30 && (killDir === "bear" ? c0 > rth[rth.findIndex((x) => x.t.min >= 930)]?.close : c0 < rth[rth.findIndex((x) => x.t.min >= 930)]?.close);
             if (hit && ranAgainst) {
               const up = killDir === "bull", lvl = hit[1];

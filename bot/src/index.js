@@ -418,6 +418,39 @@ export default {
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
     if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));
+    // data pool as CSV: board (5-min greeks/gamma/flow rows), lb (top-10 0DTE contracts per 5 min), eod (daily close vs the
+    // EOD plan), signals (scorecard), paper (paper trades). ?from=YYYY-MM-DD&to=YYYY-MM-DD (board/lb: max 120 days per call)
+    if (url.pathname === "/export") {
+      const kind = url.searchParams.get("kind") || "board", today = et(Date.now()).date;
+      const from = url.searchParams.get("from") || today, to = url.searchParams.get("to") || today;
+      const csv = (rows) => {
+        if (!rows.length) return "";
+        const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+        const cell = (v) => { if (v == null) return ""; const s = typeof v === "object" ? JSON.stringify(v) : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+        return [cols.join(","), ...rows.map((r) => cols.map((c) => cell(r[c])).join(","))].join("\n") + "\n";
+      };
+      let rows = [];
+      if (kind === "board" || kind === "lb") {
+        for (let d = new Date(from + "T12:00:00Z"), n = 0; d.toISOString().slice(0, 10) <= to && n < 120; d = new Date(d.getTime() + 864e5), n++) {
+          if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+          const date = d.toISOString().slice(0, 10), H = await readJSON(env, "hist:day:" + date);
+          if (H) rows.push(...(H[kind] || []).map((r) => ({ date, ...r })));
+        }
+      } else if (kind === "eod") {
+        rows = (((await readJSON(env, "lb:hist")) || {}).items || []).filter((x) => x.date >= from && x.date <= to).map((x) => ({
+          date: x.date, close: x.close, top1: x.top[0] && `${x.top[0].k}${x.top[0].t}`, top1Vol: x.top[0] && x.top[0].vol, top1ITM: x.top[0] && x.top[0].itm,
+          top2: x.top[1] && `${x.top[1].k}${x.top[1].t}`, top2ITM: x.top[1] && x.top[1].itm, top3: x.top[2] && `${x.top[2].k}${x.top[2].t}`, top3ITM: x.top[2] && x.top[2].itm,
+          killDir: x.eod && x.eod.killDir, pin: x.eod && x.eod.pin, pinErr: x.eod && x.eod.pinErr, walls: x.eod && x.eod.walls && x.eod.walls.join(" "),
+          insideWalls: x.eod && x.eod.insideWalls, killWorked: x.eod && x.eod.killWorked,
+          taxDied: x.eod && x.eod.taxDied && x.eod.taxDied.map((c) => `${c.label}:${c.died ? "died" : "paid"}`).join(" ") }));
+      } else if (kind === "signals") {
+        rows = (((await readJSON(env, "bot:stats")) || {}).items || []).filter((x) => x.date >= from && x.date <= to).map(({ ctx, ...x }) => ({ ...x, ctx: ctx ? JSON.stringify(ctx) : null }));
+      } else if (kind === "paper") {
+        rows = (((await readJSON(env, "paper:trades")) || {}).items || []).map((x) => ({ date: x.date || (x.closedAt ? et(x.closedAt).date : ""), ...x }))
+          .filter((x) => x.date >= from && x.date <= to);
+      } else return new Response("kind must be board, lb, eod, signals or paper", { status: 400 });
+      return new Response(csv(rows), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${kind}_${from}_${to}.csv"` } });
+    }
     // your weekly bigger-picture thesis from #spx-training: { date, text, levels: [{ name, price, role }], scenarios: [..] }
     if (url.pathname === "/thesis") {
       if (req.method === "POST") { const b = await req.json(); await writeJSON(env, "bot:thesis", b); return json({ ok: true, levels: (b.levels || []).length }); }

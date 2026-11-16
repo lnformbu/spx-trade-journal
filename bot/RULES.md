@@ -398,6 +398,50 @@ Not backtested (no history of option volume or 0DTE gamma), so: the fakeout fade
 ("eod:plan") and scored at 4:10 against the close (pin error, inside the walls, kill direction right, did the shaken names die) in "lb:hist".
 Paper account: after 3:30 a style only enters if its day is green (profits only), still A/A+ cards only.
 
+## **NEW** Data pool (CSV history, recorded every 5 minutes in market hours)
+The bot keeps a permanent record per day in its database (`hist:day:<date>`), and `scripts/pull-history.mjs` (or double-click
+`files/pull-data.cmd`) copies everything into CSV files in `files/data/`, adding new days and keeping all old rows:
+
+| File | What | When |
+|---|---|---|
+| board.csv | SPX spot, gamma flip, call/put walls, Eye of Sauron, max pain + zone, biggest / growing 0DTE gamma strike, positive / negative gamma nodes, 0DTE call/put volume, tax list | every 5 min, 9:30-4:00 |
+| lb.csv | top-10 SPX 0DTE contracts: volume, last, own VWAP, % vs VWAP, ITM | every 5 min |
+| eod.csv | top-3 contracts at the close (ITM or not), EOD plan (kill direction, pin, walls) vs the close | daily |
+| signals.csv / paper.csv | every scored signal / paper trade | as they finish |
+| spx_1m.csv, spy_1m.csv, spx_daily.csv | 1-minute candles (Schwab only keeps ~48 days, so the pool is the only long record), 3 years daily | each pull |
+
+Run the pull at least once every ~6 weeks (the 1-minute candles expire after that); daily is best. Online: `GET /export?kind=board|lb|eod|signals|paper&from=&to=` (admin key).
+
+## **NEW** Levels are zones, not exact prices
+* Your thesis levels count anywhere within **±5 SPX points** (7730 resistance → a rejection at 7728 counts). Per level or for the
+  whole post: add `"zone": 3` to the level (or the thesis) to change it.
+* Take-profits sit **in front of** a level: your levels by 40% of the zone (7730 → TP 7728), the bot's own levels by 0.01 ATR.
+* The bot's own levels already count within 0.05 ATR (~3 points) for the ⭐ cards; the EOD fakeout fade now uses its zone too.
+* Tested on 1-minute bounces at the bot's ATR / PDH / PDL / ORB levels (32 sessions): exact ±0 gross +0.02R, ±2 −0.02R, ±5 +0.02R.
+  Wider zones did not make bounces better; they only found more of them (1.4 → 14.6 a day). So the zone is for **not missing a
+  real reaction at a hand-picked level, and not missing a take-profit by a point**; it does not make a level worth trading by itself.
+
+## **NEW** 1-minute scalping test (`scripts/scalp-test.mjs`, entries and exits on 1m only)
+Signal on a closed 1m candle, fill at the next open, stop/target inside the candle (both touched = stop), one trade at a time,
+30-min limit, cost 0.6 SPX pt per round trip (option spread + slippage). 32 sessions, 10/1-11/13:
+
+| Entry | Best exit | Trades/day | Net R | PF |
+|---|---|---|---|---|
+| EMA 8/21 pullback | 2R | 6.3 | −0.00 | 1.00 |
+| VWAP reclaim | 1R | 2.0 | −0.05 | 0.89 |
+| **20-bar breakout (8>21>48)** | **2R** | 8.7 | **+0.06** | 1.12 |
+| Level bounce (±0 / ±2 / ±5) | ½ at 1R + trail | 1.4-14.6 | −0.09 to −0.20 | 0.68-0.84 |
+
+* Costs decide 1m scalps: before costs the pullback made +0.14R and the breakout +0.17R; the 0.6 pt spread takes most of it,
+  because 1m stops are only 3-7 points. Tight-stop scalps (level bounces, ~3 pt risk) lose after costs.
+* **The one that held up: 20-bar breakout before noon, 2R target**: 99 trades, +0.24R net, PF 1.55, both halves positive
+  (+0.32 / +0.16), still +0.18R at 1.0 pt cost, 19 of 31 days green. After noon it fails (12-2 +0.02R, 2-3:50 −0.09R).
+* Verdict: a plain 1m scalp is not better than the core playbook (+0.32R, PF 1.84). The morning breakout is worth forward-testing;
+  the time cut was found in this same sample, so it needs new days before it trades.
+* **Built (watch only):** ⚡ SPX 1m BREAKOUT SCALP, 9:35-12:00, family `bo1m`: entry at the signal close, stop past the 1m 21 EMA
+  (1.5-15 pts), target 2R, out within 30 min, 10-minute pause after each one. Live rule on the same data: 152 trades, +0.24R net.
+  It posts in #signals and gets scored; the paper account trades it only after 15+ scored results over 3+ new days stay positive.
+
 ## **NEW** Take-profit ladder and trade follow-ups (SPX)
 
 Every SPX trade signal now carries a **Take profits** line:
