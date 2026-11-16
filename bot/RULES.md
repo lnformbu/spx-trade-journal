@@ -6,12 +6,12 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 
 ## Money (scales with the account)
 
-| Rule | Setting | Example: $2,000 account |
+| Rule | Setting | Example: $25,000 account |
 |---|---|---|
-| Account | paper account (your starting amount; example $2,000), follows the bot's own P/L | $2,000 |
-| Position size | **50% of the account** in premium: contracts = account × 50% ÷ (price × 100), at least 1 | ~$1,000 (e.g. 2 × $5.00) |
-| Max loss per trade | **15% of the account** (premium stop at about −30%), including fees and slippage | $300 |
-| Daily loss lockout | **15% of the account**, realized + open risk; checked *before* each entry | $300 (one full loss ends the day) |
+| Account | paper account (your starting amount; example $25,000), follows the bot's own P/L (one 0DTE SPX contract costs ~$1,700-2,500) | $25,000 |
+| Position size | **50% of the account** in premium: contracts = account × 50% ÷ (price × 100), at least 1 | ~$12,500 (e.g. 6 × $20.00) |
+| Max loss per trade | **15% of the account** (premium stop at about −30%), including fees and slippage | $3,750 |
+| Daily loss lockout | **15% of the account**, realized + open risk; checked *before* each entry | $3,750 (one full loss ends the day) |
 | If one contract alone costs more than 50% or risks more than 15% | skip the trade | |
 | Max trades per day | 4 | |
 | Max consecutive losses | 2, then done for the day | |
@@ -276,7 +276,7 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 ## **NEW** Style challengers (the bot finds its own trading style)
 
 Your rules are the **champion** and trade the paper account. Alongside, **challengers** trade the same SPX signals at the same moments,
-each with one change and its own $2,000 paper book (silent: no Discord posts, shown in the journal):
+each with one change and its own $25,000 paper book (silent: no Discord posts, shown in the journal):
 
 | Challenger | Change |
 |---|---|

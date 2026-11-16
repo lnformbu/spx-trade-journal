@@ -13,7 +13,8 @@ import { post } from "./signals.js";
 import { decide, learn, famOf, kindFam, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES } from "./learn.js";
 
 const FEE = 0.65;            // Schwab, per contract per side
-const START = 2000;
+// paper account size: one 0DTE SPX contract costs ~$1,700-2,500, so $2,000 could never buy one under the 50% rule
+const START = 25000;
 const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
@@ -282,6 +283,10 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
 
   // one quote call for every book's open contract, the tickers, waiting contracts and the champion's after-exit shadows
   const books = [acct, ...Object.values(ch.books).map((x) => x.book)];
+  // one-time move to the new size: a book that never traded at the old $2,000 start starts over at START
+  for (const b of books) if (b.start !== START && b.balance === b.start && !b.open && !(b.recent || []).length) {
+    b.start = START; b.balance = START; if (b.day) b.day.startBal = START;
+  }
   const syms = [...new Set([
     ...books.flatMap((b) => [...(b.open ? [b.open.symbol, b.open.under] : []), ...(b.pending || []).flatMap((p) => [p.sym, p.contract.symbol])]),
     ...acct.shadow.map((s) => s.symbol),
