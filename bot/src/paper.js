@@ -124,7 +124,10 @@ async function stepBook(b, cfg, X) {
   b.positions = b.positions || (b.open ? [b.open] : []);
   const SLOTS = cfg.collect ? 12 : MAX_OPEN;
   const openRisk = () => b.positions.reduce((s, x) => s + (x.risk || 0), 0);
-  const conflict = (sym, dir) => (cfg.collect ? null : b.positions.find((x) => group(x.under) === group(sym) && x.dir !== dir));
+  // main account: never both sides of a ticker; data collector: at most 3 open per ticker (SPX always keeps room)
+  const conflict = (sym, dir) => (cfg.collect
+    ? (b.positions.filter((x) => group(x.under) === group(sym)).length >= 3 ? b.positions.find((x) => group(x.under) === group(sym)) : null)
+    : b.positions.find((x) => group(x.under) === group(sym) && x.dir !== dir));
 
   // the contract this style buys for a signal: the signal's own, or (delta styles, SPX) the SPX 0DTE contract nearest its delta
   async function contractFor(c) {
@@ -293,7 +296,9 @@ async function stepBook(b, cfg, X) {
 // candidates = this minute's new signals that were posted with a contract (from runSignals)
 export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, now = Date.now(), t }) {
   const { schwabToken, schwab, readJSON, writeJSON } = deps;
-  candidates = candidates.filter((c) => paperTicker(env, c.contract));   // blocked / watch-only ones still reach the data collector
+  // the main account and the challengers trade PAPER_TICKERS (SPX); the data collector takes every ticker's signals (1 contract)
+  const allCands = candidates.filter((c) => c.contract && c.contract.symbol);
+  candidates = allCands.filter((c) => paperTicker(env, c.contract));
   const acct = (await readJSON(env, "paper:acct")) || newBook();
   const model = (await readJSON(env, "paper:model")) || DEFAULT_MODEL;
   // one-time switch of the champion to scalp exits (the learned params were the old swing defaults)
@@ -364,7 +369,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   for (const x of Object.values(ch.books)) {
     try { await stepBook(x.book, x.cfg, { ...X, champion: false }); } catch (e) { console.error("challenger", x.cfg.id, e); }
   }
-  try { await stepBook(data, dataCfg, X.dataClosed ? { ...X, champion: false } : X); } catch (e) { console.error("data collector", e); }
+  try { await stepBook(data, dataCfg, { ...X, candidates: allCands, champion: false }); } catch (e) { console.error("data collector", e); }
   // per-session results for the champion-vs-challenger comparison
   const rec = (id, b) => { const h = (ch.hist[id] = ch.hist[id] || {}); h[t.date] = { pnl: b.day.pnl, trades: b.day.trades, gw: b.day.gw, gl: b.day.gl }; };
   rec("champion", acct);
