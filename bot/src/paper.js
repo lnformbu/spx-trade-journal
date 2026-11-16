@@ -15,6 +15,9 @@ import { decide, learn, famOf, kindFam, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES
 const FEE = 0.65;            // Schwab, per contract per side
 // paper account size: one 0DTE SPX contract costs ~$1,700-2,500, so $2,000 could never buy one under the 50% rule
 const START = 25000;
+// several positions at once (user 2026-11-16): up to MAX_OPEN, never two opposite sides of the same ticker; the 50% premium
+// and 15% risk-per-trade limits are split between the slots, and all open risk counts against the day's 15% loss budget
+const MAX_OPEN = 3;
 const r2 = (x) => Math.round(x * 100) / 100;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
@@ -88,8 +91,8 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (d.pnl <= -0.15 * sb) return (d.done = "daily loss limit (−15%) reached");
   if (d.pnl >= 0.15 * sb) return (d.done = "daily target (+15%) reached");
   if (d.best >= 0.10 * sb && d.pnl < d.best / 2) return (d.done = "profit lock: gave back half of the day's best");
-  if (d.trades >= 4) return "4 trades today";
-  if (d.consecLoss >= 2) return (d.done = "2 losses in a row");
+  if (d.trades >= 10) return "10 trades today";
+  if (d.consecLoss >= 3) return (d.done = "3 losses in a row");
   if (now - d.lastLossAt < 15 * 60000) return "15-minute cooldown after a loss";
   if (d.stopOuts.some((s) => s.sym === group(cand.sym) && s.dir === cand.dir && Math.abs(s.level - cand.uEntry) <= Math.abs(cand.uEntry) * 0.0008)) return "already stopped out at this level in this direction";
   return null;
@@ -112,6 +115,9 @@ async function stepBook(b, cfg, X) {
   const P = { ...DEFAULT_PARAMS, ...cfg.params };
   P.stopPct = Math.min(0.3, P.stopPct || 0.3);
   if (!b.day || b.day.date !== t.date) freshDay(b, t);
+  b.positions = b.positions || (b.open ? [b.open] : []);
+  const openRisk = () => b.positions.reduce((s, x) => s + (x.risk || 0), 0);
+  const conflict = (sym, dir) => b.positions.find((x) => group(x.under) === group(sym) && x.dir !== dir);
 
   // the contract this style buys for a signal: the signal's own, or (delta styles, SPX) the SPX 0DTE contract nearest its delta
   async function contractFor(c) {
@@ -137,7 +143,8 @@ async function stepBook(b, cfg, X) {
     const avgExit = p.exits.reduce((s, e) => s + e.qty * e.px, 0) / p.qty;
     const trade = { ...p, pnl, R: r2(pnl / p.risk), avgExit: r2(avgExit), exitWhy: why, closedAt: now, closedET: hhmm(t.min), balance: b.balance };
     delete trade.qtyOpen; delete trade.missed; delete trade.lastBid;
-    b.open = null;
+    b.positions = b.positions.filter((x) => x !== p);
+    b.open = b.positions[0] || null;
     log(b, t, pnl >= 0 ? "win" : "loss", p.label, `${why} · ${usd(pnl)}`);
     if (!champion) { b.recent = [{ date: t.date, et: p.et, label: p.label, signal: p.signal, pnl, R: trade.R, why }, ...(b.recent || [])].slice(0, 30); return; }
     X.closed.push(trade);
@@ -152,12 +159,12 @@ async function stepBook(b, cfg, X) {
   function enter(p, k, underPx, how) {
     const ask = k.ask, bid = k.bid;
     const cost1 = ask * 100, riskPer = cost1 * P.stopPct + 2 * FEE;
-    const share = cfg.sizing === "edge" && (p.est == null || p.est < 0.2) ? 0.25 : 0.5;
+    const share = (cfg.sizing === "edge" && (p.est == null || p.est < 0.2) ? 0.25 : 0.5) / MAX_OPEN;
     let qty = Math.floor((share * b.balance) / cost1);
-    if (qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${share * 100}% of the account`); return false; }
-    qty = Math.min(qty, Math.floor((0.15 * b.balance) / riskPer), Math.floor((b.day.pnl + 0.15 * b.day.startBal) / riskPer));
-    if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the 15% limit left today"); return false; }
-    b.open = {
+    if (qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
+    qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl + 0.15 * b.day.startBal - openRisk()) / riskPer));
+    if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the 15% limit left today (open positions included)"); return false; }
+    const pos = {
       id: now + ":" + k.symbol, date: t.date, symbol: k.symbol, label: k.label, under: p.sym, delta: k.delta, dir: p.dir,
       qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
       at: now, et: hhmm(t.min), stop: r2(ask * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,
@@ -165,21 +172,23 @@ async function stepBook(b, cfg, X) {
       fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est,
       exits: [], realized: 0, path: [r3((bid || ask) / ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct }, style: cfg.name,
     };
+    b.positions.push(pos);
+    b.open = b.positions[0];
     b.day.trades++;
     log(b, t, "bought", p.title, `${qty} × ${k.label} @ ${usd(ask)} (${how})`);
     if (champion) {
       const bull = p.dir === "bull", tk = p.sym.replace("$", "");
       X.messages.push({
         title: `📄 PAPER BUY ${qty} × ${k.label} @ ${usd(ask)}`,
-        text: `From: ${p.title} (${p.et} ET) · ${how}${p.why ? `\n**Why taken:** ${p.why}` : ""}\nStop ${usd(b.open.stop)} (−${Math.round(P.stopPct * 100)}%) or ${tk} ${bull ? "below" : "above"} ${r2(p.uStop)} · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(ask * (1 + P.t1Pct))})${p.uTarget != null ? ` or ${tk} ${r2(p.uTarget)}` : ""}\nRisk ${usd(b.open.risk)} of ${usd(b.balance)} · style: ${cfg.name}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
+        text: `From: ${p.title} (${p.et} ET) · ${how}${p.why ? `\n**Why taken:** ${p.why}` : ""}\nStop ${usd(pos.stop)} (−${Math.round(P.stopPct * 100)}%) or ${tk} ${bull ? "below" : "above"} ${r2(p.uStop)} · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(ask * (1 + P.t1Pct))})${p.uTarget != null ? ` or ${tk} ${r2(p.uTarget)}` : ""}\nRisk ${usd(pos.risk)} of ${usd(b.balance)} · open positions ${b.positions.length}/${MAX_OPEN} · style: ${cfg.name}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
         color: bull ? 0x2ec26b : 0xf0556b,
       });
     }
     return true;
   }
 
-  // ---- manage the open position ----
-  const pos = b.open;
+  // ---- manage the open positions ----
+  for (const pos of [...b.positions]) {
   if (pos && pos.date !== t.date) sell(pos, pos.qtyOpen, pos.lastBid || 0, "carried past the session (closed at last price)");
   else if (pos) {
     const q = Q[pos.symbol], u = px(pos.under);
@@ -224,13 +233,15 @@ async function stepBook(b, cfg, X) {
       else if (t.min >= 959) why = "3:59 close";
       if (why) sell(pos, pos.qtyOpen, bid, why);
     }
-    if (b.open && b.open.missed >= 5) log(b, t, "warning", b.open.label, "no option quote for 5 minutes");
+    if (b.positions.includes(pos) && pos.missed >= 5) log(b, t, "warning", pos.label, "no option quote for 5 minutes");
+  }
   }
 
   // ---- signals waiting for their entry level ----
-  if (!b.open) {
+  if (b.positions.length < MAX_OPEN) {
     for (const p of b.pending) {
-      if (p.done || b.open) continue;
+      if (p.done || b.positions.length >= MAX_OPEN) continue;
+      if (conflict(p.sym, p.dir)) continue;   // keeps waiting while the opposite side is open
       const bull = p.dir === "bull", u = px(p.sym);
       const g = gate(b, cfg, p, t, now, X.events);
       if (g) { p.done = true; log(b, t, "skipped", p.title, g); continue; }
@@ -251,7 +262,8 @@ async function stepBook(b, cfg, X) {
   for (const c of candidates) {
     const g = gate(b, cfg, c, t, now, X.events);
     if (g) { log(b, t, "skipped", c.title, g); continue; }
-    if (b.open) { log(b, t, "skipped", c.title, "a position is already open"); continue; }
+    if (b.positions.length >= MAX_OPEN) { log(b, t, "skipped", c.title, `${MAX_OPEN} positions already open`); continue; }
+    if (conflict(c.sym, c.dir)) { log(b, t, "skipped", c.title, `opposite side already open (${conflict(c.sym, c.dir).label})`); continue; }
     const d = decide(model, c);
     if (!d.ok) { log(b, t, "skipped", c.title, d.why); continue; }
     if (c.needTrigger) {
@@ -261,9 +273,10 @@ async function stepBook(b, cfg, X) {
     } else {
       const k = await contractFor(c);
       if (!k || !(k.ask > 0)) { log(b, t, "skipped", c.title, "no ask price for the contract"); continue; }
-      if (enter({ ...c, est: d.est }, k, c.uEntry, `signal entry, ${c.sym.replace("$", "")} ${r2(c.uEntry)}`)) b.pending = b.pending.filter((p) => group(p.sym) !== group(c.sym));
+      if (enter({ ...c, est: d.est }, k, c.uEntry, `signal entry, ${c.sym.replace("$", "")} ${r2(c.uEntry)}`)) b.pending = b.pending.filter((p) => !(group(p.sym) === group(c.sym) && p.dir === c.dir));
     }
   }
+  b.open = b.positions[0] || null;   // first position, for older readers (journal card, challenger table)
   if (!champion) b.log = b.log.slice(-15);
 }
 
@@ -284,11 +297,11 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   // one quote call for every book's open contract, the tickers, waiting contracts and the champion's after-exit shadows
   const books = [acct, ...Object.values(ch.books).map((x) => x.book)];
   // one-time move to the new size: a book that never traded at the old $2,000 start starts over at START
-  for (const b of books) if (b.start !== START && b.balance === b.start && !b.open && !(b.recent || []).length) {
+  for (const b of books) if (b.start !== START && b.balance === b.start && !b.open && !(b.positions || []).length && !(b.recent || []).length) {
     b.start = START; b.balance = START; if (b.day) b.day.startBal = START;
   }
   const syms = [...new Set([
-    ...books.flatMap((b) => [...(b.open ? [b.open.symbol, b.open.under] : []), ...(b.pending || []).flatMap((p) => [p.sym, p.contract.symbol])]),
+    ...books.flatMap((b) => [...(b.positions || (b.open ? [b.open] : [])).flatMap((x) => [x.symbol, x.under]), ...(b.pending || []).flatMap((p) => [p.sym, p.contract.symbol])]),
     ...acct.shadow.map((s) => s.symbol),
   ])];
   const Q = await quotes(schwab, token, syms);
@@ -337,7 +350,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     await writeJSON(env, "paper:trades", tr);
   }
   for (const m of X.messages) await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: `${hhmm(t.min)} ET · paper trade (no real order)` } }).catch(() => {});
-  return { balance: acct.balance, open: acct.open && acct.open.label, pending: acct.pending.length, closed: X.closed.length, challengers: Object.keys(ch.books).length };
+  return { balance: acct.balance, open: (acct.positions || []).map((x) => x.label).join(", ") || null, pending: acct.pending.length, closed: X.closed.length, challengers: Object.keys(ch.books).length };
 }
 
 // ---- champion vs challengers ----

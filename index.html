@@ -1153,17 +1153,17 @@
     const day=A.day&&A.day.date===todayISO?A.day:null;
     $("#ppKpis").innerHTML=[
       kpi("Paper account",usd(A.balance),`started ${usd(A.start||2000)} · ${usd(A.balance-(A.start||2000))}`,cls(A.balance-(A.start||2000))),
-      kpi("Today",usd(day?day.pnl:0),day?`${day.trades}/4 trades${day.done?" · done: "+esc(day.done):""}`:"no trades yet",cls(day&&day.pnl)),
+      kpi("Today",usd(day?day.pnl:0),day?`${day.trades}/10 trades${day.done?" · done: "+esc(day.done):""}`:"no trades yet",cls(day&&day.pnl)),
       kpi("Win rate",tr.length?Math.round(w.length/tr.length*100)+"%":"—",`${tr.length} trades`),
       kpi("Profit factor",gl?(gw/gl).toFixed(2):gw?"∞":"—",`P/L ${usd(gw-gl)}`,cls(gw-gl)),
       kpi("Max drawdown",Math.round(dd*100)+"%","from the account's peak",dd>0.15?"neg":""),
     ].join("");
-    const o=A.open;
-    $("#ppOpen").innerHTML=o?[
+    const ops=(A.positions&&A.positions.length)?A.positions:(A.open?[A.open]:[]);
+    $("#ppOpen").innerHTML=ops.length?ops.map((o,i)=>(ops.length>1?`<div class="bs-line"><span><b>Position ${i+1} of ${ops.length}</b></span><span></span></div>`:"")+[
       ["Contract",`<b>${esc(o.label)}</b> 0DTE × ${o.qtyOpen}/${o.qty}${o.posted?" (your posted contract)":""}`],
       ["Entry",`${usd(o.entry)} at ${esc(o.et)} ET`],["Now (bid)",o.lastBid!=null?`${usd(o.lastBid)} (${Math.round((o.lastBid/o.entry-1)*100)}%)`:"—"],
       ["Stop",usd(o.stop)+(o.t1?" · target 1 hit, trailing":"")],["From signal",esc(o.signal)],
-    ].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join(""):`<p class="hint">No open position. Trades SPX signals 9:33–3:55 ET, closes everything at 3:59.</p>`;
+    ].map(([l,v])=>`<div class="bs-line"><span>${l}</span><span>${v}</span></div>`).join("")).join('<hr style="border:0;border-top:1px solid var(--line,#333);margin:6px 0">'):`<p class="hint">No open position. Trades SPX signals 9:33–3:55 ET (up to 3 at once), closes everything at 3:59.</p>`;
     const lg=(A.log||[]).slice().reverse();
     $("#ppLog").innerHTML=(day&&lg.length)?lg.map(x=>`<tr><td>${esc(x.et)}</td><td style="text-align:left">${esc(x.action)}</td><td style="text-align:left">${esc(x.title)}<br><small style="color:var(--ink-3)">${esc(x.why)}</small></td></tr>`).join(""):`<tr><td class="hint">Nothing yet today.</td></tr>`;
     $("#ppTrades").innerHTML=`<tr><th>When</th><th>Contract</th><th>Setup</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th><th>R</th><th>Exit reason</th></tr>`+

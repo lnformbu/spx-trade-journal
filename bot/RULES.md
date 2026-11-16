@@ -9,13 +9,13 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 | Rule | Setting | Example: $25,000 account |
 |---|---|---|
 | Account | paper account (your starting amount; example $25,000), follows the bot's own P/L (one 0DTE SPX contract costs ~$1,700-2,500) | $25,000 |
-| Position size | **50% of the account** in premium: contracts = account × 50% ÷ (price × 100), at least 1 | ~$12,500 (e.g. 6 × $20.00) |
-| Max loss per trade | **15% of the account** (premium stop at about −30%), including fees and slippage | $3,750 |
+| Position size | **50% of the account ÷ 3 slots** in premium: contracts = account × 16.7% ÷ (price × 100), at least 1 | ~$4,150 (e.g. 6 × $7.00) |
+| Max loss per trade | **15% of the account ÷ 3 slots** (premium stop at about −30%), including fees and slippage | $1,250 |
 | Daily loss lockout | **15% of the account**, realized + open risk; checked *before* each entry | $3,750 (one full loss ends the day) |
 | If one contract alone costs more than 50% or risks more than 15% | skip the trade | |
-| Max trades per day | 4 | |
-| Max consecutive losses | 2, then done for the day | |
-| Max open positions | 1 | |
+| Max trades per day | 10 | |
+| Max consecutive losses | 3, then done for the day | |
+| Max open positions | **3** at once, never calls and puts on SPX at the same time; each takes one slot: 50% ÷ 3 of the account in premium and 15% ÷ 3 risk, and all open risk counts against the day's 15% loss budget | ~$4,150 premium / $1,250 risk per position |
 | **NEW** Cooldown after a loss | 15 minutes, no new entries *(start)* | |
 | **NEW** Same level after a stop-out | no second entry in the same direction at the same level that day | |
 | Never | average down, add to a loser, widen a stop, re-enter out of revenge | |
