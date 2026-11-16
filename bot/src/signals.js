@@ -77,6 +77,18 @@ async function adjustContract(c, dir, getList) {
   const n = cobj(o, root === "SPX" ? "$SPX" : root);
   return { c: n, note: `\n↪️ **Adjusted** to ${n.label} ~ $${r2(o.mark)} (Δ ${Math.abs(o.delta).toFixed(2)}): price moved, ${c.label} is now Δ ${d.toFixed(2)}` };
 }
+// PRICE BAND (user 2026-11-16): SPX alert contracts should cost about $5-9 (wrangler.toml CONTRACT_BAND = "5-9"), so many
+// plays fit in a day. Outside the band -> same expiry, same side, the strike whose ask is closest to the middle of the band,
+// never past +/-1 ATR (a strike SPX rarely reaches). Returns the new chain row, or null when the contract is fine / nothing fits.
+function priceBand(list, c, dir, band, atrLimit) {
+  if (!c || !band || !(c.ask > 0) || (c.ask >= band[0] && c.ask <= band[1])) return null;
+  const cur = list.find((o) => o.symbol === c.symbol);
+  if (!cur) return null;
+  const bull = dir === "bull", mid = (band[0] + band[1]) / 2;
+  const pool = list.filter((o) => o.exp === cur.exp && o.putCall === cur.putCall && o.bid > 0 && o.ask >= band[0] && o.ask <= band[1]
+    && (atrLimit == null || (bull ? o.strikePrice <= atrLimit : o.strikePrice >= atrLimit)));
+  return pool.sort((a, b) => Math.abs(a.ask - mid) - Math.abs(b.ask - mid))[0] || null;
+}
 // the contract a signal shows, in a form the paper trader can buy
 const cobj = (o, sym) => (o ? { symbol: o.symbol, label: `${show(sym)} ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} ${o.exp.slice(5)}`, bid: o.bid, ask: o.ask, mark: o.mark, delta: o.delta } : null);
 // your posted contract (nearest expiry with that strike)
@@ -316,7 +328,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
 
       // ---- options chain: whales + options flow ----
       const toDate = big(sym) ? t.date : isoDay(now + 8 * 864e5);
-      const chain = await schwab(token, `/marketdata/v1/chains?symbol=${encodeURIComponent(sym)}&strikeCount=16&fromDate=${t.date}&toDate=${toDate}`);
+      const chain = await schwab(token, `/marketdata/v1/chains?symbol=${encodeURIComponent(sym)}&strikeCount=${sym === "$SPX" ? 40 : 16}&fromDate=${t.date}&toDate=${toDate}`);
       const list = contracts(chain);
       // the chain to re-pick a drifted contract from (SPX 0DTE for SPX contracts, fetched only when needed)
       const spxLists = {};
@@ -1096,6 +1108,18 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
           const line = `Contract idea: ${show(sym)} ${idea(list, f.track.dir, tgt)}`;
           if (/Contract idea:[^\n]*/.test(f.text)) f.text = f.text.replace(/Contract idea:[^\n]*/, line);
           else if (!/ontract/.test(f.text)) f.text += "\n" + line;
+        }
+      }
+      // price band on every SPX alert contract (posted, adjusted or the bot's own pick): the paper account buys the result
+      if (sym === "$SPX") {
+        const band = String(env.CONTRACT_BAND || "5-9").split("-").map(Number);
+        for (const f of found) if (f.sym === sym && f.contract && f.track && !f.banded) {
+          f.banded = true;
+          const o = priceBand(list, f.contract, f.track.dir, band.length === 2 && band.every(isFinite) ? band : null, lv && lv[f.track.dir === "bull" ? "+1" : "-1"]);
+          if (!o) continue;
+          const old = f.contract;
+          f.contract = cobj(o, sym);
+          f.text += `\n💵 **Price band $${band[0]}-${band[1]}:** ${f.contract.label} ~ $${r2(o.ask)} (Δ ${Math.abs(o.delta || 0).toFixed(2)}) instead of ${old.label} ~ $${r2(old.ask)}`;
         }
       }
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {

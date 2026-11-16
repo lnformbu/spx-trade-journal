@@ -23,6 +23,7 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 ## Instrument
 
 - **SPX 0DTE** long calls and long puts (same-day expiry, cash-settled).
+- **Price band $5-9** (wrangler.toml `CONTRACT_BAND`): an SPX alert contract priced outside it is swapped for the same-expiry strike whose ask is closest to $7, never past ±1 ATR. The post shows "💵 Price band" and the paper account buys that contract.
 - **Your posted contracts first:** the SPX call from `Upside:` for call trades, the SPX put from `Downside:` for put trades.
   With no post, the bot picks delta 0.45 to 0.60 (at-the-money or slightly in-the-money; one strike out-of-the-money also scored).
 - Levels: daily ATR levels and PDH/PDL/PDC from SPX's own data; premarket, overnight, ORB and VWAP from SPY × the live SPX/SPY ratio.
