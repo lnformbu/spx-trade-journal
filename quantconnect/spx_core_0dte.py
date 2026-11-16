@@ -275,6 +275,8 @@ class SpxCore0DTE(QCAlgorithm):
         if self.open:                      # half day (1:00 close): the contract settled before an exit; left out of the stats
             self.unclosed += len(self.open)
             self.open = []
+        if self.day is None or d.month != self.day.month:   # progress line in the Console once a month
+            self.debug("progress %s: %d signals so far, %d with no 0DTE quote" % (d.strftime("%Y-%m"), len(self.trades), self.no_chain))
         self.day, self.today, self.fired, self.gg_arm, self.bo_until = d, [], set(), {}, -1
         self.m7open, self.m7last = {}, {}
         rows = [{"h": float(x.high), "l": float(x.low), "c": float(x.close)}
