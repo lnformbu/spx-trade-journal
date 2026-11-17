@@ -407,6 +407,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const done = m1.filter((c) => c.datetime + 60000 <= now);
       const rows = done.map((c) => ({ ...c, t: et(c.datetime) })).filter((c) => c.t.date === t.date);
       const rth = rows.filter((c) => c.t.min >= OPEN && c.t.min < CLOSE);
+      // today's SPX 1-minute bars for the journal's chart: [unix seconds, open, high, low, close]
+      if (sym === "$SPX") st.spx1m = rth.map((c) => [Math.round(c.datetime / 1000), r2(c.open), r2(c.high), r2(c.low), r2(c.close)]);
       const intra = intradayLevels(done, t.date, null);
       const L = { pdh: D.pdh, pdl: D.pdl, pdc: D.pdc, atr: D.atr, atrLevels: lv, ...intra };
       const c0 = rth.length ? rth[rth.length - 1].close : price;
@@ -1510,7 +1512,8 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     const lastHour = st.alerts.filter((x) => x.sym === a.sym && (x.kind === "big" || x.kind === "momentum") && now - x.at < 3600e3).length;
     if (lastHour >= MAX_PER_TICKER_HOUR && (a.kind === "big" || a.kind === "momentum")) continue;
     st.fired[a.key] = now;
-    const alert = { at: now, et: hhmm(t.min), kind: a.kind, sym: a.sym, title: a.title, text: a.text };
+    const alert = { at: now, et: hhmm(t.min), kind: a.kind, sym: a.sym, title: a.title, text: a.text,
+      ...(a.track ? { dir: a.track.dir, px: a.track.entry } : {}) };   // dir / price: the chart's signal markers
     st.alerts.push(alert);
     if (!dry && a.track && a.track.entry != null && a.track.stop != null && a.track.entry !== a.track.stop) {
       (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, at: now, et: hhmm(t.min),

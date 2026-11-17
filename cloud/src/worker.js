@@ -280,6 +280,8 @@ async function handle(req, env) {
       ok: true, state, greeks,
       signals: sig ? (sig.alerts || []).slice(-25).reverse() : [],
       planStatus: sig ? sig.planSt || {} : {},
+      // the Bot desk chart: today's SPX 1m bars and the SPX trade signals (time, side, price, title)
+      chart: sig ? { bars: sig.spx1m || [], marks: (sig.alerts || []).filter((a) => a.sym === "$SPX" && a.dir && a.px != null).map((a) => ({ at: a.at, dir: a.dir, px: a.px, title: a.title })) } : null,
     });
   }
   // the bot's scorecard: scored signals, daily plan reviews, training posts

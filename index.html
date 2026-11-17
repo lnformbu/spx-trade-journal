@@ -347,6 +347,8 @@
   .glance b{color:var(--ink);font-size:16px;} .glance b.up{color:var(--win);} .glance b.dn{color:var(--loss);}
   details.more{margin-top:12px;} details.more>summary{cursor:pointer;font-weight:600;color:var(--ink-2);padding:6px 0;}
   /* status chips */
+  .spx-chart{height:380px;width:100%;} @media(max-width:640px){.spx-chart{height:300px;}}
+  .ch-tf span{min-height:28px;padding:0 10px;font-size:12px;}
   .chips{display:flex;flex-wrap:wrap;gap:8px;} .chips>.chip{flex:1 1 130px;}   /* chips share the full width evenly */
   .chip{display:flex;flex-direction:column;gap:1px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;min-width:96px;font-variant-numeric:tabular-nums;}
   .chip .l{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;}
@@ -498,6 +500,16 @@
       <div class="bd-main">
         <div class="glance" id="bdGlance" aria-live="polite"></div>
         <div class="chips" id="bdChips" aria-live="polite"></div>
+        <section class="bd-box" id="chartBox">
+          <div class="bd-h"><h3>SPX chart <small>today's bars from the bot · ATR levels, your plan, GEX and the bot's signals</small></h3>
+            <div class="seg ch-tf" role="radiogroup" aria-label="Chart timeframe">
+              <label><input type="radio" name="chTf" value="1" checked><span>1m</span></label>
+              <label><input type="radio" name="chTf" value="3"><span>3m</span></label>
+              <label><input type="radio" name="chTf" value="5"><span>5m</span></label>
+            </div></div>
+          <div id="spxChart" class="spx-chart"></div>
+          <p class="hint" id="spxChartNote"></p>
+        </section>
         <div class="tfs" id="bdTfs"></div>
         <div class="bd-row one">
           <section class="bd-box" hidden>
@@ -811,6 +823,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastMsg"></span><button id="toastAct" hidden></button></div>
 
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 (function(){
   const $=s=>document.querySelector(s);
@@ -991,7 +1004,51 @@
     const card=$("#botCard"); card.hidden=!res; $("#viewSw").hidden=!res; if(!res) return;
     if(!botRes){ let v="me"; try{ v=localStorage.getItem("journalView")||"me"; }catch(e){} if(v==="bot"||v==="paper"){ document.querySelector('input[name="view"][value="'+v+'"]').checked=true; setView(v); } }
     botRes=res; renderBot();
+    try{ renderChart(); }catch(e){ console.error("chart",e); }
     if(!botTimer) botTimer=setInterval(()=>{ if(document.visibilityState==="visible") botLoad(); },60000);
+  }
+  // ---- SPX chart (TradingView Lightweight Charts, free/open source): the bot's 1m bars, levels and signal arrows ----
+  let spxChart=null, spxSeries=null, spxLines=[], chTf=1;
+  document.querySelectorAll('input[name="chTf"]').forEach(r=>r.addEventListener("change",()=>{ chTf=+r.value; renderChart(); }));
+  const etOff=ms=>{ const d=new Date(ms); return (new Date(d.toLocaleString("en-US",{timeZone:"America/New_York"}))-new Date(d.toLocaleString("en-US",{timeZone:"UTC"})))/1000; };
+  function renderChart(){
+    const box=$("#spxChart"), note=$("#spxChartNote");
+    const C=botRes&&botRes.chart, bars=(C&&C.bars)||[];
+    if(typeof LightweightCharts==="undefined"){ note.textContent="Chart library didn't load (check the connection)."; return; }
+    if(!bars.length){ note.textContent="No SPX bars yet today: the chart fills in from 9:30 ET."; if(spxSeries) spxSeries.setData([]); return; }
+    const css=getComputedStyle(document.body), cv=(n,f)=>(css.getPropertyValue(n)||"").trim()||f;
+    const ink=cv("--ink-3","#8a8f98"), line=cv("--line","#2a2f3a"), win=cv("--win","#2ecc8c"), loss=cv("--loss","#f05a6e");
+    if(!spxChart){
+      spxChart=LightweightCharts.createChart(box,{autoSize:true,layout:{background:{type:"solid",color:"transparent"},textColor:ink,fontSize:11},
+        grid:{vertLines:{color:line},horzLines:{color:line}},rightPriceScale:{borderVisible:false},
+        timeScale:{timeVisible:true,secondsVisible:false,borderVisible:false,rightOffset:6},crosshair:{mode:0}});
+      spxSeries=spxChart.addCandlestickSeries({upColor:win,downColor:loss,borderVisible:false,wickUpColor:win,wickDownColor:loss});
+    }
+    // bars in New York time, grouped into 1/3/5-minute candles (9:30 sits on every grid)
+    const off=etOff(bars[0][0]*1000), step=chTf*60, out=[];
+    for(const [t,o,h,l,c] of bars){ const tt=Math.floor((t+off)/step)*step, x=out[out.length-1];
+      if(x&&x.time===tt){ x.high=Math.max(x.high,h); x.low=Math.min(x.low,l); x.close=c; } else out.push({time:tt,open:o,high:h,low:l,close:c}); }
+    spxSeries.setData(out);
+    // level lines: SPX ATR levels, your plan's SPX triggers, GEX flip and walls
+    spxLines.forEach(l=>spxSeries.removePriceLine(l)); spxLines=[];
+    const st=botRes.state||{}, S=st.levelsSPX||{}, A=S.atrLevels||{}, P=st.plan&&st.plan.parsed, g=botRes.greeks||{};
+    const add=(price,title,color,style=2)=>{ if(price==null||!isFinite(price)) return; spxLines.push(spxSeries.createPriceLine({price:+price,title,color,lineWidth:1,lineStyle:style,axisLabelVisible:true})); };
+    const grey="rgba(140,146,158,.75)";
+    add(S.pdc,"PDC",grey,0);
+    [["0.236","Trig"],["0.382","GG"],["0.618","Fib"],["1","ATR"]].forEach(([k,n])=>{ add(A["+"+k],"+"+n,grey); add(A["-"+k],"−"+n,grey); });
+    const lastC=out[out.length-1].close;
+    [["1.236","123.6%"],["1.382","138.2%"]].forEach(([k,n])=>{ if(A["-1"]!=null&&lastC<A["-1"]) add(A["-"+k],"−"+n,grey); if(A["+1"]!=null&&lastC>A["+1"]) add(A["+"+k],"+"+n,grey); });
+    if(P){ add(P.spxCall,"Your calls","#f5a524",0); add(P.spxPut,"Your puts","#f5a524",0); }
+    if(g.flip!=null) add(g.flip,"γ flip","#a78bfa",1);
+    if(g.callWall!=null) add(g.callWall,"Call wall",win,1);
+    if(g.putWall!=null) add(g.putWall,"Put wall",loss,1);
+    // signal arrows on the candle they fired in
+    const ms=((C&&C.marks)||[]).map(m=>{ const tt=Math.floor((Math.round(m.at/1000)+off)/step)*step-step; const up=m.dir==="bull";
+      return {time:Math.max(out[0].time,tt),position:up?"belowBar":"aboveBar",color:up?win:loss,shape:up?"arrowUp":"arrowDown",
+        text:String(m.title).split(/[▲▼·|]/)[0].replace(/[^\x20-\x7E]/g,"").replace(/SPX\s*/,"").replace(/\s+/g," ").trim().slice(0,22)}; })
+      .filter(m=>out.some(b=>b.time===m.time)).sort((a,b)=>a.time-b.time);
+    spxSeries.setMarkers(ms);
+    note.textContent=`${out.length} × ${chTf}m candles · last ${f2(lastC)} · arrows = the bot's SPX trade signals · grey = ATR levels, orange = your plan, purple = gamma flip`;
   }
   function renderBot(){
     const {state:st, greeks:g, signals=[], planStatus={}}=botRes;
