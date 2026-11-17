@@ -45,6 +45,24 @@ export async function post(env, embed, replyTo = null) {
   });
 }
 
+// Trade-alert card: the contract to buy is called out at the very top (embed author line), then one line with entry / stop /
+// target, then the reasons. The older "Buy:", "Contract idea:", "Strike check" and "Price band" lines are dropped so the post
+// never shows two different contracts; the contract shown is exactly the one the paper account buys.
+function cardEmbed(a, footer) {
+  const base = { title: a.title, color: a.color, footer: { text: footer } };
+  const k = a.contract, tr = a.track;
+  if (!k || !k.label || !tr || tr.entry == null) return { ...base, description: String(a.text || "") };
+  const up = tr.dir === "bull", px = k.ask > 0 ? k.ask : k.mark;
+  const label = String(k.label).replace(/(\d)([cp])(?= |$)/, (m, d, cp) => d + cp.toUpperCase());
+  const tgt = tr.target != null ? tr.target : a.tps && a.tps[0] ? a.tps[0].price : null;
+  const head = `${up ? "🟢" : "🔴"} BUY ${label}${px > 0 ? ` @ ~$${r2(px)}` : ""}${k.delta != null ? ` · Δ ${Math.abs(k.delta).toFixed(2)}` : ""}${a.noTrade ? " · watch only" : ""}`;
+  const lvls = `📍 **Entry** ${tr.needTrigger ? `1m close ${up ? "above" : "below"} **${r2(tr.entry)}** (9 min)` : `now ~**${r2(tr.entry)}**`}`
+    + ` · 🛑 **Stop** ${r2(tr.stop)} · ✅ **Target** ${tgt != null ? r2(tgt) : "—"}`;
+  const drop = /^(\*\*Buy:\*\*|Contract idea:|💵 \*\*Price band|✔️ Strike check|↪️ \*\*Adjusted\*\*|\*\*Entry:\*\*)/;
+  const rest = String(a.text || "").split("\n").filter((l) => !drop.test(l.trim())).join("\n").trim();
+  return { ...base, author: { name: head.slice(0, 250) }, description: (lvls + (rest ? "\n\n" + rest : "")).slice(0, 4000) };
+}
+
 // copy of an alert to a second channel (COPY_CHANNEL_ID); never a reply, failures don't affect the main post
 async function postCopy(env, embed) {
   if (!env.COPY_CHANNEL_ID || !env.DISCORD_BOT_TOKEN) return null;
@@ -1326,6 +1344,15 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       }
       // market context of every signal from this ticker (the learning run compares winners and losers by it)
       const gexSide = (sym === "$SPX" || (sym === "SPY" && ratio)) ? ({ "+": "positive", "-": "negative" }[gexReg(sym === "SPY" ? c0 * ratio : c0)] || null) : null;
+      // farthest strike a contract may sit at: +/-1 ATR, or, when SPX is already past it (trend days), the next ATR extension
+      // beyond price (11/16: SPX below -1 ATR forced in-the-money $22 puts because nothing could sit past -1 ATR)
+      const atrLim = (dir) => {
+        const up = dir === "bull", one = lv && lv[up ? "+1" : "-1"];
+        if (one == null) return null;
+        if (up ? c0 < one : c0 > one) return one;
+        const ext = Object.entries(lv).filter(([k, v]) => (up ? k.startsWith("+") : k.startsWith("-")) && Math.abs(+k) > 1 && (up ? v > c0 : v < c0)).map(([, v]) => v);
+        return ext.length ? (up ? Math.min(...ext) : Math.max(...ext)) : null;
+      };
       for (const f of found) if (f.sym === sym && f.track && f.contract === undefined) {
         // SPX ideas use the paper account's current style delta (it can change when a challenger takes over)
         const tgt = sym === "$SPX" && paperStyle && paperStyle.delta ? paperStyle.delta : 0.4;
@@ -1333,7 +1360,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         // PDF 10 strike sanity check: an OTM strike must be reachable, so at or inside the trade's target and never past ±1 ATR
         // (SPY touches ±1 ATR on only ~16% of days). Otherwise use the nearest strike inside that limit, same expiry.
         const bullF = f.track.dir === "bull";
-        const lims = [f.track.target, lv && lv[bullF ? "+1" : "-1"]].filter((v) => v != null && isFinite(v));
+        const lims = [f.track.target, atrLim(f.track.dir)].filter((v) => v != null && isFinite(v));
         const limit = lims.length ? (bullF ? Math.min(...lims) : Math.max(...lims)) : null;
         if (o && limit != null && (bullF ? o.strikePrice > limit : o.strikePrice < limit)) {
           const alt = list.filter((x) => x.exp === o.exp && x.putCall === o.putCall && x.mark > 0 && x.delta != null && (bullF ? x.strikePrice <= limit : x.strikePrice >= limit))
@@ -1352,7 +1379,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         const band = String(env.CONTRACT_BAND || "5-9").split("-").map(Number);
         for (const f of found) if (f.sym === sym && f.contract && f.track && !f.banded) {
           f.banded = true;
-          const o = priceBand(list, f.contract, f.track.dir, band.length === 2 && band.every(isFinite) ? band : null, lv && lv[f.track.dir === "bull" ? "+1" : "-1"]);
+          const o = priceBand(list, f.contract, f.track.dir, band.length === 2 && band.every(isFinite) ? band : null, atrLim(f.track.dir));
           if (!o) continue;
           const old = f.contract;
           f.contract = cobj(o, sym);
@@ -1501,13 +1528,13 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     }
     sent.push(alert);
     if (!dry) {
-      const r = await post(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot` } })
+      const r = await post(env, cardEmbed(a, `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot`))
         .catch((e) => ({ ok: false, status: e.message }));
       // what the copy channel gets (wrangler COPY_FILTER): "lb" = leaderboard shakeout alerts only (incoming + watch),
       // "spx" = every SPX alert (SPX plan / VIX alerts included), "all" = everything
       const copyMode = env.COPY_FILTER || "lb";
       const copyOk = copyMode === "all" ? true : copyMode === "spx" ? a.sym === "$SPX" || /\bSPX\b/.test(a.title) : /^lb(inc|shake):/.test(a.key);
-      const cp = !copyOk ? null : await postCopy(env, { title: a.title, description: a.text, color: a.color, footer: { text: `${hhmm(t.min)} ET · SPX bot alert (copy)` } });
+      const cp = !copyOk ? null : await postCopy(env, cardEmbed(a, `${hhmm(t.min)} ET · SPX bot alert (copy)`));
       if (cp && !cp.ok) errors.push("copy channel post: " + cp.status + (cp.status === 403 ? " (bot can't post there: give it Send Messages + Embed Links)" : ""));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }

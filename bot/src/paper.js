@@ -242,7 +242,7 @@ async function stepBook(b, cfg, X) {
       else if (rejected) why = `rejected at ${lvl[0]} ${lvl[1]}`;
       else if (flipped) why = "10m Saty cloud flipped against the trade";
       else if (evSoon) why = `closing before ${evSoon.name} at ${hhmm(evSoon.min)}`;
-      else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain) why = `time stop (no +${Math.round(P.timeStopGain * 100)}% in ${P.timeStopMin} min)`;
+      else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain && pct <= 0) why = `time stop (still red after ${P.timeStopMin} min)`;   // only a LOSING trade is timed out (11/16: two green time-stops ran to +31% / +45%)
       else if (pos.t1 && now - pos.bestAt >= P.stallMin * 60000) why = `runner stalled ${P.stallMin} min`;
       else if (opp) why = "opposite signal: " + opp.title;
       else if (t.min >= 959) why = "3:59 close";
@@ -307,7 +307,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   if ((model.scalpV || 0) < SCALP_V) {
     model.params = { ...(model.params || {}), ...DEFAULT_PARAMS };
     model.scalpV = SCALP_V;
-    model.changes = [...(model.changes || []), { date: t.date, what: "exits: stop -15%, trailing stop from +20% (keeps 60%), bank 1 of 3 at +40%, 6-min time stop, max 3 contracts" }].slice(-50);
+    model.changes = [...(model.changes || []), { date: t.date, what: "exits: stop -15%, trailing stop from +20% (keeps 60%), bank 1 of 3 at +40%, time stop only for trades still red after 8 min, max 3 contracts" }].slice(-50);
     await writeJSON(env, "paper:model", model);
   }
   const champ = championCfg(model);

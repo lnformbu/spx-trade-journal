@@ -30,11 +30,11 @@ export const DEFAULT_PARAMS = {
   runnerStop1: 0.25,  // 1 contract: stop after target 1
   keep2: 0.75,        // after target 1 the trail keeps 75% of the best gain (80% with 1 contract)
   keep1: 0.80,
-  timeStopMin: 6,     // no +10% within 6 minutes: out
+  timeStopMin: 8,     // still red after 8 minutes (and never +10%): out; green trades are left to the trailing stop
   timeStopGain: 0.10,
   stallMin: 15,       // runner makes no new high for 15 minutes: out (let winners run)
 };
-export const SCALP_V = 2;   // bump to re-apply the scalp exits over learned params
+export const SCALP_V = 3;   // bump to re-apply the scalp exits over learned params
 export const DEFAULT_MODEL = { v: 0, updated: null, lastRun: null, fams: {}, feats: {}, minScore: 70, threshold: -0.15, params: { ...DEFAULT_PARAMS }, changes: [] };
 
 const PRIOR = 10;      // results worth of "0R" every average starts from
@@ -113,7 +113,7 @@ export function replay(path, P, two) {
     }
     if (t1) stop = Math.max(stop, (two ? P.keep2 : P.keep1) * best);
     if (pct <= stop) return realized + open * pct;
-    if (!t1 && i >= P.timeStopMin && best < P.timeStopGain) return realized + open * pct;
+    if (!t1 && i >= P.timeStopMin && best < P.timeStopGain && pct <= 0) return realized + open * pct;   // only losing trades are timed out
     if (t1 && i - bestAt >= P.stallMin) return realized + open * pct;
   }
   return realized + open * (path.length ? path[path.length - 1] : 0);
