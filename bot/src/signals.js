@@ -409,6 +409,14 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const rth = rows.filter((c) => c.t.min >= OPEN && c.t.min < CLOSE);
       // today's SPX 1-minute bars for the journal's chart: [unix seconds, open, high, low, close]
       if (sym === "$SPX") st.spx1m = rth.map((c) => [Math.round(c.datetime / 1000), r2(c.open), r2(c.high), r2(c.low), r2(c.close)]);
+      // live market structure for the paper account's exits: the 1m and 3m 8/21 clouds (side + minutes on that side)
+      if (sym === "$SPX" && done.length > 60) {
+        const sideRun = (bars) => { const cl = bars.map((c) => c.close), a = ema(cl, 8), b = ema(cl, 21), n = cl.length - 1, up = a[n] > b[n];
+          let run = 0; for (let j = n; j >= 0 && (a[j] > b[j]) === up; j--) run++; return { up, run }; };
+        st.tf1 = { ...(st.tf1 || {}), [sym]: sideRun(done) };
+        const g3s = aggregate(done, 3).filter((b) => b.datetime + 180000 <= now);
+        if (g3s.length > 25) st.tf3 = { ...(st.tf3 || {}), [sym]: sideRun(g3s) };
+      }
       const intra = intradayLevels(done, t.date, null);
       const L = { pdh: D.pdh, pdl: D.pdl, pdc: D.pdc, atr: D.atr, atrLevels: lv, ...intra };
       const c0 = rth.length ? rth[rth.length - 1].close : price;
@@ -1568,6 +1576,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   }
   const paper = { candidates, events, kl: st.kl || {},
     tf10: Object.fromEntries(Object.entries(st.tf10 || {}).map(([s, v]) => [s, v && v.rib ? v.rib.state : null])),
+    tf1: st.tf1 || {}, tf3: st.tf3 || {}, flow: (GX && GX.lb && GX.lb.flow) || null,
     plan: { call: (planOf("SPY") || {}).spxCall || (planOf("$SPX") || {}).spxCall || null, put: (planOf("SPY") || {}).spxPut || (planOf("$SPX") || {}).spxPut || null } };
   return { group, plans: Object.keys(plans), sent, errors, found: found.length, paper };
 }

@@ -270,6 +270,18 @@ async function handle(req, env) {
   }
 
   // ---- bot panel: the bot worker (../bot) writes bot:day:<date>; the journal only reads it ----
+  // live SPX price for the Bot desk chart (polled every 5 s while the Bot tab is open in market hours)
+  if (url.pathname === "/api/bot/live" && req.method === "GET") {
+    const s = await schwabState(env);
+    if (!s.refresh) return json({ ok: false, error: "Schwab not connected" });
+    try {
+      const before = s.access, tok = await schwabAccess(env, s);
+      if (s.access !== before) await saveSchwab(env, s);
+      const q = await schwabGet(tok, "/marketdata/v1/quotes?symbols=%24SPX&fields=quote");
+      const x = q && q.$SPX && q.$SPX.quote;
+      return json({ ok: !!x, last: x ? x.lastPrice : null, at: x ? x.tradeTime || x.quoteTime || Date.now() : null });
+    } catch (e) { return json({ ok: false, error: e.message }); }
+  }
   if (url.pathname === "/api/bot" && req.method === "GET") {
     const date = url.searchParams.get("date") || (await readBlob(env, "bot:latest"));
     const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };

@@ -1008,7 +1008,22 @@
     if(!botTimer) botTimer=setInterval(()=>{ if(document.visibilityState==="visible") botLoad(); },60000);
   }
   // ---- SPX chart (TradingView Lightweight Charts, free/open source): the bot's 1m bars, levels and signal arrows ----
-  let spxChart=null, spxSeries=null, spxLines=[], chTf=1;
+  let spxChart=null, spxSeries=null, spxLines=[], chTf=1, chartOut=[], chartOff=0, liveTimer=null, liveBar=null, liveAt=0;
+  // live candle: the latest SPX price from Schwab every 5 s (Bot tab open, page visible, 9:30-4:00 ET weekdays)
+  async function liveTick(){
+    if(!spxSeries||!chartOut.length||document.visibilityState!=="visible"||!document.body.classList.contains("view-bot")) return;
+    const p=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"numeric",minute:"numeric",hour12:false}).formatToParts(new Date());
+    const g=k=>(p.find(x=>x.type===k)||{}).value, mins=(+g("hour"))*60+(+g("minute"));
+    if(/Sat|Sun/.test(g("weekday"))||mins<570||mins>=960) return;
+    let j=null; try{ const r=await fetch("/api/bot/live"); j=r.ok?await r.json():null; }catch(e){}
+    if(!j||!j.ok||!(j.last>0)) return;
+    const step=chTf*60, tt=Math.floor((Math.round(Date.now()/1000)+chartOff)/step)*step, last=chartOut[chartOut.length-1];
+    if(tt<last.time) return;
+    if(tt===last.time){ last.high=Math.max(last.high,j.last); last.low=Math.min(last.low,j.last); last.close=j.last; liveBar={...last}; }
+    else { liveBar={time:tt,open:last.close,high:Math.max(last.close,j.last),low:Math.min(last.close,j.last),close:j.last}; chartOut.push({...liveBar}); }
+    spxSeries.update({...liveBar}); liveAt=Date.now();
+    const n=$("#spxChartNote"); if(n) n.textContent=n.textContent.replace(/ · ● live.*$/,"")+` · ● live ${j.last.toFixed(2)}`;
+  }
   document.querySelectorAll('input[name="chTf"]').forEach(r=>r.addEventListener("change",()=>{ chTf=+r.value; renderChart(); }));
   const etOff=ms=>{ const d=new Date(ms); return (new Date(d.toLocaleString("en-US",{timeZone:"America/New_York"}))-new Date(d.toLocaleString("en-US",{timeZone:"UTC"})))/1000; };
   function renderChart(){
@@ -1028,7 +1043,9 @@
     const off=etOff(bars[0][0]*1000), step=chTf*60, out=[];
     for(const [t,o,h,l,c] of bars){ const tt=Math.floor((t+off)/step)*step, x=out[out.length-1];
       if(x&&x.time===tt){ x.high=Math.max(x.high,h); x.low=Math.min(x.low,l); x.close=c; } else out.push({time:tt,open:o,high:h,low:l,close:c}); }
-    spxSeries.setData(out);
+    spxSeries.setData(out); chartOut=out; chartOff=off;
+    if(liveBar&&liveBar.time>=out[out.length-1].time){ const L0=out[out.length-1]; if(liveBar.time===L0.time){ L0.high=Math.max(L0.high,liveBar.high); L0.low=Math.min(L0.low,liveBar.low); L0.close=liveBar.close; spxSeries.update({...L0}); } else { out.push({...liveBar}); spxSeries.update({...liveBar}); } }
+    if(!liveTimer) liveTimer=setInterval(liveTick,5000);
     // level lines: SPX ATR levels, your plan's SPX triggers, GEX flip and walls
     spxLines.forEach(l=>spxSeries.removePriceLine(l)); spxLines=[];
     const st=botRes.state||{}, S=st.levelsSPX||{}, A=S.atrLevels||{}, P=st.plan&&st.plan.parsed, g=botRes.greeks||{};

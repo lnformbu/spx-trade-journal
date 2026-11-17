@@ -30,11 +30,11 @@ export const DEFAULT_PARAMS = {
   runnerStop1: 0.25,  // 1 contract: stop after target 1
   keep2: 0.75,        // after target 1 the trail keeps 75% of the best gain (80% with 1 contract)
   keep1: 0.80,
-  timeStopMin: 8,     // still red after 8 minutes (and never +10%): out; green trades are left to the trailing stop
+  timeStopMin: 15,    // backstop only: still red after 15 minutes (and never +10%); structure / flow exits do the real work
   timeStopGain: 0.10,
   stallMin: 15,       // runner makes no new high for 15 minutes: out (let winners run)
 };
-export const SCALP_V = 3;   // bump to re-apply the scalp exits over learned params
+export const SCALP_V = 4;   // bump to re-apply the scalp exits over learned params
 export const DEFAULT_MODEL = { v: 0, updated: null, lastRun: null, fams: {}, feats: {}, minScore: 70, threshold: -0.15, params: { ...DEFAULT_PARAMS }, changes: [] };
 
 const PRIOR = 10;      // results worth of "0R" every average starts from
@@ -179,7 +179,7 @@ export function learn(prev, statsItems, trades, today, extra = {}) {
     const cut = Math.floor(withPath.length * 0.7), fit = withPath.slice(0, cut), check = withPath.slice(cut);
     const cur = m.params;
     let best = cur, bestFit = avgReplay(fit, cur);
-    for (const stopPct of [0.1, 0.15, 0.2]) for (const t1Pct of [0.3, 0.4, 0.6, 0.8]) for (const timeStopMin of [4, 6, 10]) {   // scalp-centred grid (user: focus on scalps)
+    for (const stopPct of [0.1, 0.15, 0.2]) for (const t1Pct of [0.3, 0.4, 0.6, 0.8]) for (const timeStopMin of [10, 15, 20]) {   // scalp-centred grid (user: focus on scalps)
       const P = { ...cur, stopPct, t1Pct, timeStopMin };
       const s = avgReplay(fit, P);
       if (s > bestFit) { bestFit = s; best = P; }

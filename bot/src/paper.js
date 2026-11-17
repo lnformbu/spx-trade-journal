@@ -182,7 +182,7 @@ async function stepBook(b, cfg, X) {
       id: now + ":" + k.symbol, date: t.date, symbol: k.symbol, label: k.label, under: p.sym, delta: k.delta, dir: p.dir,
       qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
       at: now, et: hhmm(t.min), stop: r2(ask * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,
-      uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer), bestU: underPx ?? p.uEntry, rib0: X.tf10[p.sym] || null,
+      uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer), bestU: underPx ?? p.uEntry, rib0: X.tf10[p.sym] || null, tf3up: X.tf3 && X.tf3[p.sym] ? X.tf3[p.sym].up : null,
       fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est, blocked: p.blocked || null,
       exits: [], realized: 0, path: [r3((bid || ask) / ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct }, style: cfg.name,
     };
@@ -236,11 +236,22 @@ async function stepBook(b, cfg, X) {
       // invalidated: the 10m Saty cloud flipped against the trade since the entry
       const cloud = X.tf10[pos.under], flipped = cloud && cloud === (bull ? "bearish" : "bullish") && pos.rib0 !== cloud;
       const evSoon = X.events.find((e) => e.min >= 570 && t.min >= e.min - 5 && t.min < e.min);
+      // MARKET STRUCTURE + FLOW exits (user 11/16: lose on structure and flow, not on a clock):
+      //  3m 8/21 cloud turned against the trade after the entry  -> the scalp's structure is broken
+      //  1m 8/21 cloud against for 3+ minutes while the option is red
+      //  0DTE volume flow spiking on the other side (put volume for a call trade) while the option is red
+      const s3 = (X.tf3 || {})[pos.under], s1 = (X.tf1 || {})[pos.under], heldMin = (now - pos.at) / 60000;
+      const struct3 = s3 && s3.up !== bull && (pos.tf3up === bull || s3.run * 3 < heldMin);
+      const struct1 = s1 && s1.up !== bull && s1.run >= 3 && pct < 0;
+      const F = X.flow, flowAgainst = F && pct < 0 && (bull ? F.putSpike && F.puts > F.calls : F.callSpike && F.calls > F.puts);
       let why = null;
       if (bid <= pos.stop) why = pos.stop > E ? (pos.t1 || pos.bestBid / E - 1 >= (P.trailFrom ?? 9) ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
       else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
       else if (rejected) why = `rejected at ${lvl[0]} ${lvl[1]}`;
       else if (flipped) why = "10m Saty cloud flipped against the trade";
+      else if (struct3) why = "structure: the 3m cloud turned against the trade";
+      else if (struct1) why = "structure: 1m cloud against the trade for 3+ min while red";
+      else if (flowAgainst) why = `flow: 0DTE ${bull ? "put" : "call"} volume spiking against the trade while red`;
       else if (evSoon) why = `closing before ${evSoon.name} at ${hhmm(evSoon.min)}`;
       else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain && pct <= 0) why = `time stop (still red after ${P.timeStopMin} min)`;   // only a LOSING trade is timed out (11/16: two green time-stops ran to +31% / +45%)
       else if (pos.t1 && now - pos.bestAt >= P.stallMin * 60000) why = `runner stalled ${P.stallMin} min`;
@@ -296,7 +307,7 @@ async function stepBook(b, cfg, X) {
 }
 
 // candidates = this minute's new signals that were posted with a contract (from runSignals)
-export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, now = Date.now(), t }) {
+export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, tf1 = {}, tf3 = {}, flow = null, now = Date.now(), t }) {
   const { schwabToken, schwab, readJSON, writeJSON } = deps;
   // the main account and the challengers trade PAPER_TICKERS (SPX); the data collector takes every ticker's signals (1 contract)
   const allCands = candidates.filter((c) => c.contract && c.contract.symbol);
@@ -307,7 +318,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   if ((model.scalpV || 0) < SCALP_V) {
     model.params = { ...(model.params || {}), ...DEFAULT_PARAMS };
     model.scalpV = SCALP_V;
-    model.changes = [...(model.changes || []), { date: t.date, what: "exits: stop -15%, trailing stop from +20% (keeps 60%), bank 1 of 3 at +40%, time stop only for trades still red after 8 min, max 3 contracts" }].slice(-50);
+    model.changes = [...(model.changes || []), { date: t.date, what: "exits: stop -15%, trailing stop from +20% (keeps 60%), bank 1 of 3 at +40%, structure / flow exits (3m cloud against, 1m cloud against 3+ min while red, opposite 0DTE flow spike while red), backstop: still red after 15 min, max 3 contracts" }].slice(-50);
     await writeJSON(env, "paper:model", model);
   }
   const champ = championCfg(model);
@@ -343,7 +354,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   const Q = await quotes(schwab, token, syms);
   const chains = {};
   const X = {
-    env, candidates, events, kl, tf10, Q, model, now, t, closed: [], dataClosed: [], messages: [], shadow: acct.shadow,
+    env, candidates, events, kl, tf10, tf1, tf3, flow, Q, model, now, t, closed: [], dataClosed: [], messages: [], shadow: acct.shadow,
     px: (sym) => (Q[sym] ? Q[sym].last ?? Q[sym].mark : null),
     // SPX 0DTE chain for the delta styles, fetched at most once per side per minute
     chain: (dir) => (chains[dir] = chains[dir] || (async () => {

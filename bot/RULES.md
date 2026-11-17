@@ -211,7 +211,8 @@ A pattern counts only **at a key level**. In the middle of a range it's ignored.
 | Trailing stop | see the profit ladder below |
 | Rejection | price reaches a level and gets rejected: exit, don't wait for the next one |
 | Invalidated | the setup's reason is gone (e.g. ribbon flips against the trade) |
-| Scalp time stop | **only a losing trade**: still red after **8 minutes** and never +10%: exit (green trades are left to the trailing stop; 11/16 two green time-stops ran to +31% and +45%); 0DTE time decay works against a trade that doesn't move. Breakeven stop at +15%, at +25% the stop goes to +10%, trail keeps 75-80% of the best gain, runner out after 8 min with no new high |
+| Structure / flow exits | **3m 8/21 cloud turns against** the trade · **1m cloud against for 3+ min while red** · **0DTE volume flow spikes on the other side while red** (structure and flow, not a clock; user 11/16) |
+| Time stop (backstop) | **only a losing trade**: still red after **15 minutes** and never +10%: exit (green trades are left to the trailing stop; 11/16 two green time-stops ran to +31% and +45%); 0DTE time decay works against a trade that doesn't move. Breakeven stop at +15%, at +25% the stop goes to +10%, trail keeps 75-80% of the best gain, runner out after 8 min with no new high |
 | **NEW** Runner stall | runner makes no new high for 15 minutes: exit *(start)* |
 | Time | 3:59 |
 
