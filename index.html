@@ -347,8 +347,12 @@
   .glance b{color:var(--ink);font-size:16px;} .glance b.up{color:var(--win);} .glance b.dn{color:var(--loss);}
   details.more{margin-top:12px;} details.more>summary{cursor:pointer;font-weight:600;color:var(--ink-2);padding:6px 0;}
   /* status chips */
-  .spx-chart{height:380px;width:100%;} @media(max-width:640px){.spx-chart{height:300px;}}
-  .ch-tf span{min-height:28px;padding:0 10px;font-size:12px;}
+  .spx-chart{height:400px;width:100%;} @media(max-width:640px){.spx-chart{height:300px;}}
+  .spx-osc{height:120px;width:100%;margin-top:4px;border-top:1px solid var(--line);}
+  .ch-head{flex-wrap:wrap;} .ch-ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .ch-tf span{min-height:28px;padding:0 9px;font-size:12px;} .ch-mode{height:30px;padding:0 8px;font-size:12px;width:auto;}
+  .ch-draw{height:30px;padding:0 10px;font-size:12px;} .ch-draw[aria-pressed="true"]{outline:2px solid var(--accent);}
+  .ch-mine{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;} .ch-mine button{font-size:11.5px;padding:3px 8px;border-radius:99px;border:1px solid var(--line);background:var(--panel-3);color:var(--ink-2);cursor:pointer;}
   .chips{display:flex;flex-wrap:wrap;gap:8px;} .chips>.chip{flex:1 1 130px;}   /* chips share the full width evenly */
   .chip{display:flex;flex-direction:column;gap:1px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;min-width:96px;font-variant-numeric:tabular-nums;}
   .chip .l{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;}
@@ -501,13 +505,25 @@
         <div class="glance" id="bdGlance" aria-live="polite"></div>
         <div class="chips" id="bdChips" aria-live="polite"></div>
         <section class="bd-box" id="chartBox">
-          <div class="bd-h"><h3>SPX chart <small>today's bars from the bot · ATR levels, your plan, GEX and the bot's signals</small></h3>
-            <div class="seg ch-tf" role="radiogroup" aria-label="Chart timeframe">
-              <label><input type="radio" name="chTf" value="1" checked><span>1m</span></label>
-              <label><input type="radio" name="chTf" value="3"><span>3m</span></label>
-              <label><input type="radio" name="chTf" value="5"><span>5m</span></label>
+          <div class="bd-h ch-head"><h3>SPX chart <small>Saty Pivot Ribbon · ATR levels · Phase Oscillator · your levels · the bot's signals</small></h3>
+            <div class="ch-ctrl">
+              <div class="seg ch-tf" role="radiogroup" aria-label="Chart timeframe">
+                <label><input type="radio" name="chTf" value="1m"><span>1m</span></label>
+                <label><input type="radio" name="chTf" value="3m" checked><span>3m</span></label>
+                <label><input type="radio" name="chTf" value="10m"><span>10m</span></label>
+                <label><input type="radio" name="chTf" value="1h"><span>1h</span></label>
+                <label><input type="radio" name="chTf" value="D"><span>D</span></label>
+                <label><input type="radio" name="chTf" value="W"><span>W</span></label>
+              </div>
+              <select class="inp ch-mode" id="chMode" aria-label="ATR levels mode">
+                <option value="auto">ATR: auto</option><option value="day">Day (daily)</option><option value="multiday">Multiday (weekly)</option>
+                <option value="swing">Swing (monthly)</option><option value="position">Position (quarterly)</option><option value="longterm">Long-term (yearly)</option><option value="none">ATR: off</option>
+              </select>
+              <button class="btn ch-draw" id="chDraw" type="button" aria-pressed="false">✏️ Draw level</button>
             </div></div>
           <div id="spxChart" class="spx-chart"></div>
+          <div id="spxOsc" class="spx-osc" aria-label="Phase Oscillator"></div>
+          <div class="ch-mine" id="chMine"></div>
           <p class="hint" id="spxChartNote"></p>
         </section>
         <div class="tfs" id="bdTfs"></div>
@@ -1004,12 +1020,133 @@
     const card=$("#botCard"); card.hidden=!res; $("#viewSw").hidden=!res; if(!res) return;
     if(!botRes){ let v="me"; try{ v=localStorage.getItem("journalView")||"me"; }catch(e){} if(v==="bot"||v==="paper"){ document.querySelector('input[name="view"][value="'+v+'"]').checked=true; setView(v); } }
     botRes=res; renderBot();
-    try{ renderChart(); }catch(e){ console.error("chart",e); }
+    renderChart(!spxChart).catch(e=>console.error("chart",e));
     if(!botTimer) botTimer=setInterval(()=>{ if(document.visibilityState==="visible") botLoad(); },60000);
   }
-  // ---- SPX chart (TradingView Lightweight Charts, free/open source): the bot's 1m bars, levels and signal arrows ----
-  let spxChart=null, spxSeries=null, spxLines=[], chTf=1, chartOut=[], chartOff=0, liveTimer=null, liveBar=null, liveAt=0;
-  // live candle: the latest SPX price from Schwab every 5 s (Bot tab open, page visible, 9:30-4:00 ET weekdays)
+  // ---- SPX chart: Saty Pivot Ribbon + ATR levels (by mode) + Phase Oscillator, your drawn levels and the bot's signals ----
+  // Same math as the bot (bot/src/levels.js). Data: /api/bot/candles (Schwab), live candle from /api/bot/live every 5 s.
+  let spxChart=null, spxSeries=null, emaSer={}, oscChart=null, oscSer=null, spxLines=[], oscLines=[], chartOut=[], chartOff=0,
+      liveTimer=null, chTf="3m", chMode="auto", drawing=false, myLv=[];
+  const chCache={};
+  try{ chTf=localStorage.getItem("chTf")||"3m"; chMode=localStorage.getItem("chMode")||"auto"; }catch(e){}
+  document.querySelectorAll('input[name="chTf"]').forEach(r=>{ r.checked=r.value===chTf; r.addEventListener("change",()=>{ chTf=r.value; try{localStorage.setItem("chTf",chTf);}catch(e){} renderChart(true); }); });
+  const chModeSel=$("#chMode"); if(chModeSel){ chModeSel.value=chMode; chModeSel.addEventListener("change",()=>{ chMode=chModeSel.value; try{localStorage.setItem("chMode",chMode);}catch(e){} renderChart(); }); }
+  const etOff=ms=>{ const d=new Date(ms); return (new Date(d.toLocaleString("en-US",{timeZone:"America/New_York"}))-new Date(d.toLocaleString("en-US",{timeZone:"UTC"})))/1000; };
+  const emaA=(v,n)=>{ const k=2/(n+1); let e=null; return v.map(x=>(e=e===null?x:x*k+e*(1-k))); };
+  const atrSer=(b,n=14)=>{ const out=[]; let a=null,s=0; b.forEach((c,i)=>{ const tr=i?Math.max(c.high-c.low,Math.abs(c.high-b[i-1].close),Math.abs(c.low-b[i-1].close)):c.high-c.low;
+    if(i<n){ s+=tr; a=i===n-1?s/n:null; } else a=(a*(n-1)+tr)/n; out.push(a); }); return out; };
+  const atrLast=(b,n=14)=>{ if(b.length<n) return null; const tr=b.map((c,i)=>i?Math.max(c.high-c.low,Math.abs(c.high-b[i-1].close),Math.abs(c.low-b[i-1].close)):c.high-c.low);
+    let a=tr.slice(0,n).reduce((x,y)=>x+y,0)/n; for(let i=n;i<tr.length;i++) a=(a*(n-1)+tr[i])/n; return a; };
+  // Saty Phase Oscillator + compression (levels.js phaseOsc / compressionTracker)
+  function phase(b){ const cl=b.map(x=>x.close), piv=emaA(cl,21), at=atrSer(b,14);
+    const osc=emaA(cl.map((c,i)=>at[i]?((c-piv[i])/(3*at[i]))*100:0),3), comp=[], tr=[];
+    for(let i=0;i<cl.length;i++){ if(at[i]==null||i<20){ comp.push(null); tr.push(0); continue; }
+      const w=cl.slice(i-20,i+1), m=w.reduce((x,y)=>x+y,0)/w.length, off=2*Math.sqrt(w.reduce((x,y)=>x+(y-m)**2,0)/w.length);
+      const c=off-2*at[i], ez=off-1.854*at[i], exp=comp[i-1]!=null&&comp[i-1]<=c; comp.push(c); tr.push(exp&&ez>0?0:c<=0?1:0); }
+    return {osc,tr}; }
+  async function getBars(tf){ const ttl=tf==="1m"||tf==="10m"?50e3:tf==="30m"?240e3:3600e3, c=chCache[tf];
+    if(c&&Date.now()-c.at<ttl) return c.bars;
+    let j=null; try{ const r=await fetch("/api/bot/candles?tf="+tf); j=r.ok?await r.json():null; }catch(e){}
+    const bars=j&&j.ok?j.bars:(c?c.bars:[]); chCache[tf]={at:Date.now(),bars}; return bars; }
+  const dKey=t=>new Date(t*1000+12*3600e3).toISOString().slice(0,10);   // daily/weekly/monthly bars: the date they belong to
+  // intraday rows -> New York time, regular hours, grouped into N-minute candles anchored at 9:30
+  function intraday(rows,N){ const out=[]; if(!rows.length) return out; const off=etOff(rows[rows.length-1][0]*1000); chartOff=off;
+    for(const [t,o,h,l,c] of rows){ const tt=t+off, m=Math.floor(tt/60)%1440; if(m<570||m>=960) continue;
+      const key=Math.floor(tt/86400)*86400+(570+Math.floor((m-570)/N)*N)*60, x=out[out.length-1];
+      if(x&&x.time===key){ x.high=Math.max(x.high,h); x.low=Math.min(x.low,l); x.close=c; } else out.push({time:key,open:o,high:h,low:l,close:c}); }
+    return out; }
+  async function tfBars(tf){
+    if(tf==="1m") return intraday(await getBars("1m"),1);
+    if(tf==="3m") return intraday(await getBars("1m"),3);
+    if(tf==="10m") return intraday(await getBars("10m"),10);
+    if(tf==="1h") return intraday(await getBars("30m"),60);
+    const rows=await getBars(tf==="W"?"W":"D");
+    return rows.map(([t,o,h,l,c])=>({time:dKey(t),open:o,high:h,low:l,close:c}));
+  }
+  // ATR levels for a Saty mode: previous completed period's close +/- Wilder ATR(14) of that period x fib
+  async function modeLevels(mode){
+    const nyToday=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
+    const group=(rows,keyOf)=>{ const out=[]; for(const [t,o,h,l,c] of rows){ const k=keyOf(dKey(t)), x=out[out.length-1];
+      if(!x||x.k!==k) out.push({k,open:o,high:h,low:l,close:c}); else { x.high=Math.max(x.high,h); x.low=Math.min(x.low,l); x.close=c; } } return out; };
+    const weekOf=d=>{ const dt=new Date(d+"T12:00:00Z"); dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7)); return dt.toISOString().slice(0,10); };
+    let periods=[], cur;
+    if(mode==="day"){ periods=group(await getBars("Dlong"),d=>d); cur=nyToday; }
+    else if(mode==="multiday"){ periods=group(await getBars("Dlong"),weekOf); cur=weekOf(nyToday); }
+    else if(mode==="swing"){ periods=group(await getBars("M"),d=>d.slice(0,7)); cur=nyToday.slice(0,7); }
+    else if(mode==="position"){ const q=d=>d.slice(0,4)+"Q"+(Math.floor((+d.slice(5,7)-1)/3)+1); periods=group(await getBars("M"),q); cur=q(nyToday); }
+    else if(mode==="longterm"){ periods=group(await getBars("M"),d=>d.slice(0,4)); cur=nyToday.slice(0,4); }
+    const done=periods.filter(p=>p.k<cur); if(done.length<15) return null;
+    const pc=done[done.length-1].close, a=atrLast(done,14); if(!a) return null;
+    return {pc,a,tag:{day:"D",multiday:"Wk",swing:"M",position:"Q",longterm:"Y"}[mode]};
+  }
+  async function loadMine(){ try{ const r=await fetch("/api/bot/mylevels"); const j=r.ok?await r.json():null; myLv=j&&j.ok?j.items:myLv; }catch(e){} }
+  async function saveMine(body){ try{ const r=await fetch("/api/bot/mylevels",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json(); if(j.ok) myLv=j.items; }catch(e){} renderChart(); }
+  function renderMine(){ const box=$("#chMine"); if(!box) return;
+    box.innerHTML=myLv.length?myLv.map(x=>`<button type="button" data-at="${x.at}" title="Remove this level">✏️ ${esc(x.label)} ${(+x.price).toFixed(2)} ✕</button>`).join(""):"";
+    box.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>saveMine({remove:+b.dataset.at}))); }
+  const drawBtn=$("#chDraw"); if(drawBtn) drawBtn.addEventListener("click",()=>{ drawing=!drawing; drawBtn.setAttribute("aria-pressed",String(drawing)); drawBtn.textContent=drawing?"Click the chart…":"✏️ Draw level"; });
+  let chBusy=false;
+  async function renderChart(fresh){
+    const box=$("#spxChart"), obox=$("#spxOsc"), note=$("#spxChartNote");
+    if(!box||chBusy) return;
+    if(typeof LightweightCharts==="undefined"){ note.textContent="Chart library didn't load (check the connection)."; return; }
+    chBusy=true;
+    try{
+    const css=getComputedStyle(document.body), cv=(n,f)=>(css.getPropertyValue(n)||"").trim()||f;
+    const ink=cv("--ink-3","#8a8f98"), line=cv("--line","#2a2f3a"), win=cv("--win","#2ecc8c"), loss=cv("--loss","#f05a6e");
+    const base={autoSize:true,layout:{background:{type:"solid",color:"transparent"},textColor:ink,fontSize:11},grid:{vertLines:{color:line},horzLines:{color:line}},
+      rightPriceScale:{borderVisible:false,minimumWidth:70},timeScale:{timeVisible:true,secondsVisible:false,borderVisible:false,rightOffset:6},crosshair:{mode:0}};
+    if(!spxChart){
+      spxChart=LightweightCharts.createChart(box,base);
+      spxSeries=spxChart.addCandlestickSeries({upColor:win,downColor:loss,borderVisible:false,wickUpColor:win,wickDownColor:loss});
+      const ln=(c,w)=>spxChart.addLineSeries({color:c,lineWidth:w,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+      emaSer={e8:ln("rgba(46,204,140,.9)",1),e13:ln("rgba(140,146,158,.45)",1),e21:ln(win,2),e48:ln("rgba(140,146,158,.7)",1),e200:ln("#3ba3ff",1)};
+      oscChart=LightweightCharts.createChart(obox,{...base,timeScale:{...base.timeScale,visible:false}});
+      oscSer=oscChart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:true});
+      spxChart.timeScale().subscribeVisibleLogicalRangeChange(r=>{ if(r) oscChart.timeScale().setVisibleLogicalRange(r); });
+      spxChart.subscribeClick(p=>{ if(!drawing||!p.point) return; const price=spxSeries.coordinateToPrice(p.point.y); if(price==null) return;
+        drawing=false; drawBtn.setAttribute("aria-pressed","false"); drawBtn.textContent="✏️ Draw level";
+        const label=prompt(`Label for the level at ${price.toFixed(2)} (the bot will treat it as one of your key levels)`,"my level"); if(label!==null) saveMine({price,label}); });
+      [100,61.8,23.6,0,-23.6,-61.8,-100].forEach(v=>oscLines.push(oscSer.createPriceLine({price:v,color:v===0?"rgba(140,146,158,.8)":"rgba(140,146,158,.35)",lineWidth:1,lineStyle:v===0?0:2,axisLabelVisible:Math.abs(v)===100||v===0||Math.abs(v)===61.8,title:""})));
+    }
+    const out=await tfBars(chTf);
+    if(!out.length){ note.textContent="No SPX data (Schwab not connected, or before the first bars)."; return; }
+    spxSeries.setData(out); chartOut=out;
+    // Saty Pivot Ribbon (8/13/21/48 + 200): the 21 turns green with the 8 above it (fast cloud up), red below
+    const cl=out.map(b=>b.close), E={8:emaA(cl,8),13:emaA(cl,13),21:emaA(cl,21),48:emaA(cl,48),200:emaA(cl,200)};
+    const pts=(n,col)=>out.map((b,i)=>({time:b.time,value:+E[n][i].toFixed(2),...(col?{color:col(i)}:{})}));
+    emaSer.e8.setData(pts(8)); emaSer.e13.setData(pts(13)); emaSer.e48.setData(pts(48)); emaSer.e200.setData(out.length>=200?pts(200):[]);
+    emaSer.e21.setData(pts(21,i=>E[8][i]>=E[21][i]?win:loss));
+    // Phase Oscillator: green rising, red falling, grey = compression (squeeze)
+    const P=phase(out); oscSer.setData(out.map((b,i)=>({time:b.time,value:+P.osc[i].toFixed(2),color:P.tr[i]?"#9aa0a6":i&&P.osc[i]>=P.osc[i-1]?win:loss})));
+    if(fresh) { spxChart.timeScale().fitContent(); }
+    // level lines
+    spxLines.forEach(l=>spxSeries.removePriceLine(l)); spxLines=[];
+    const add=(price,title,color,style=2)=>{ if(price==null||!isFinite(price)) return; spxLines.push(spxSeries.createPriceLine({price:+price,title,color,lineWidth:1,lineStyle:style,axisLabelVisible:true})); };
+    const intra=/m$|1h/.test(chTf), mode=chMode==="auto"?(chTf==="1h"?"swing":chTf==="D"?"position":chTf==="W"?"longterm":"day"):chMode;
+    if(mode!=="none"){ const L=await modeLevels(mode);
+      if(L){ const g="rgba(140,146,158,.8)", gg="rgba(245,165,36,.8)", lv=f=>L.pc+L.a*f;
+        add(L.pc,L.tag+" pivot","rgba(220,222,228,.9)",0);
+        [[0.236,"Trig",g],[0.382,"GG",gg],[0.618,"Mid",g],[0.786,"78.6",g],[1,"ATR",g],[1.236,"123.6",g],[1.618,"161.8",g],[2,"2 ATR",g]].forEach(([f,n,c])=>{ add(lv(f),`${L.tag} +${n}`,c); add(lv(-f),`${L.tag} −${n}`,c); }); } }
+    const st=(botRes&&botRes.state)||{}, PL=st.plan&&st.plan.parsed, gx=(botRes&&botRes.greeks)||{};
+    if(intra){ if(PL){ add(PL.spxCall,"Your calls","#f5a524",0); add(PL.spxPut,"Your puts","#f5a524",0); }
+      if(gx.flip!=null) add(gx.flip,"γ flip","#a78bfa",1); if(gx.callWall!=null) add(gx.callWall,"Call wall",win,1); if(gx.putWall!=null) add(gx.putWall,"Put wall",loss,1); }
+    myLv.forEach(x=>add(+x.price,"✏ "+x.label,"#ff9f43",1)); renderMine();
+    // the bot's SPX signals as arrows (intraday charts)
+    let ms=[];
+    if(intra){ const N={"1m":1,"3m":3,"10m":10,"1h":60}[chTf], times=new Set(out.map(b=>b.time));
+      ms=((botRes&&botRes.chart&&botRes.chart.marks)||[]).map(m=>{ const tt=Math.round(m.at/1000)+chartOff, mm=Math.floor(tt/60)%1440;
+        const key=Math.floor(tt/86400)*86400+(570+Math.floor((mm-570-1)/N)*N)*60, up=m.dir==="bull";
+        return {time:key,position:up?"belowBar":"aboveBar",color:up?win:loss,shape:up?"arrowUp":"arrowDown",
+          text:String(m.title).split(/[▲▼·|]/)[0].replace(/[^\x20-\x7E]/g,"").replace(/SPX\s*/,"").replace(/\s+/g," ").trim().slice(0,22)}; })
+        .filter(m=>times.has(m.time)).sort((a,b)=>a.time-b.time); }
+    spxSeries.setMarkers(ms);
+    note.textContent=`${chTf} · ${out.length} candles · ATR levels: ${mode==="none"?"off":mode} · ribbon 8/13/21/48/200 (21 green = fast cloud up) · oscillator grey = compression`
+      +(intra?" · arrows = the bot's SPX signals":"")+" · ✏️ Draw level: click a price, the bot uses it as one of your key levels";
+    if(!liveTimer) liveTimer=setInterval(liveTick,5000);
+    } finally { chBusy=false; }
+  }
+  // live candle: the latest SPX price every 5 s (Bot tab open, page visible, 9:30-4:00 ET weekdays)
   async function liveTick(){
     if(!spxSeries||!chartOut.length||document.visibilityState!=="visible"||!document.body.classList.contains("view-bot")) return;
     const p=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"numeric",minute:"numeric",hour12:false}).formatToParts(new Date());
@@ -1017,56 +1154,15 @@
     if(/Sat|Sun/.test(g("weekday"))||mins<570||mins>=960) return;
     let j=null; try{ const r=await fetch("/api/bot/live"); j=r.ok?await r.json():null; }catch(e){}
     if(!j||!j.ok||!(j.last>0)) return;
-    const step=chTf*60, tt=Math.floor((Math.round(Date.now()/1000)+chartOff)/step)*step, last=chartOut[chartOut.length-1];
-    if(tt<last.time) return;
-    if(tt===last.time){ last.high=Math.max(last.high,j.last); last.low=Math.min(last.low,j.last); last.close=j.last; liveBar={...last}; }
-    else { liveBar={time:tt,open:last.close,high:Math.max(last.close,j.last),low:Math.min(last.close,j.last),close:j.last}; chartOut.push({...liveBar}); }
-    spxSeries.update({...liveBar}); liveAt=Date.now();
-    const n=$("#spxChartNote"); if(n) n.textContent=n.textContent.replace(/ · ● live.*$/,"")+` · ● live ${j.last.toFixed(2)}`;
+    const last=chartOut[chartOut.length-1], N={"1m":1,"3m":3,"10m":10,"1h":60}[chTf];
+    if(N){ const tt=Math.round(Date.now()/1000)+chartOff, mm=Math.floor(tt/60)%1440, key=Math.floor(tt/86400)*86400+(570+Math.floor((mm-570)/N)*N)*60;
+      if(key<last.time) return;
+      if(key===last.time){ last.high=Math.max(last.high,j.last); last.low=Math.min(last.low,j.last); last.close=j.last; spxSeries.update({...last}); }
+      else { const nb={time:key,open:last.close,high:Math.max(last.close,j.last),low:Math.min(last.close,j.last),close:j.last}; chartOut.push(nb); spxSeries.update({...nb}); } }
+    else { last.high=Math.max(last.high,j.last); last.low=Math.min(last.low,j.last); last.close=j.last; spxSeries.update({...last}); }
+    const n=$("#spxChartNote"); if(n) n.textContent="● live "+j.last.toFixed(2)+" · "+n.textContent.replace(/^● live [\d.]+ · /,"");
   }
-  document.querySelectorAll('input[name="chTf"]').forEach(r=>r.addEventListener("change",()=>{ chTf=+r.value; renderChart(); }));
-  const etOff=ms=>{ const d=new Date(ms); return (new Date(d.toLocaleString("en-US",{timeZone:"America/New_York"}))-new Date(d.toLocaleString("en-US",{timeZone:"UTC"})))/1000; };
-  function renderChart(){
-    const box=$("#spxChart"), note=$("#spxChartNote");
-    const C=botRes&&botRes.chart, bars=(C&&C.bars)||[];
-    if(typeof LightweightCharts==="undefined"){ note.textContent="Chart library didn't load (check the connection)."; return; }
-    if(!bars.length){ note.textContent="No SPX bars yet today: the chart fills in from 9:30 ET."; if(spxSeries) spxSeries.setData([]); return; }
-    const css=getComputedStyle(document.body), cv=(n,f)=>(css.getPropertyValue(n)||"").trim()||f;
-    const ink=cv("--ink-3","#8a8f98"), line=cv("--line","#2a2f3a"), win=cv("--win","#2ecc8c"), loss=cv("--loss","#f05a6e");
-    if(!spxChart){
-      spxChart=LightweightCharts.createChart(box,{autoSize:true,layout:{background:{type:"solid",color:"transparent"},textColor:ink,fontSize:11},
-        grid:{vertLines:{color:line},horzLines:{color:line}},rightPriceScale:{borderVisible:false},
-        timeScale:{timeVisible:true,secondsVisible:false,borderVisible:false,rightOffset:6},crosshair:{mode:0}});
-      spxSeries=spxChart.addCandlestickSeries({upColor:win,downColor:loss,borderVisible:false,wickUpColor:win,wickDownColor:loss});
-    }
-    // bars in New York time, grouped into 1/3/5-minute candles (9:30 sits on every grid)
-    const off=etOff(bars[0][0]*1000), step=chTf*60, out=[];
-    for(const [t,o,h,l,c] of bars){ const tt=Math.floor((t+off)/step)*step, x=out[out.length-1];
-      if(x&&x.time===tt){ x.high=Math.max(x.high,h); x.low=Math.min(x.low,l); x.close=c; } else out.push({time:tt,open:o,high:h,low:l,close:c}); }
-    spxSeries.setData(out); chartOut=out; chartOff=off;
-    if(liveBar&&liveBar.time>=out[out.length-1].time){ const L0=out[out.length-1]; if(liveBar.time===L0.time){ L0.high=Math.max(L0.high,liveBar.high); L0.low=Math.min(L0.low,liveBar.low); L0.close=liveBar.close; spxSeries.update({...L0}); } else { out.push({...liveBar}); spxSeries.update({...liveBar}); } }
-    if(!liveTimer) liveTimer=setInterval(liveTick,5000);
-    // level lines: SPX ATR levels, your plan's SPX triggers, GEX flip and walls
-    spxLines.forEach(l=>spxSeries.removePriceLine(l)); spxLines=[];
-    const st=botRes.state||{}, S=st.levelsSPX||{}, A=S.atrLevels||{}, P=st.plan&&st.plan.parsed, g=botRes.greeks||{};
-    const add=(price,title,color,style=2)=>{ if(price==null||!isFinite(price)) return; spxLines.push(spxSeries.createPriceLine({price:+price,title,color,lineWidth:1,lineStyle:style,axisLabelVisible:true})); };
-    const grey="rgba(140,146,158,.75)";
-    add(S.pdc,"PDC",grey,0);
-    [["0.236","Trig"],["0.382","GG"],["0.618","Fib"],["1","ATR"]].forEach(([k,n])=>{ add(A["+"+k],"+"+n,grey); add(A["-"+k],"−"+n,grey); });
-    const lastC=out[out.length-1].close;
-    [["1.236","123.6%"],["1.382","138.2%"]].forEach(([k,n])=>{ if(A["-1"]!=null&&lastC<A["-1"]) add(A["-"+k],"−"+n,grey); if(A["+1"]!=null&&lastC>A["+1"]) add(A["+"+k],"+"+n,grey); });
-    if(P){ add(P.spxCall,"Your calls","#f5a524",0); add(P.spxPut,"Your puts","#f5a524",0); }
-    if(g.flip!=null) add(g.flip,"γ flip","#a78bfa",1);
-    if(g.callWall!=null) add(g.callWall,"Call wall",win,1);
-    if(g.putWall!=null) add(g.putWall,"Put wall",loss,1);
-    // signal arrows on the candle they fired in
-    const ms=((C&&C.marks)||[]).map(m=>{ const tt=Math.floor((Math.round(m.at/1000)+off)/step)*step-step; const up=m.dir==="bull";
-      return {time:Math.max(out[0].time,tt),position:up?"belowBar":"aboveBar",color:up?win:loss,shape:up?"arrowUp":"arrowDown",
-        text:String(m.title).split(/[▲▼·|]/)[0].replace(/[^\x20-\x7E]/g,"").replace(/SPX\s*/,"").replace(/\s+/g," ").trim().slice(0,22)}; })
-      .filter(m=>out.some(b=>b.time===m.time)).sort((a,b)=>a.time-b.time);
-    spxSeries.setMarkers(ms);
-    note.textContent=`${out.length} × ${chTf}m candles · last ${f2(lastC)} · arrows = the bot's SPX trade signals · grey = ATR levels, orange = your plan, purple = gamma flip`;
-  }
+  loadMine();
   function renderBot(){
     const {state:st, greeks:g, signals=[], planStatus={}}=botRes;
     renderGreeks(g);

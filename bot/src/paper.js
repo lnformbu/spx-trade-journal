@@ -24,7 +24,7 @@ const r3 = (x) => Math.round(x * 1000) / 1000;
 const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
 // best families after every rule (replay): Vomy, 8 EMA ride, 10m checklist, ±1 ATR snap-back, 1m divergence, Golden Gate pullback/go, 21 EMA pullback
 export const CORE = new Set(["vomy", "pb8", "ckl10", "atr1", "div1m", "ggpb", "ggo", "pb21"]);
-const TRADED = new Set(["star", "flip", "squeeze", "box", "div1m", "cbox1m", "cbox3m", "plan-trigger", "pb21", "vomy", "orb", "orb1m", "flip1m", "orrt", "pb8", "ggo", "ggpb", "atr1", "ckl10"]);
+const TRADED = new Set(["star", "flip", "squeeze", "box", "div1m", "cbox1m", "cbox3m", "plan-trigger", "plan-scenario", "pb21", "vomy", "orb", "orb1m", "flip1m", "orrt", "pb8", "ggo", "ggpb", "atr1", "ckl10"]);
 const group = (sym) => (sym === "SPY" || sym === "$SPX" ? "SPX" : sym);   // SPY and SPX count as one market
 const rootOf = (contract) => String((contract && contract.symbol) || "").split(" ")[0].replace(/^SPXW$/, "SPX");
 // which option underlyings get paper traded: wrangler.toml PAPER_TICKERS (default "$SPX"; add e.g. ",TSLA" later)

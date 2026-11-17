@@ -270,6 +270,43 @@ async function handle(req, env) {
   }
 
   // ---- bot panel: the bot worker (../bot) writes bot:day:<date>; the journal only reads it ----
+  // SPX candles for the Bot desk chart, any timeframe: 1m (also builds 3m), 10m, 30m (builds 1h), D (2y), Dlong (3y, ATR levels),
+  // W (5y), M (20y: swing / position / long-term levels). Rows: [unix seconds, open, high, low, close]
+  if (url.pathname === "/api/bot/candles" && req.method === "GET") {
+    const tf = url.searchParams.get("tf") || "1m", now = Date.now();
+    const Q = {
+      "1m": { frequencyType: "minute", frequency: "1", startDate: String(now - 5 * DAY), endDate: String(now) },
+      "10m": { frequencyType: "minute", frequency: "10", startDate: String(now - 20 * DAY), endDate: String(now) },
+      "30m": { frequencyType: "minute", frequency: "30", startDate: String(now - 90 * DAY), endDate: String(now) },
+      D: { periodType: "year", period: "2", frequencyType: "daily", frequency: "1" },
+      Dlong: { periodType: "year", period: "3", frequencyType: "daily", frequency: "1" },
+      W: { periodType: "year", period: "5", frequencyType: "weekly", frequency: "1" },
+      M: { periodType: "year", period: "20", frequencyType: "monthly", frequency: "1" },
+    }[tf];
+    if (!Q) return json({ ok: false, error: "tf must be 1m, 10m, 30m, D, Dlong, W or M" }, 400);
+    const s = await schwabState(env);
+    if (!s.refresh) return json({ ok: false, error: "Schwab not connected" });
+    try {
+      const before = s.access, tok = await schwabAccess(env, s);
+      if (s.access !== before) await saveSchwab(env, s);
+      const r = await schwabGet(tok, "/marketdata/v1/pricehistory?" + new URLSearchParams({ symbol: "$SPX", needExtendedHoursData: "false", ...Q }));
+      const r2 = (x) => Math.round(x * 100) / 100;
+      return json({ ok: true, tf, bars: (r.candles || []).map((c) => [Math.round(c.datetime / 1000), r2(c.open), r2(c.high), r2(c.low), r2(c.close)]) });
+    } catch (e) { return json({ ok: false, error: e.message }); }
+  }
+  // levels you draw on the chart: the bot reads them as key levels (D1 "bot:mylevels")
+  if (url.pathname === "/api/bot/mylevels") {
+    let cur = { items: [] };
+    try { cur = JSON.parse((await readBlob(env, "bot:mylevels")) || '{"items":[]}'); } catch (e) {}
+    if (req.method === "GET") return json({ ok: true, items: cur.items || [] });
+    if (req.method === "POST") {
+      const b = await req.json().catch(() => ({}));
+      if (b.remove != null) cur.items = (cur.items || []).filter((x) => x.at !== b.remove);
+      else if (isFinite(+b.price)) cur.items = [...(cur.items || []), { price: Math.round(+b.price * 100) / 100, label: String(b.label || "level").slice(0, 40), at: Date.now() }].slice(-40);
+      await writeBlob(env, "bot:mylevels", JSON.stringify(cur));
+      return json({ ok: true, items: cur.items });
+    }
+  }
   // live SPX price for the Bot desk chart (polled every 5 s while the Bot tab is open in market hours)
   if (url.pathname === "/api/bot/live" && req.method === "GET") {
     const s = await schwabState(env);

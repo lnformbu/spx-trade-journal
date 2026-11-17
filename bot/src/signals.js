@@ -290,6 +290,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   const paperStyle = ((await readJSON(env, "paper:model")) || {}).style || null;
   // your weekly bigger-picture thesis (key levels + scenarios), saved from #spx-training
   const thesis = await readJSON(env, "bot:thesis");
+  // levels you draw on the journal's chart (Bot desk): [{ price, label, at }], treated like your thesis levels (zone USER_ZONE)
+  const myLevels = ((await readJSON(env, "bot:mylevels")) || {}).items || [];
   const resolved = [];
 
   // ---- VIX on 10m (inverse of SPX): cloud, oscillator, last two 10m closes; refreshed every 10 minutes ----
@@ -551,6 +553,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         ...(D.longterm ? [["Yearly pivot", D.longterm.prevClose], ["Yearly call trigger", D.longterm.atrLevels["+0.236"]], ["Yearly put trigger", D.longterm.atrLevels["-0.236"]],
           ["Yearly Golden Gate up", D.longterm.atrLevels["+0.382"]], ["Yearly Golden Gate down", D.longterm.atrLevels["-0.382"]]] : []),
         // your posted weekly thesis levels (#spx-training bigger-picture post), SPX only
+        ...(sym === "$SPX" ? myLevels.filter((x) => isFinite(x.price)).map((x) => ["your drawn " + (x.label || "level"), +x.price, USER_ZONE]) : []),
         ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price, x.zone ?? thesis.zone ?? USER_ZONE]) : []),
       ];
       // SPX gamma levels (call wall, put wall, flip, Eye of Sauron, biggest nodes); SPY gets them divided by the SPX/SPY ratio
@@ -1275,14 +1278,20 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             });
           }
         }
-        P.scenarios.forEach((s, i) => {
-          if (!s.dir || s.level == null) return;
+        for (const [i, s] of P.scenarios.entries()) {
+          if (!s.dir || s.level == null) continue;
           const sk = `scn${i}`;
           const beyond = s.dir === "bull" ? c0 > s.level : c0 < s.level;
           if (beyond && !ps[sk]) {
             ps[sk] = { at: now, hit: [] };
+            // your scenario is a trade: your posted contract, entry now, stop back through the scenario's level, target 1 = its first target
+            // (11/16: the put scenario set up at 10:04 and reached -1 ATR at 10:25, but carried no entry/stop so nothing could trade it)
+            let cs = await contract(s.dir);
+            if (cs && cs.c) { const adj = await adjustContract(cs.c, s.dir, () => listFor(cs.c, s.dir)); cs = { text: cs.text + adj.note, c: adj.c }; }
+            const t1 = (s.targets || []).find((x) => x.price != null && (s.dir === "bull" ? x.price > c0 : x.price < c0));
             found.push({
-              kind: "plan", sym, key: `plan:${sym}:${sk}`, once: true, color: COLORS[s.dir],
+              kind: "plan", sym, key: `plan:${sym}:${sk}`, once: true, color: COLORS[s.dir], contract: (cs && cs.c) || undefined,
+              track: { dir: s.dir, entry: c0, stop: s.dir === "bull" ? s.level * 0.9985 : s.level * 1.0015, target: t1 ? t1.price : null },
               title: `🗺️ ${name} scenario set up: ${s.dir === "bull" ? "▲" : "▼"} ${s.dir === "bull" ? "above" : "below"} ${s.level}${asSpx(s.level)}`,
               text: `"${s.text.slice(0, 180)}"\nTargets: ${s.targets.map((x) => `${x.label} ${x.price ?? "?"}`).join(" › ") || "—"}`,
             });
@@ -1298,7 +1307,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
               text: j === 0 ? "Target 1: bank half, move the runner's stop to +30% and let it trail." : `Target ${j + 1}: tighten the runner's trail or take it.`,
             });
           });
-        });
+        }
       }
 
       // ---- ⭐ confluence: Candlestick Bible pattern at a Saty level + everything else ----
