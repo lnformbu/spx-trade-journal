@@ -339,12 +339,25 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const q = quotes[sym] && quotes[sym].quote;
       if (!q) continue;
       const price = q.lastPrice;
-      if (!st.daily[sym] || st.daily[sym].ema21w === undefined || st.daily[sym].oscD === undefined) {
+      if (!st.daily[sym] || st.daily[sym].ema21w === undefined || st.daily[sym].oscD === undefined || st.daily[sym].multiday === undefined) {
         const d = await history(token, { symbol: sym, periodType: "year", period: "3", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
         const dl = dayLevels(d, t.date);
-        const mo = await history(token, { symbol: sym, periodType: "year", period: "10", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
+        const mo = await history(token, { symbol: sym, periodType: "year", period: "20", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
+        // your Saty setups (11/16): Multiday = 1h ETH with WEEKLY ATR levels, Long-term = W with YEARLY levels, Big picture = M
+        const groupBy = (bars, keyOf) => { const out = []; for (const c of bars) { const k = keyOf(c), x = out.at(-1);
+          if (!x || x.k !== k) out.push({ k, open: c.open, high: c.high, low: c.low, close: c.close, datetime: c.datetime });
+          else { x.high = Math.max(x.high, c.high); x.low = Math.min(x.low, c.low); x.close = c.close; } } return out; };
+        const weekOf = (c) => { const dt = new Date(Date.parse(dailyDate(c))); dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); return dt.toISOString().slice(0, 10); };
+        const dPast = d.filter((c) => dailyDate(c) < t.date), weeks = groupBy(dPast, weekOf), curWeek = weekOf({ datetime: Date.parse(t.date + "T12:00:00Z") });
+        const years = groupBy(mo, (c) => dailyDate(c).slice(0, 4)), monthsPast = mo.filter((c) => dailyDate(c).slice(0, 7) < t.date.slice(0, 7));
+        const oscOf = (bars) => { const o = bars.length >= 30 ? phaseOsc(bars) : null; return o ? { value: o.value, compression: o.compression, zone: o.zone } : null; };
+        const ribOf = (bars) => { const r = bars.length >= 21 ? ribbon(bars) : null; return r ? r.state : null; };
         st.daily[sym] = dl && {
           ...dl,
+          multiday: modeLevels(weeks.filter((w) => w.k < curWeek)),
+          longterm: modeLevels(years.filter((y) => y.k < t.date.slice(0, 4))),
+          bigW: { rib: ribOf(weeks), osc: oscOf(weeks) },
+          bigM: { rib: ribOf(monthsPast), osc: oscOf(monthsPast) },
           cloudD: cloud2021(d.filter((c) => dailyDate(c) < t.date)),
           swing: modeLevels(mo.filter((c) => dailyDate(c).slice(0, 7) < t.date.slice(0, 7))),
           // daily 21 EMA (swing pullback zone)
@@ -531,6 +544,12 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         ...(D.position ? [["Quarterly pivot", D.position.prevClose], ["Quarterly call trigger", D.position.atrLevels["+0.236"]], ["Quarterly put trigger", D.position.atrLevels["-0.236"]],
           ["Quarterly Golden Gate up", D.position.atrLevels["+0.382"]], ["Quarterly Golden Gate down", D.position.atrLevels["-0.382"]],
           ["Quarterly midrange up", D.position.atrLevels["+0.618"]], ["Quarterly midrange down", D.position.atrLevels["-0.618"]]] : []),
+        // Multiday (weekly ATR levels) and Long-term (yearly ATR levels), from your Saty setups
+        ...(D.multiday ? [["Weekly pivot", D.multiday.prevClose], ["Weekly call trigger", D.multiday.atrLevels["+0.236"]], ["Weekly put trigger", D.multiday.atrLevels["-0.236"]],
+          ["Weekly Golden Gate up", D.multiday.atrLevels["+0.382"]], ["Weekly Golden Gate down", D.multiday.atrLevels["-0.382"]],
+          ["Weekly midrange up", D.multiday.atrLevels["+0.618"]], ["Weekly midrange down", D.multiday.atrLevels["-0.618"]]] : []),
+        ...(D.longterm ? [["Yearly pivot", D.longterm.prevClose], ["Yearly call trigger", D.longterm.atrLevels["+0.236"]], ["Yearly put trigger", D.longterm.atrLevels["-0.236"]],
+          ["Yearly Golden Gate up", D.longterm.atrLevels["+0.382"]], ["Yearly Golden Gate down", D.longterm.atrLevels["-0.382"]]] : []),
         // your posted weekly thesis levels (#spx-training bigger-picture post), SPX only
         ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price, x.zone ?? thesis.zone ?? USER_ZONE]) : []),
       ];
@@ -1399,7 +1418,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
       for (const f of found) if (f.sym === sym && !f.ctx) f.ctx = {
         chop: choppy, gex: gexSide, vix: f.track ? vixAgrees(f.track.dir) : null,
         phase: f.track ? phaseCtx(osc10, f.track.dir) : null,
-        phaseD: f.track && st.daily[sym] ? phaseCtx(st.daily[sym].oscD, f.track.dir) : null,   // daily Phase Oscillator zone (Time Warp)
+        phaseD: f.track && st.daily[sym] ? phaseCtx(st.daily[sym].oscD, f.track.dir) : null,
+        // Long-term (weekly) and Big picture (monthly) Pivot Ribbon: is the trade with or against it
+        ribW: f.track && st.daily[sym] && st.daily[sym].bigW && st.daily[sym].bigW.rib ? (st.daily[sym].bigW.rib === (f.track.dir === "bull" ? "bullish" : "bearish") ? "with" : st.daily[sym].bigW.rib === "mixed" ? "mixed" : "against") : null,
+        ribM: f.track && st.daily[sym] && st.daily[sym].bigM && st.daily[sym].bigM.rib ? (st.daily[sym].bigM.rib === (f.track.dir === "bull" ? "bullish" : "bearish") ? "with" : st.daily[sym].bigM.rib === "mixed" ? "mixed" : "against") : null,   // daily Phase Oscillator zone (Time Warp)
         mag7: f.track && (sym === "$SPX" || sym === "SPY") ? mag7Side(f.track.dir) : null,   // Mag 7 breadth with / against the trade   // 10m Phase Oscillator zone from the trade's side
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
         trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",

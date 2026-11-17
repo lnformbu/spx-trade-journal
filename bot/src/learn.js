@@ -74,6 +74,8 @@ export function features(x) {
     phase: c.phase || null,
     mag7: c.mag7 || null,
     phaseD: c.phaseD || null,
+    ribW: c.ribW || null,
+    ribM: c.ribM || null,
   };
 }
 const shrunk = (sum, n) => sum / (n + PRIOR);
