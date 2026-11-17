@@ -553,7 +553,9 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         ...(D.longterm ? [["Yearly pivot", D.longterm.prevClose], ["Yearly call trigger", D.longterm.atrLevels["+0.236"]], ["Yearly put trigger", D.longterm.atrLevels["-0.236"]],
           ["Yearly Golden Gate up", D.longterm.atrLevels["+0.382"]], ["Yearly Golden Gate down", D.longterm.atrLevels["-0.382"]]] : []),
         // your posted weekly thesis levels (#spx-training bigger-picture post), SPX only
-        ...(sym === "$SPX" ? myLevels.filter((x) => isFinite(x.price)).map((x) => ["your drawn " + (x.label || "level"), +x.price, USER_ZONE]) : []),
+        ...(sym === "$SPX" ? myLevels.filter((x) => x.type !== "trend" && isFinite(x.price)).map((x) => ["your drawn " + (x.label || "level"), +x.price, USER_ZONE]) : []),
+        // your trendlines: their value right now (the line extended to the current time)
+        ...(sym === "$SPX" ? myLevels.filter((x) => x.type === "trend" && x.t2 !== x.t1).map((x) => ["your trendline " + (x.label || ""), r2(x.p1 + ((x.p2 - x.p1) * (now / 1000 - x.t1)) / (x.t2 - x.t1)), USER_ZONE]) : []),
         ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price, x.zone ?? thesis.zone ?? USER_ZONE]) : []),
       ];
       // SPX gamma levels (call wall, put wall, flip, Eye of Sauron, biggest nodes); SPY gets them divided by the SPX/SPY ratio

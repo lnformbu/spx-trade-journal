@@ -302,6 +302,9 @@ async function handle(req, env) {
     if (req.method === "POST") {
       const b = await req.json().catch(() => ({}));
       if (b.remove != null) cur.items = (cur.items || []).filter((x) => x.at !== b.remove);
+      // trendline: two points (unix seconds, price); grp "intra" (minute / hour charts) or "daily" (D / W charts)
+      else if (b.type === "trend" && [b.t1, b.p1, b.t2, b.p2].every((v) => isFinite(+v)) && +b.t2 !== +b.t1)
+        cur.items = [...(cur.items || []), { type: "trend", grp: b.grp === "daily" ? "daily" : "intra", t1: +b.t1, p1: Math.round(+b.p1 * 100) / 100, t2: +b.t2, p2: Math.round(+b.p2 * 100) / 100, label: String(b.label || "trendline").slice(0, 40), at: Date.now() }].slice(-40);
       else if (isFinite(+b.price)) cur.items = [...(cur.items || []), { price: Math.round(+b.price * 100) / 100, label: String(b.label || "level").slice(0, 40), at: Date.now() }].slice(-40);
       await writeBlob(env, "bot:mylevels", JSON.stringify(cur));
       return json({ ok: true, items: cur.items });
@@ -330,7 +333,9 @@ async function handle(req, env) {
       signals: sig ? (sig.alerts || []).slice(-25).reverse() : [],
       planStatus: sig ? sig.planSt || {} : {},
       // the Bot desk chart: today's SPX 1m bars and the SPX trade signals (time, side, price, title)
-      chart: sig ? { bars: sig.spx1m || [], marks: (sig.alerts || []).filter((a) => a.sym === "$SPX" && a.dir && a.px != null).map((a) => ({ at: a.at, dir: a.dir, px: a.px, title: a.title })) } : null,
+      // marks: SPX trade signals (side + price) and the leaderboard / EOD plays (shakeout watch has no side: shown as a dot)
+      chart: sig ? { bars: sig.spx1m || [], marks: (sig.alerts || []).filter((a) => a.sym === "$SPX" && ((a.dir && a.px != null) || /LB SHAKEOUT|EOD|FINAL 20|max pain/i.test(a.title || "")))
+        .map((a) => ({ at: a.at, dir: a.dir || null, px: a.px ?? null, title: a.title })) } : null,
     });
   }
   // the bot's scorecard: scored signals, daily plan reviews, training posts

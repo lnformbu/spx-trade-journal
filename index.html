@@ -505,21 +505,29 @@
         <div class="glance" id="bdGlance" aria-live="polite"></div>
         <div class="chips" id="bdChips" aria-live="polite"></div>
         <section class="bd-box" id="chartBox">
-          <div class="bd-h ch-head"><h3>SPX chart <small>Saty Pivot Ribbon · ATR levels · Phase Oscillator · your levels · the bot's signals</small></h3>
+          <div class="bd-h ch-head"><h3>SPX chart <small>your Saty setups · Pivot Ribbon (+ Time Warp) · ATR levels · Phase Oscillator · your lines · the bot's signals</small></h3>
             <div class="ch-ctrl">
+              <select class="inp ch-mode" id="chSetup" aria-label="Your setup">
+                <option value="scalp13">Scalp 1/3 · 1m, warp 3m</option><option value="scalp">Scalp · 3m</option><option value="day310" selected>Day 3/10 · 3m, warp 10m</option>
+                <option value="day">Day · 10m</option><option value="day10h">Day 10/H · 10m weekly, warp H</option><option value="multiday">Multiday · H weekly</option>
+                <option value="swinghd">Swing H/D · H monthly, warp D</option><option value="swing">Swing · 4H monthly</option><option value="position">Position · D quarterly</option>
+                <option value="longterm">Long-term · D yearly</option><option value="squeeze">Squeeze · D, ±3 ATR Keltner</option><option value="big">Big Picture · W</option>
+              </select>
               <div class="seg ch-tf" role="radiogroup" aria-label="Chart timeframe">
                 <label><input type="radio" name="chTf" value="1m"><span>1m</span></label>
                 <label><input type="radio" name="chTf" value="3m" checked><span>3m</span></label>
                 <label><input type="radio" name="chTf" value="10m"><span>10m</span></label>
                 <label><input type="radio" name="chTf" value="1h"><span>1h</span></label>
+                <label><input type="radio" name="chTf" value="4h"><span>4H</span></label>
                 <label><input type="radio" name="chTf" value="D"><span>D</span></label>
                 <label><input type="radio" name="chTf" value="W"><span>W</span></label>
               </div>
               <select class="inp ch-mode" id="chMode" aria-label="ATR levels mode">
-                <option value="auto">ATR: auto</option><option value="day">Day (daily)</option><option value="multiday">Multiday (weekly)</option>
+                <option value="auto">ATR: setup</option><option value="day">Day (daily)</option><option value="multiday">Multiday (weekly)</option>
                 <option value="swing">Swing (monthly)</option><option value="position">Position (quarterly)</option><option value="longterm">Long-term (yearly)</option><option value="none">ATR: off</option>
               </select>
-              <button class="btn ch-draw" id="chDraw" type="button" aria-pressed="false">✏️ Draw level</button>
+              <button class="btn ch-draw" id="chDrawLv" type="button" aria-pressed="false">➖ Level</button>
+              <button class="btn ch-draw" id="chDrawTr" type="button" aria-pressed="false">📐 Trendline</button>
             </div></div>
           <div id="spxChart" class="spx-chart"></div>
           <div id="spxOsc" class="spx-osc" aria-label="Phase Oscillator"></div>
@@ -1026,11 +1034,18 @@
   // ---- SPX chart: Saty Pivot Ribbon + ATR levels (by mode) + Phase Oscillator, your drawn levels and the bot's signals ----
   // Same math as the bot (bot/src/levels.js). Data: /api/bot/candles (Schwab), live candle from /api/bot/live every 5 s.
   let spxChart=null, spxSeries=null, emaSer={}, oscChart=null, oscSer=null, spxLines=[], oscLines=[], chartOut=[], chartOff=0,
-      liveTimer=null, chTf="3m", chMode="auto", drawing=false, myLv=[];
-  const chCache={};
-  try{ chTf=localStorage.getItem("chTf")||"3m"; chMode=localStorage.getItem("chMode")||"auto"; }catch(e){}
+      liveTimer=null, chTf="3m", chMode="auto", chSetup="day310", drawing=null, drawA=null, myLv=[], trendSer=[];
+  // your thinkorswim setups: timeframe, ATR levels mode, Pivot Ribbon Time Warp (higher-timeframe ribbon), extras
+  const SETUPS={scalp13:{tf:"1m",mode:"day",warp:"3m"},scalp:{tf:"3m",mode:"day"},day310:{tf:"3m",mode:"day",warp:"10m"},day:{tf:"10m",mode:"day"},
+    day10h:{tf:"10m",mode:"multiday",warp:"1h"},multiday:{tf:"1h",mode:"multiday"},swinghd:{tf:"1h",mode:"swing",warp:"D"},swing:{tf:"4h",mode:"swing"},
+    position:{tf:"D",mode:"position"},longterm:{tf:"D",mode:"longterm"},squeeze:{tf:"D",mode:"none",kc:true},big:{tf:"W",mode:"none"}};
+  const setupCfg=()=>SETUPS[chSetup]&&SETUPS[chSetup].tf===chTf?SETUPS[chSetup]:{tf:chTf,mode:chTf==="1h"?"multiday":chTf==="4h"?"swing":chTf==="D"?"position":chTf==="W"?"none":"day"};
+  const chCache={}; const chModeSel=$("#chMode");
+  try{ chSetup=localStorage.getItem("chSetup")||"day310"; chTf=(SETUPS[chSetup]||{}).tf||localStorage.getItem("chTf")||"3m"; chMode=localStorage.getItem("chMode")||"auto"; }catch(e){}
+  const chSetupSel=$("#chSetup"); if(chSetupSel){ chSetupSel.value=chSetup; chSetupSel.addEventListener("change",()=>{ chSetup=chSetupSel.value; chTf=SETUPS[chSetup].tf; chMode="auto"; if(chModeSel) chModeSel.value="auto";
+    document.querySelectorAll('input[name="chTf"]').forEach(r=>{ r.checked=r.value===chTf; }); try{localStorage.setItem("chSetup",chSetup);localStorage.setItem("chMode","auto");}catch(e){} renderChart(true); }); }
   document.querySelectorAll('input[name="chTf"]').forEach(r=>{ r.checked=r.value===chTf; r.addEventListener("change",()=>{ chTf=r.value; try{localStorage.setItem("chTf",chTf);}catch(e){} renderChart(true); }); });
-  const chModeSel=$("#chMode"); if(chModeSel){ chModeSel.value=chMode; chModeSel.addEventListener("change",()=>{ chMode=chModeSel.value; try{localStorage.setItem("chMode",chMode);}catch(e){} renderChart(); }); }
+  if(chModeSel){ chModeSel.value=chMode; chModeSel.addEventListener("change",()=>{ chMode=chModeSel.value; try{localStorage.setItem("chMode",chMode);}catch(e){} renderChart(); }); }
   const etOff=ms=>{ const d=new Date(ms); return (new Date(d.toLocaleString("en-US",{timeZone:"America/New_York"}))-new Date(d.toLocaleString("en-US",{timeZone:"UTC"})))/1000; };
   const emaA=(v,n)=>{ const k=2/(n+1); let e=null; return v.map(x=>(e=e===null?x:x*k+e*(1-k))); };
   const atrSer=(b,n=14)=>{ const out=[]; let a=null,s=0; b.forEach((c,i)=>{ const tr=i?Math.max(c.high-c.low,Math.abs(c.high-b[i-1].close),Math.abs(c.low-b[i-1].close)):c.high-c.low;
@@ -1060,6 +1075,7 @@
     if(tf==="3m") return intraday(await getBars("1m"),3);
     if(tf==="10m") return intraday(await getBars("10m"),10);
     if(tf==="1h") return intraday(await getBars("30m"),60);
+    if(tf==="4h") return intraday(await getBars("30m"),240);
     const rows=await getBars(tf==="W"?"W":"D");
     return rows.map(([t,o,h,l,c])=>({time:dKey(t),open:o,high:h,low:l,close:c}));
   }
@@ -1082,9 +1098,15 @@
   async function loadMine(){ try{ const r=await fetch("/api/bot/mylevels"); const j=r.ok?await r.json():null; myLv=j&&j.ok?j.items:myLv; }catch(e){} }
   async function saveMine(body){ try{ const r=await fetch("/api/bot/mylevels",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json(); if(j.ok) myLv=j.items; }catch(e){} renderChart(); }
   function renderMine(){ const box=$("#chMine"); if(!box) return;
-    box.innerHTML=myLv.length?myLv.map(x=>`<button type="button" data-at="${x.at}" title="Remove this level">✏️ ${esc(x.label)} ${(+x.price).toFixed(2)} ✕</button>`).join(""):"";
+    box.innerHTML=myLv.length?myLv.map(x=>`<button type="button" data-at="${x.at}" title="Remove">${x.type==="trend"?"📐 "+esc(x.label)+" ("+(x.grp==="daily"?"D/W":"intraday")+")":"➖ "+esc(x.label)+" "+(+x.price).toFixed(2)} ✕</button>`).join(""):"";
     box.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>saveMine({remove:+b.dataset.at}))); }
-  const drawBtn=$("#chDraw"); if(drawBtn) drawBtn.addEventListener("click",()=>{ drawing=!drawing; drawBtn.setAttribute("aria-pressed",String(drawing)); drawBtn.textContent=drawing?"Click the chart…":"✏️ Draw level"; });
+  const btnLv=$("#chDrawLv"), btnTr=$("#chDrawTr");
+  const setDraw=m=>{ drawing=m; drawA=null; if(btnLv){ btnLv.setAttribute("aria-pressed",String(m==="level")); btnLv.textContent=m==="level"?"Click a price…":"➖ Level"; }
+    if(btnTr){ btnTr.setAttribute("aria-pressed",String(m==="trend")); btnTr.textContent=m==="trend"?"Click point 1…":"📐 Trendline"; } };
+  if(btnLv) btnLv.addEventListener("click",()=>setDraw(drawing==="level"?null:"level"));
+  if(btnTr) btnTr.addEventListener("click",()=>setDraw(drawing==="trend"?null:"trend"));
+  // chart time -> real unix seconds (intraday bars are shifted to New York time; daily bars are dates)
+  const realT=t=>typeof t==="number"?t-chartOff:Math.round(Date.parse((typeof t==="string"?t:`${t.year}-${String(t.month).padStart(2,"0")}-${String(t.day).padStart(2,"0")}`)+"T21:00:00Z")/1000);
   let chBusy=false;
   async function renderChart(fresh){
     const box=$("#spxChart"), obox=$("#spxOsc"), note=$("#spxChartNote");
@@ -1100,13 +1122,19 @@
       spxChart=LightweightCharts.createChart(box,base);
       spxSeries=spxChart.addCandlestickSeries({upColor:win,downColor:loss,borderVisible:false,wickUpColor:win,wickDownColor:loss});
       const ln=(c,w)=>spxChart.addLineSeries({color:c,lineWidth:w,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
-      emaSer={e8:ln("rgba(46,204,140,.9)",1),e13:ln("rgba(140,146,158,.45)",1),e21:ln(win,2),e48:ln("rgba(140,146,158,.7)",1),e200:ln("#3ba3ff",1)};
+      emaSer={e8:ln("rgba(46,204,140,.9)",1),e13:ln("rgba(140,146,158,.45)",1),e21:ln(win,2),e48:ln("rgba(140,146,158,.7)",1),e200:ln("#3ba3ff",1),
+        w21:ln("rgba(46,204,140,.45)",4),w48:ln("rgba(160,166,178,.45)",3),kcU:ln("rgba(167,139,250,.8)",1),kcL:ln("rgba(167,139,250,.8)",1)};
       oscChart=LightweightCharts.createChart(obox,{...base,timeScale:{...base.timeScale,visible:false}});
       oscSer=oscChart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:true});
       spxChart.timeScale().subscribeVisibleLogicalRangeChange(r=>{ if(r) oscChart.timeScale().setVisibleLogicalRange(r); });
       spxChart.subscribeClick(p=>{ if(!drawing||!p.point) return; const price=spxSeries.coordinateToPrice(p.point.y); if(price==null) return;
-        drawing=false; drawBtn.setAttribute("aria-pressed","false"); drawBtn.textContent="✏️ Draw level";
-        const label=prompt(`Label for the level at ${price.toFixed(2)} (the bot will treat it as one of your key levels)`,"my level"); if(label!==null) saveMine({price,label}); });
+        if(drawing==="level"){ setDraw(null); const label=prompt(`Label for the level at ${price.toFixed(2)} (the bot treats it as one of your key levels)`,"my level"); if(label!==null) saveMine({price,label}); return; }
+        if(p.time==null) return;
+        if(!drawA){ drawA={t:realT(p.time),p:price}; if(btnTr) btnTr.textContent="Click point 2…"; return; }
+        const B={t:realT(p.time),p:price}, A=drawA; setDraw(null); if(B.t===A.t) return;
+        const [P1,P2]=A.t<B.t?[A,B]:[B,A];
+        const label=prompt(`Label for the trendline (${P1.p.toFixed(2)} → ${P2.p.toFixed(2)}; the bot uses where it is right now as a key level)`,"trendline");
+        if(label!==null) saveMine({type:"trend",grp:/^(D|W)$/.test(chTf)?"daily":"intra",t1:P1.t,p1:P1.p,t2:P2.t,p2:P2.p,label}); });
       [100,61.8,23.6,0,-23.6,-61.8,-100].forEach(v=>oscLines.push(oscSer.createPriceLine({price:v,color:v===0?"rgba(140,146,158,.8)":"rgba(140,146,158,.35)",lineWidth:1,lineStyle:v===0?0:2,axisLabelVisible:Math.abs(v)===100||v===0||Math.abs(v)===61.8,title:""})));
     }
     const out=await tfBars(chTf);
@@ -1117,13 +1145,24 @@
     const pts=(n,col)=>out.map((b,i)=>({time:b.time,value:+E[n][i].toFixed(2),...(col?{color:col(i)}:{})}));
     emaSer.e8.setData(pts(8)); emaSer.e13.setData(pts(13)); emaSer.e48.setData(pts(48)); emaSer.e200.setData(out.length>=200?pts(200):[]);
     emaSer.e21.setData(pts(21,i=>E[8][i]>=E[21][i]?win:loss));
+    const cfg=setupCfg();
+    // Time Warp: the higher timeframe's ribbon (21 colored by its 8 > 21, and its 48) drawn on this chart, step by step
+    if(cfg.warp){ const wb=await tfBars(cfg.warp), wc=wb.map(b=>b.close), W8=emaA(wc,8), W21=emaA(wc,21), W48=emaA(wc,48);
+      const wkey=cfg.warp==="D"?(t=>new Date(t*1000).toISOString().slice(0,10)):null;
+      const idx=new Map(wb.map((b,i)=>[b.time,i])); let j=0; const w21=[], w48=[];
+      out.forEach(b=>{ let i; if(wkey){ i=idx.get(wkey(b.time)); } else { while(j+1<wb.length&&wb[j+1].time<=b.time) j++; i=wb[j]&&wb[j].time<=b.time?j:undefined; }
+        if(i!=null){ w21.push({time:b.time,value:+W21[i].toFixed(2),color:W8[i]>=W21[i]?"rgba(46,204,140,.45)":"rgba(240,90,110,.45)"}); w48.push({time:b.time,value:+W48[i].toFixed(2)}); } });
+      emaSer.w21.setData(w21); emaSer.w48.setData(w48); } else { emaSer.w21.setData([]); emaSer.w48.setData([]); }
+    // Squeeze setup: +/-3 ATR Keltner channels around the 21 EMA
+    if(cfg.kc){ const at=atrSer(out,14); emaSer.kcU.setData(out.map((b,i)=>at[i]?{time:b.time,value:+(E[21][i]+3*at[i]).toFixed(2)}:{time:b.time})); emaSer.kcL.setData(out.map((b,i)=>at[i]?{time:b.time,value:+(E[21][i]-3*at[i]).toFixed(2)}:{time:b.time})); }
+    else { emaSer.kcU.setData([]); emaSer.kcL.setData([]); }
     // Phase Oscillator: green rising, red falling, grey = compression (squeeze)
     const P=phase(out); oscSer.setData(out.map((b,i)=>({time:b.time,value:+P.osc[i].toFixed(2),color:P.tr[i]?"#9aa0a6":i&&P.osc[i]>=P.osc[i-1]?win:loss})));
     if(fresh) { spxChart.timeScale().fitContent(); }
     // level lines
     spxLines.forEach(l=>spxSeries.removePriceLine(l)); spxLines=[];
     const add=(price,title,color,style=2)=>{ if(price==null||!isFinite(price)) return; spxLines.push(spxSeries.createPriceLine({price:+price,title,color,lineWidth:1,lineStyle:style,axisLabelVisible:true})); };
-    const intra=/m$|1h/.test(chTf), mode=chMode==="auto"?(chTf==="1h"?"swing":chTf==="D"?"position":chTf==="W"?"longterm":"day"):chMode;
+    const intra=/m$|h$/.test(chTf), mode=chMode==="auto"?cfg.mode:chMode;
     if(mode!=="none"){ const L=await modeLevels(mode);
       if(L){ const g="rgba(140,146,158,.8)", gg="rgba(245,165,36,.8)", lv=f=>L.pc+L.a*f;
         add(L.pc,L.tag+" pivot","rgba(220,222,228,.9)",0);
@@ -1131,18 +1170,26 @@
     const st=(botRes&&botRes.state)||{}, PL=st.plan&&st.plan.parsed, gx=(botRes&&botRes.greeks)||{};
     if(intra){ if(PL){ add(PL.spxCall,"Your calls","#f5a524",0); add(PL.spxPut,"Your puts","#f5a524",0); }
       if(gx.flip!=null) add(gx.flip,"γ flip","#a78bfa",1); if(gx.callWall!=null) add(gx.callWall,"Call wall",win,1); if(gx.putWall!=null) add(gx.putWall,"Put wall",loss,1); }
-    myLv.forEach(x=>add(+x.price,"✏ "+x.label,"#ff9f43",1)); renderMine();
+    myLv.filter(x=>x.type!=="trend").forEach(x=>add(+x.price,"➖ "+x.label,"#ff9f43",1));
+    trendSer.forEach(sr=>spxChart.removeSeries(sr)); trendSer=[];
+    const grp=/^(D|W)$/.test(chTf)?"daily":"intra";
+    myLv.filter(x=>x.type==="trend"&&x.grp===grp).forEach(x=>{ const k=(x.p2-x.p1)/(x.t2-x.t1);
+      const d=out.filter(b=>realT(b.time)>=x.t1).map(b=>({time:b.time,value:+(x.p1+k*(realT(b.time)-x.t1)).toFixed(2)}));
+      if(d.length<2) return; const sr=spxChart.addLineSeries({color:"#ff9f43",lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:x.label,crosshairMarkerVisible:false}); sr.setData(d); trendSer.push(sr); });
+    renderMine();
     // the bot's SPX signals as arrows (intraday charts)
     let ms=[];
-    if(intra){ const N={"1m":1,"3m":3,"10m":10,"1h":60}[chTf], times=new Set(out.map(b=>b.time));
+    if(intra){ const N={"1m":1,"3m":3,"10m":10,"1h":60,"4h":240}[chTf], times=new Set(out.map(b=>b.time));
+      const lbName=t=>/SHAKEOUT INCOMING/i.test(t)?"LB shakeout ⚠":/SHAKEOUT WATCH/i.test(t)?"LB watch":/EOD PLAN/i.test(t)?"EOD plan":/FAKEOUT FADE/i.test(t)?"EOD fade":/FINAL 20/i.test(t)?"Final 20":/max pain/i.test(t)?"Max pain":null;
       ms=((botRes&&botRes.chart&&botRes.chart.marks)||[]).map(m=>{ const tt=Math.round(m.at/1000)+chartOff, mm=Math.floor(tt/60)%1440;
-        const key=Math.floor(tt/86400)*86400+(570+Math.floor((mm-570-1)/N)*N)*60, up=m.dir==="bull";
-        return {time:key,position:up?"belowBar":"aboveBar",color:up?win:loss,shape:up?"arrowUp":"arrowDown",
-          text:String(m.title).split(/[▲▼·|]/)[0].replace(/[^\x20-\x7E]/g,"").replace(/SPX\s*/,"").replace(/\s+/g," ").trim().slice(0,22)}; })
+        const key=Math.floor(tt/86400)*86400+(570+Math.floor((mm-570-1)/N)*N)*60, up=m.dir==="bull", lb=lbName(String(m.title||""));
+        if(!m.dir) return {time:key,position:"aboveBar",color:"#f5a524",shape:"circle",text:lb||"LB"};
+        return {time:key,position:up?"belowBar":"aboveBar",color:lb?"#f5a524":up?win:loss,shape:up?"arrowUp":"arrowDown",
+          text:lb||String(m.title).split(/[▲▼·|]/)[0].replace(/[^\x20-\x7E]/g,"").replace(/SPX\s*/,"").replace(/\s+/g," ").trim().slice(0,22)}; })
         .filter(m=>times.has(m.time)).sort((a,b)=>a.time-b.time); }
     spxSeries.setMarkers(ms);
-    note.textContent=`${chTf} · ${out.length} candles · ATR levels: ${mode==="none"?"off":mode} · ribbon 8/13/21/48/200 (21 green = fast cloud up) · oscillator grey = compression`
-      +(intra?" · arrows = the bot's SPX signals":"")+" · ✏️ Draw level: click a price, the bot uses it as one of your key levels";
+    note.textContent=`${chTf} · ${out.length} candles · ATR levels: ${mode==="none"?"off":mode}${cfg.warp?` · Time Warp ${cfg.warp} ribbon (thick)`:""}${cfg.kc?" · ±3 ATR Keltner":""} · 21 green = fast cloud up · oscillator grey = compression`
+      +(intra?" · arrows = the bot's SPX signals, orange = leaderboard / EOD":"")+" · ➖ Level / 📐 Trendline: the bot uses your lines as key levels";
     if(!liveTimer) liveTimer=setInterval(liveTick,5000);
     } finally { chBusy=false; }
   }
@@ -1154,13 +1201,13 @@
     if(/Sat|Sun/.test(g("weekday"))||mins<570||mins>=960) return;
     let j=null; try{ const r=await fetch("/api/bot/live"); j=r.ok?await r.json():null; }catch(e){}
     if(!j||!j.ok||!(j.last>0)) return;
-    const last=chartOut[chartOut.length-1], N={"1m":1,"3m":3,"10m":10,"1h":60}[chTf];
+    const last=chartOut[chartOut.length-1], N={"1m":1,"3m":3,"10m":10,"1h":60,"4h":240}[chTf];
     if(N){ const tt=Math.round(Date.now()/1000)+chartOff, mm=Math.floor(tt/60)%1440, key=Math.floor(tt/86400)*86400+(570+Math.floor((mm-570)/N)*N)*60;
       if(key<last.time) return;
       if(key===last.time){ last.high=Math.max(last.high,j.last); last.low=Math.min(last.low,j.last); last.close=j.last; spxSeries.update({...last}); }
       else { const nb={time:key,open:last.close,high:Math.max(last.close,j.last),low:Math.min(last.close,j.last),close:j.last}; chartOut.push(nb); spxSeries.update({...nb}); } }
     else { last.high=Math.max(last.high,j.last); last.low=Math.min(last.low,j.last); last.close=j.last; spxSeries.update({...last}); }
-    const n=$("#spxChartNote"); if(n) n.textContent="● live "+j.last.toFixed(2)+" · "+n.textContent.replace(/^● live [\d.]+ · /,"");
+    const n=$("#spxChartNote"); if(n) n.textContent=n.textContent.replace(/^● live [\d.]+ · /,"")&&("● live "+j.last.toFixed(2)+" · "+n.textContent.replace(/^● live [\d.]+ · /,""));
   }
   loadMine();
   function renderBot(){
