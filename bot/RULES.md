@@ -667,6 +667,25 @@ time window, setup type, score band, delta, and exit reason, plus estimated vs a
 - It calculates the indicators itself from Schwab's candles; compare its levels with your thinkorswim chart before trusting them.
 - Planned loss is not a guarantee: fast markets can blow through a stop.
 
+## **NEW** Pullback hold + exit audit (11/18, paper only)
+
+- **Hold score (0-6)**, checked every tick on an open trade:
+  - 10m cloud with the trade;
+  - VWAP side;
+  - shallow pullback (kept half the move, or holding the 3m 21 EMA);
+  - 0DTE flow still leads;
+  - room before the call/put wall;
+  - negative GEX. Non-SPX tickers get "before 1 PM" instead of the two GEX checks.
+- **"Pullback-tolerant" challenger.**
+  - With a score of 4+, these soft exits are held instead of sold: 1m cloud against while red, 3m cloud against, the signal's SPX stop, time stop. The +60% tight trail stays at the looser trail.
+  - When a soft exit is held, a structure stop goes just past the pullback's low (high for puts). A new high clears it. The trade sells if the structure stop breaks or the score falls under 3.
+  - Never overridden: −30% max premium stop, daily limits, no-red stop, +100% lock, opposite signal, 3:59 close.
+- **Main account.** It only gets this if the challenger wins the normal 20-session contest.
+- **Exit audit.** Every SPX exit on the main account and the data collector is followed for 60 minutes after the sale. Each night, "sold" is compared with "held 30 / 60 min" for each rule and score.
+  - A soft exit loses its override when holding with a high score lost money over 30+ cases.
+  - It gets it back when that changes.
+- **Test.** `node scripts/pbhold-sim.mjs` runs an offline test.
+
 ## SPX greek exposure board (journal sidebar, every minute)
 
 - Per strike, 0-3 day expirations, 40 strikes around spot: **GEX** (gamma × OI × 100 × spot² × 1%, calls +, puts −), **DEX** ($ delta),

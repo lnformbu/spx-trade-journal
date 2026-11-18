@@ -35,6 +35,31 @@ const rootOf = (contract) => String((contract && contract.symbol) || "").split("
 // which option underlyings get paper traded: wrangler.toml PAPER_TICKERS (default "$SPX"; add e.g. ",TSLA" later)
 const paperTicker = (env, contract) => String(env.PAPER_TICKERS || "$SPX").split(",").map((s) => s.trim().replace("$", "")).includes(rootOf(contract));
 
+// ---- pullback hold score (user 11/18): a pullback inside a trade that is still working, or a real reversal? ----
+// Six checks, 1 point each. In the "pullback-tolerant" style a SOFT exit (below) is overridden when the score is HOLD_MIN+:
+// the trade is held with a structure stop just past the pullback's extreme instead. The −30% premium stop, the daily limits,
+// the no-red stop, +100% lock, opposite signal and the 3:59 close are never overridden.
+export const SOFT_EXITS = { struct1: "1m cloud against while red", struct3: "3m cloud against", ustop: "signal's SPX stop", time: "time stop", trail85: "tight trail (+60%, keep 85%)" };
+export const HOLD_MIN = 4;
+export function holdScore(pos, X, u, bull) {
+  const why = [], tk = pos.under, L = Object.fromEntries((X.kl[tk] || []).map(([n, v]) => [n, v]));
+  if (u == null) return { score: 0, why };
+  if (X.tf10[tk] === (bull ? "bullish" : "bearish")) why.push("10m cloud with the trade");
+  if (L.VWAP != null && (bull ? u >= L.VWAP : u <= L.VWAP)) why.push(bull ? "above VWAP" : "below VWAP");
+  const best = pos.bestU ?? pos.uEntry, run = bull ? best - pos.uEntry : pos.uEntry - best, back = bull ? best - u : u - best, e21 = L["3m EMA 21"];
+  if ((run > Math.abs(pos.uEntry) * 0.0004 && back <= 0.5 * run) || (e21 != null && (bull ? u >= e21 : u <= e21))) why.push("shallow pullback (holding half the move / 3m 21 EMA)");
+  const F = X.flow;
+  if (F && (bull ? F.calls >= F.puts && !F.putSpike : F.puts >= F.calls && !F.callSpike)) why.push(`0DTE ${bull ? "call" : "put"} flow still leads`);
+  // smart money / dealer positioning (SPX board): room before the wall in the trade's way; negative GEX = moves extend
+  const G = X.gx;
+  if (G && tk === "$SPX") {
+    const wall = bull ? G.callWall : G.putWall;
+    if (wall == null || (bull ? wall - u : u - wall) > u * 0.001) why.push("room before the " + (bull ? "call" : "put") + " wall");
+    if (G.gex != null && G.gex < 0) why.push("negative GEX (moves extend)");
+  } else if (X.t.min < 780) why.push("before 1 PM");
+  return { score: why.length, why };
+}
+
 // ---- trading styles ----
 export const BASE_STYLE = { name: "Your rules", traits: [], delta: null, window: "rules", sizing: "full" };
 export const TEMPLATES = [
@@ -49,6 +74,8 @@ export const TEMPLATES = [
   { id: "morning", name: "Mornings only (9:33-11:30)", apply: (c) => ({ ...c, window: "morning" }) },
   { id: "edge", name: "Size down weaker setups", apply: (c) => ({ ...c, sizing: "edge" }) },
   // replay with every rule, one position at a time: core playbook 162 trades 57% +0.32R PF 1.84 vs all families +0.16R PF 1.35
+  // user 11/18: pullbacks were being sold (1m cloud exits: +55% if held 30 min); hold through them when the hold score says the trade still works
+  { id: "pbhold", name: "Pullback-tolerant (hold score overrides soft exits)", apply: (c) => ({ ...c, params: { ...c.params, pbTol: true } }) },
   { id: "core", name: "Core playbook only", apply: (c) => ({ ...c, fams: "core" }) },
 ];
 export function championCfg(model) {
@@ -165,6 +192,10 @@ async function stepBook(b, cfg, X) {
     b.open = b.positions[0] || null;
     log(b, t, pnl >= 0 ? "win" : "loss", p.label, `${why} · ${usd(pnl)}`);
     if (cfg.collect) X.dataClosed.push({ ...trade, blocked: p.blocked || null });
+    // exit audit (11/18): follow the sold option for 60 minutes -> nightly learning compares "sold" with "held"
+    if ((champion || cfg.collect) && p.under === "$SPX") X.audit.push({ id: p.id, book: champion ? "acct" : "data", symbol: p.symbol, fam: p.fam, dir: p.dir, entry: p.entry,
+      rule: p.rule || null, hs: p.hs ? p.hs.score : null, hsWhy: p.hs ? p.hs.why : [], exitPct: r3(price / p.entry - 1), bestPct: r3(p.bestBid / p.entry - 1),
+      date: t.date, at: now, until: now + 60 * 60000, after: [], best: r3(price / p.entry - 1) });
     if (!champion) { b.recent = [{ date: t.date, et: p.et, label: p.label, signal: p.signal, pnl, R: trade.R, why }, ...(b.recent || [])].slice(0, 30); return; }
     X.closed.push(trade);
     X.shadow.push({ id: p.id, symbol: p.symbol, until: now + 30 * 60000 });
@@ -226,6 +257,10 @@ async function stepBook(b, cfg, X) {
       pos.path.push(r3(bid / E - 1));
       if (bid > pos.bestBid) { pos.bestBid = bid; pos.bestAt = now; }
       const pct = bid / E - 1, bestPct = pos.bestBid / E - 1;
+      const hs = holdScore(pos, X, u, bull);
+      pos.hs = hs;
+      const tolMode = !!P.pbTol && (!pos.manual || pos.botManaged), offR = (X.model && X.model.exitStats && X.model.exitStats.off) || {};
+      const mayHold = (rule) => tolMode && !offR[rule] && hs.score >= HOLD_MIN && pct > -P.stopPct;
       // you moved the stop yourself (chart / ticket): the automatic profit locks below stop ratcheting it until you hand it back (✕)
       const yourStop = pos.manualStop ? pos.stop : null;
       if (bestPct >= P.bePct) pos.stop = Math.max(pos.stop, E);
@@ -245,13 +280,22 @@ async function stepBook(b, cfg, X) {
       }
       if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
       // user rule (11/17): once the option has been up 60%+, tight trailing stop: keep 85% of the best gain (every style, manual trades too)
-      if (bestPct >= 0.6) pos.stop = Math.max(pos.stop, r2(E + 0.85 * (pos.bestBid - E)));
+      if (bestPct >= 0.6) {
+        if (mayHold("trail85")) { if (!pos.trail85held) { pos.trail85held = true; log(b, t, "note", pos.label, `holding the +60% tight trail loose (hold score ${hs.score}/6: ${hs.why.join(", ")})`); } }
+        else pos.stop = Math.max(pos.stop, r2(E + 0.85 * (pos.bestBid - E)));
+      }
       // user rule (11/17): once it has doubled (+100%), it never gives that back: the stop sits at +100% at least
       if (bestPct >= 1) pos.stop = Math.max(pos.stop, r2(E * 2));
       if (yourStop != null) pos.stop = yourStop;
       const opp = cfg.collect ? null : candidates.find((c) => !c.blocked && group(c.sym) === group(pos.under) && c.dir !== pos.dir && decide(model, c).ok);
       // rejected at a level: the ticker reached a key level beyond the entry, then gave back half the move while the option is green
-      if (u != null) pos.bestU = bull ? Math.max(pos.bestU ?? u, u) : Math.min(pos.bestU ?? u, u);
+      if (u != null) {
+        const nb = bull ? Math.max(pos.bestU ?? u, u) : Math.min(pos.bestU ?? u, u);
+        // pullback extreme since the last new high (low for puts); a new high ends the pullback and clears the structure stop
+        if (nb !== pos.bestU || pos.pbX == null) { pos.pbX = u; if (nb !== pos.bestU && pos.sStop != null) { pos.sStop = null; log(b, t, "note", pos.label, "trade resumed (new high): structure stop cleared"); } }
+        else pos.pbX = bull ? Math.min(pos.pbX, u) : Math.max(pos.pbX, u);
+        pos.bestU = nb;
+      }
       const tol = Math.abs(pos.uEntry) * 0.0004, run = bull ? pos.bestU - pos.uEntry : pos.uEntry - pos.bestU;
       const lvl = run > tol ? (X.kl[pos.under] || []).filter(([, v]) => (bull ? v > pos.uEntry + tol && pos.bestU >= v - tol : v < pos.uEntry - tol && pos.bestU <= v + tol))
         .sort((a, z) => (bull ? z[1] - a[1] : a[1] - z[1]))[0] : null;
@@ -268,23 +312,39 @@ async function stepBook(b, cfg, X) {
       const struct3 = grace && s3 && s3.up !== bull && (pos.tf3up === bull || s3.run * 3 < heldMin);
       const struct1 = grace && s1 && s1.up !== bull && Math.min(s1.run, Math.floor(heldMin)) >= 3 && red;
       const F = X.flow, flowAgainst = grace && F && red && (bull ? F.putSpike && F.puts > F.calls : F.callSpike && F.calls > F.puts);
-      let why = null;
+      let why = null, rule = null;
       const yS = pos.userStop, yT = pos.userTarget;
       if (u != null && yS != null && (bull ? u <= yS : u >= yS)) why = `your stop (${pos.under.replace("$", "")} ${r2(u)} through ${yS})`;
       else if (u != null && yT != null && (bull ? u >= yT : u <= yT)) why = `your target (${pos.under.replace("$", "")} ${yT} reached)`;
       else if (bid <= pos.stop && pos.manualStop) why = `your option stop ($${pos.stop})`;
       else if (bid <= pos.stop) why = pos.stop > E ? (bestPct >= 1 && pos.stop <= r2(E * 2) ? `+100% lock (was up +${Math.round(bestPct * 100)}%, kept the double)` : bestPct >= 0.6 ? `tight trailing stop (was up +${Math.round(bestPct * 100)}%)` : bestPct >= GREEN_AT && pos.stop <= r2(E * (1 + GREEN_FLOOR) + (2 * FEE) / 100) ? `no-red stop (was up +${Math.round(bestPct * 100)}%, kept it green)` : pos.t1 || pos.bestBid / E - 1 >= (P.trailFrom ?? 9) ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
-      else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
+      else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) rule = "ustop", why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
       else if (rejected) why = `rejected at ${lvl[0]} ${lvl[1]}`;
       else if (flipped) why = "10m Saty cloud flipped against the trade";
-      else if (struct3) why = "structure: the 3m cloud turned against the trade";
-      else if (struct1) why = "structure: 1m cloud against the trade for 3+ min while red";
+      else if (struct3) rule = "struct3", why = "structure: the 3m cloud turned against the trade";
+      else if (struct1) rule = "struct1", why = "structure: 1m cloud against the trade for 3+ min while red";
       else if (flowAgainst) why = `flow: 0DTE ${bull ? "put" : "call"} volume spiking against the trade while red`;
       else if (evSoon) why = `closing before ${evSoon.name} at ${hhmm(evSoon.min)}`;
-      else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain && pct <= 0) why = `time stop (still red after ${P.timeStopMin} min)`;   // only a LOSING trade is timed out (11/16: two green time-stops ran to +31% / +45%)
+      else if (!pos.t1 && now - pos.at >= P.timeStopMin * 60000 && bestPct < P.timeStopGain && pct <= 0) rule = "time", why = `time stop (still red after ${P.timeStopMin} min)`;   // only a LOSING trade is timed out (11/16: two green time-stops ran to +31% / +45%)
       else if (pos.t1 && now - pos.bestAt >= P.stallMin * 60000) why = `runner stalled ${P.stallMin} min`;
       else if (opp) why = "opposite signal: " + opp.title;
       else if (t.min >= 959) why = "3:59 close";
+      if (why && !rule) rule = /premium stop/.test(why) ? "premium" : /no-red/.test(why) ? "nored" : /tight trailing/.test(why) ? "trail85" : /\+100% lock/.test(why) ? "lock100"
+        : /trailing|locked-profit/.test(why) ? "trail" : /breakeven/.test(why) ? "breakeven" : /rejected/.test(why) ? "rejected" : /10m Saty/.test(why) ? "flip10"
+        : /^flow/.test(why) ? "flow" : /^opposite/.test(why) ? "opposite" : /3:59/.test(why) ? "close" : /^your /.test(why) ? "yours" : /target/.test(why) ? "target" : "other";
+      // PULLBACK-TOLERANT: a soft exit while the hold score is high -> hold, with a structure stop just past the pullback extreme
+      if (why && rule in SOFT_EXITS && rule !== "trail85" && mayHold(rule) && u != null) {
+        if (pos.sStop == null) {
+          const buf = Math.abs(u) * 0.0004, xp = pos.pbX ?? u;
+          pos.sStop = r2(bull ? Math.min(xp, u) - buf : Math.max(xp, u) + buf);
+          pos.overrides = [...(pos.overrides || []), { et: hhmm(t.min), rule, score: hs.score, sStop: pos.sStop }];
+          log(b, t, "note", pos.label, `held through "${SOFT_EXITS[rule]}" (hold score ${hs.score}/6: ${hs.why.join(", ")}); structure stop ${pos.under.replace("$", "")} ${pos.sStop}`);
+        }
+        why = null; rule = null;
+      }
+      if (!why && pos.sStop != null && u != null && (bull ? u <= pos.sStop : u >= pos.sStop)) { rule = "sstop"; why = `structure stop (pullback ${bull ? "low" : "high"} ${pos.sStop} broke)`; }
+      else if (!why && pos.sStop != null && hs.score < HOLD_MIN - 1) { rule = "hsdrop"; why = `pullback hold ended (hold score fell to ${hs.score}/6)`; }
+      pos.rule = rule;
       if (why && pos.manual && !pos.botManaged && why !== "3:59 close" && !/^your /.test(why) && !(bid <= pos.stop && pos.stop > E)) why = null;   // you manage your own trade; profit-protect stops still apply
       if (why) sell(pos, pos.qtyOpen, bid, why);
     }
@@ -449,10 +509,14 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     ...books.flatMap((b) => [...(b.positions || (b.open ? [b.open] : [])).flatMap((x) => [x.symbol, x.under]), ...(b.pending || []).flatMap((p) => [p.sym, p.contract.symbol])]),
     ...acct.shadow.map((s) => s.symbol),
   ])];
+  const audit = (await readJSON(env, "paper:audit")) || { open: [] };
+  for (const a of audit.open) if (!syms.includes(a.symbol)) syms.push(a.symbol);
   const Q = await quotes(schwab, token, syms);
+  const gq = await readJSON(env, "greeks:spx");
+  const gx = gq && gq.date === t.date ? { callWall: gq.callWall, putWall: gq.putWall, flip: gq.flip, gex: gq.totals && gq.totals.gex } : null;
   const chains = {};
   const X = {
-    env, candidates, events, kl, tf10, tf1, tf3, flow, Q, model, now, t, patience, closed: [], dataClosed: [], messages: [], shadow: acct.shadow,
+    env, candidates, events, kl, tf10, tf1, tf3, flow, gx, Q, model, now, t, patience, closed: [], dataClosed: [], messages: [], shadow: acct.shadow, audit: [],
     px: (sym) => (Q[sym] ? Q[sym].last ?? Q[sym].mark : null),
     // SPX 0DTE chain for the delta styles, fetched at most once per side per minute
     chain: (dir) => (chains[dir] = chains[dir] || (async () => {
@@ -482,6 +546,18 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     try { await stepBook(x.book, x.cfg, { ...X, champion: false }); } catch (e) { console.error("challenger", x.cfg.id, e); }
   }
   try { await stepBook(data, dataCfg, { ...X, candidates: allCands, champion: false }); } catch (e) { console.error("data collector", e); }
+  // exit audit: one sample a minute of each sold option's bid for 60 minutes after the exit; finished ones go to "paper:auditlog"
+  {
+    for (const a of audit.open) {
+      const q = Q[a.symbol], m = Math.round((now - a.at) / 60000);
+      if (q && q.bid >= 0 && (!a.after.length || a.after.at(-1)[0] < m)) { const v = r3(q.bid / a.entry - 1); a.after.push([m, v]); a.best = Math.max(a.best, v); }
+      if (now >= a.until || t.min >= 960) a.done = true;
+    }
+    const done = audit.open.filter((a) => a.done);
+    audit.open = [...audit.open.filter((a) => !a.done), ...X.audit];
+    if (done.length) { const lg = (await readJSON(env, "paper:auditlog")) || { items: [] }; lg.items.push(...done.map(({ done: _d, until: _u, ...a }) => a)); lg.items = lg.items.slice(-3000); await writeJSON(env, "paper:auditlog", lg); }
+    if (done.length || X.audit.length || audit.open.length) await writeJSON(env, "paper:audit", audit);
+  }
   // per-session results for the champion-vs-challenger comparison
   const rec = (id, b) => { const h = (ch.hist[id] = ch.hist[id] || {}); h[t.date] = { pnl: b.day.pnl, trades: b.day.trades, gw: b.day.gw, gl: b.day.gl }; };
   rec("champion", acct);
@@ -571,6 +647,30 @@ export async function runLearning(env, deps, { force = false, report = false, qu
   const { model, changes } = learn(prev, stats.items, [...trades.items, ...dataTrades.items.map((x) => ({ ...x, data: true }))], t.date, {
     replay: replayData.items, training: lib.items.filter((x) => x.result), feedback: fbRes.items || [],
   });
+
+  // exit audit (11/18): for every exit rule, "sold" vs "held 30 / 60 more minutes", split by the hold score at the exit.
+  // A soft exit loses its override when holding with a high score has LOST money over 30+ cases; it gets marked "proven" when holding won.
+  try {
+    const lg = (await readJSON(env, "paper:auditlog")) || { items: [] };
+    const at = (a, m) => { let v = null; for (const [k, x] of a.after) { if (k <= m) v = x; else break; } return v; };
+    const R = {};
+    for (const a of lg.items) {
+      if (!a.rule) continue;
+      const h30 = at(a, 30), h60 = at(a, 60); if (h30 == null) continue;
+      const k = a.rule + (a.hs != null && a.hs >= HOLD_MIN ? ":high" : ":low");
+      const x = (R[k] = R[k] || { n: 0, exit: 0, h30: 0, h60: 0, best: 0, win30: 0 });
+      x.n++; x.exit += a.exitPct; x.h30 += h30; x.h60 += h60 ?? h30; x.best += a.best; if (h30 > a.exitPct) x.win30++;
+    }
+    for (const x of Object.values(R)) { for (const f of ["exit", "h30", "h60", "best"]) x[f] = r3(x[f] / x.n); x.edge = r3(x.h30 - x.exit); x.win30 = r2(x.win30 / x.n); }
+    const before = (prev.exitStats && prev.exitStats.off) || {}, off = {}, proven = {};
+    for (const r of Object.keys(SOFT_EXITS)) {
+      const x = R[r + ":high"];
+      if (x && x.n >= 30 && x.edge < 0) off[r] = true;
+      if (x && x.n >= 30 && x.edge >= 0.05) proven[r] = true;
+      if (!!off[r] !== !!before[r]) changes.push(off[r] ? `Pullback hold: stop overriding "${SOFT_EXITS[r]}" (holding lost ${Math.round(-x.edge * 100)}% over ${x.n} cases)` : `Pullback hold: "${SOFT_EXITS[r]}" may be overridden again`);
+    }
+    model.exitStats = { at: t.date, n: lg.items.length, rules: R, off, proven };
+  } catch (e) { console.error("exit audit", e); }
 
   // a winning challenger takes over the paper account (its style becomes the champion; a new set of challengers starts)
   const ch = await readJSON(env, "paper:challengers");
