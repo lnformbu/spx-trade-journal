@@ -447,6 +447,8 @@ export default {
       if (t.min >= 970 && t.min <= 990) ctx.waitUntil(runLearning(env, deps, { t }).catch((e) => console.error("learning", e)));
       // daily swing scan (calls only), after the close
       if (t.min >= 975 && t.min <= 995) ctx.waitUntil(runSwing(env, deps, { t }).catch((e) => console.error("swing", e)));
+      // daily bot trade review with chart pictures -> #spx-training thread (user 11/18), 4:40-5:40 PM ET, once a day
+      if (t.min >= 1000 && t.min <= 1060) ctx.waitUntil(import("./review.js").then(({ runReview }) => runReview(env, deps, { date: t.date })).catch((e) => console.error("review", e)));
     }
   },
   // private: only with the admin key (for checks and testing)
@@ -479,12 +481,14 @@ export default {
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
     // test mode for today (user 11/18): ?on=1 / ?on=0 (the journal's 🧪 button writes the same key)
     if (url.pathname === "/paper/test") { const on = url.searchParams.get("on"); if (on != null) await writeJSON(env, "paper:test", { on: on === "1", date: et(Date.now()).date, at: Date.now() }); return json((await readJSON(env, "paper:test")) || { on: false }); }
+    // daily trade review now: /review?date=YYYY-MM-DD (default today) &force=1 to post again
+    if (url.pathname === "/review") { const { runReview } = await import("./review.js"); return json(await runReview(env, deps, { date: url.searchParams.get("date") || et(Date.now()).date, force: url.searchParams.get("force") === "1", dry: url.searchParams.get("dry") === "1" })); }
     // leaderboard post test: posts the current SPX leaderboard + greek exposure (with picture) to the copy channel now
     if (url.pathname === "/lb-post-test") { const { lbChange } = await import("./lbpost.js"); const g = await readJSON(env, "greeks:spx"); return json(await lbChange(env, deps, g, et(Date.now()), Date.now(), { force: true })); }
     // chart picture test: posts nothing unless &post=1; returns the PNG
     if (url.pathname === "/shot-test") {
       const { chartShot } = await import("./shot.js");
-      let f; try { f = await chartShot(env, deps, { mode: url.searchParams.get("mode") || "", mv: url.searchParams.get("mv") || "", hl: url.searchParams.get("hl") || "", dir: url.searchParams.get("dir") || "bull", e: url.searchParams.get("e") || "", s: url.searchParams.get("s") || "", t: url.searchParams.get("t") || "", label: "TEST chart picture" }); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 500) }); }
+      let f; try { f = await chartShot(env, deps, { ...Object.fromEntries(url.searchParams), mode: url.searchParams.get("mode") || "", mv: url.searchParams.get("mv") || "", hl: url.searchParams.get("hl") || "", dir: url.searchParams.get("dir") || "bull", e: url.searchParams.get("e") || "", s: url.searchParams.get("s") || "", t: url.searchParams.get("t") || "", label: "TEST chart picture" }); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 500) }); }
       if (!f) return json({ ok: false, error: "no BROWSER binding or JOURNAL_URL" });
       if (url.searchParams.get("post") === "1") {   // returns Discord's answer so a failed upload shows
         const r = await post(env, { title: "🧪 TEST chart picture", description: "Chart pictures are on for SPX paper buys and LB shakeout alerts.", color: 0x3b82f6 }, null, f);

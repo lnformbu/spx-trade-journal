@@ -1591,10 +1591,22 @@
     }catch(e){ console.error("shot",e); }
     // zoom to the last ~2 hours (1m: 1 hour) and fit the price range to the candles plus entry / stop / target
     try{
-      const vals=["e","s","t"].map(n).filter(v=>v!=null);
+      const n=k=>{ const v=parseFloat(SHOTQ.get(k)); return isFinite(v)?v:null; };
+      const vals=["e","s","t","x"].map(n).filter(v=>v!=null);
       spxSeries.applyOptions({autoscaleInfoProvider:orig=>{ const r=orig(); if(!r||!vals.length) return r; return {...r,priceRange:{minValue:Math.min(r.priceRange.minValue,...vals),maxValue:Math.max(r.priceRange.maxValue,...vals)}}; }});
       const N=chartOut.length, ts=spxChart.timeScale(), bars=chTf==="1m"?60:chTf==="3m"?40:30;   // 1m: the last hour
-      if(N) ts.setVisibleLogicalRange({from:N-bars,to:N+(n("t")!=null?24:8)});   // room on the right for the projected move
+      const from=n("from"), to=n("to");
+      if(from!=null&&to!=null&&N){
+        // review mode (daily trade review): the trade's own window, BUY / SOLD marked on the candles (times are real unix seconds)
+        const at=sec=>{ let best=null; for(const b of chartOut){ if(typeof b.time==="number"&&b.time-chartOff<=sec) best=b.time; else if(typeof b.time==="number") break; } return best; };   // chart time = real + chartOff
+        ts.setVisibleRange({from:from+chartOff,to:to+chartOff});
+        const bull=SHOTQ.get("dir")!=="bear", ms=[], te=at(n("et")), tx=at(n("xt"));
+        if(te!=null) ms.push({time:te,position:bull?"belowBar":"aboveBar",color:"#3b82f6",shape:bull?"arrowUp":"arrowDown",text:SHOTQ.get("bl")||"BUY"});
+        if(tx!=null) ms.push({time:tx,position:bull?"aboveBar":"belowBar",color:"#f5c542",shape:bull?"arrowDown":"arrowUp",text:SHOTQ.get("xl")||"SOLD"});
+        ms.sort((a,b)=>a.time-b.time); spxSeries.setMarkers(ms);
+        const x=n("x"); if(x!=null) spxSeries.createPriceLine({price:x,color:"#f5c542",lineWidth:1,lineStyle:2,axisLabelVisible:true,title:"EXIT"});
+      }
+      else if(N) ts.setVisibleLogicalRange({from:N-bars,to:N+(n("t")!=null?24:8)});   // room on the right for the projected move
     }catch(e){ console.error("shot zoom",e); }
     requestAnimationFrame(()=>requestAnimationFrame(()=>{ shotProject(); document.documentElement.dataset.shot="ready"; }));
   }
