@@ -74,6 +74,37 @@ function cardEmbed(a, footer) {
   return { ...base, author: { name: head.slice(0, 250) }, description: (lvls + (rest ? "\n\n" + rest : "")).slice(0, 4000) };
 }
 
+// ---- market-shift alerts for the second group (user 11/18: "so winning trades don't get mixed into junk") ----
+// Trend mode start/end, GEX regime change, ribbon flip + conviction, early reversal. Only the ones that pass go to COPY_CHANNEL_ID
+// (with a picture). Returns the reason it passed, or null.
+//  - choppy (CHOP guard on) -> nothing except "trend ended"; VIX trending against -> nothing; at most 5 a day
+//  - ribbon flip / early reversal: once the family has a real record (20+ scored, 3+ days) it must be +0.10R or better with 40%+ winners;
+//    until then only A-context ones: nothing against it (trend, 10m phase, daily phase, VIX), before 2 PM, not a momentum chase, 1m only
+//  - GEX regime: not again within 60 minutes (flips whipsaw); trend ended: only after its trend-mode post went out
+const SHIFT_FAMS = new Set(["trend", "trendend", "gexflip", "conv1m", "conv3m", "rev1m"]);
+export function shiftGate(a, fam, st, model, t, now) {
+  if (!SHIFT_FAMS.has(fam) || a.vixAgainst) return null;
+  const S = (st.shiftSent = st.shiftSent && st.shiftSent.date === t.date ? st.shiftSent : { date: t.date, n: 0, last: {} });
+  if (S.n >= 5) return null;
+  const chop = st.chop && Object.values(st.chop).some((x) => x && x.on && now - x.at < 6 * 3600e3);
+  if (chop && fam !== "trendend") return null;
+  let why = null;
+  if (fam === "trend") why = "trend mode: right 72-79% of the time over the next 30-60 min in the replay";
+  else if (fam === "trendend") why = S.last.trend ? "the trend-mode call posted earlier has ended" : null;
+  else if (fam === "gexflip") why = !S.last.gexflip || now - S.last.gexflip > 60 * 60000 ? "dealer positioning flipped (gamma flip crossed)" : null;
+  else {
+    const F = model && model.fams && model.fams[fam];
+    if (F && F.n >= 20 && F.days >= 3) why = F.r >= 0.1 && F.win >= 0.4 ? `proven: ${F.r >= 0 ? "+" : ""}${F.r}R, ${Math.round(F.win * 100)}% winners over ${F.n} scored signals` : null;
+    else {
+      const c = a.ctx || {}, against = ["trend", "phase", "phaseD"].some((k) => c[k] === "against") || c.vix === false;
+      const ok = !against && t.min < 840 && fam !== "conv3m" && !/MOMENTUM/.test(a.title || "");
+      why = ok ? `A-context: nothing against it (trend, 10m + daily phase, VIX), before 2 PM (record still building: ${F ? F.n : 0} scored)` : null;
+    }
+  }
+  if (why) { S.n++; S.last[fam] = now; }
+  return why;
+}
+
 // copy of an alert to a second channel (COPY_CHANNEL_ID); never a reply, failures don't affect the main post
 async function postCopy(env, embed, file = null) {
   if (!env.COPY_CHANNEL_ID || !env.DISCORD_BOT_TOKEN) return null;
@@ -305,7 +336,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
 
   const found = [];
   const errors = [];
-  const paperStyle = ((await readJSON(env, "paper:model")) || {}).style || null;
+  const paperModel = (await readJSON(env, "paper:model")) || {}, paperStyle = paperModel.style || null;
   // your weekly bigger-picture thesis (key levels + scenarios), saved from #spx-training
   const thesis = await readJSON(env, "bot:thesis");
   // levels you draw on the journal's chart (Bot desk): [{ price, label, at }], treated like your thesis levels (zone USER_ZONE)
@@ -1773,15 +1804,19 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (!dry && !spxOnly) alert.quiet = true;
     if (!dry && spxOnly) {
       // LB shakeout alerts (user 11/18): picture of the chart + SPX greek exposure + leaderboard (journal ?shot=1&mode=lb)
-      const lbPic = /^lb(inc|shake):/.test(a.key) ? await chartShot(env, { writeJSON }, { mode: "lb", dir: a.track ? a.track.dir : "", e: a.track ? a.track.entry : "", s: a.track ? a.track.stop : "", t: a.track ? a.track.target : "",
+      const shiftWhy = shiftGate(a, famOf(a.key), st, paperModel, t, now);
+      if (shiftWhy) a.pic = { ...(a.pic || {}), mv: a.pic && a.pic.mv ? a.pic.mv : a.track && a.track.target != null ? `Expected shift ${a.track.dir === "bull" ? "UP" : "DOWN"} → ${a.track.target}` : String(a.title || "").replace(/^\W+/, "").split("·")[0].trim() };
+      const lbPic = /^lb(inc|shake):/.test(a.key) || shiftWhy ? await chartShot(env, { writeJSON }, { mode: "lb", dir: a.track ? a.track.dir : "", e: a.track ? a.track.entry : "", s: a.track ? a.track.stop : "", t: a.track ? a.track.target : "",
         label: a.title.replace(/^\W+/, "").split(":")[0], ...(a.pic || {}) }).catch((e) => { errors.push("lb picture: " + e.message); return null; }) : null;
       const r = await post(env, cardEmbed(a, `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot`), null, lbPic)
         .catch((e) => ({ ok: false, status: e.message }));
       // what the copy channel gets (wrangler COPY_FILTER): "lb" = leaderboard shakeout alerts only (incoming + watch),
       // "spx" = every SPX alert (SPX plan / VIX alerts included), "all" = everything
       const copyMode = env.COPY_FILTER || "lb";
-      const copyOk = copyMode === "all" ? true : copyMode === "spx" ? a.sym === "$SPX" || /\bSPX\b/.test(a.title) : /^lb(inc|shake):/.test(a.key);
-      const cp = !copyOk ? null : await postCopy(env, cardEmbed(a, `${hhmm(t.min)} ET · SPX bot alert (copy)`), lbPic);
+      const copyOk = copyMode === "all" ? true : copyMode === "spx" ? a.sym === "$SPX" || /\bSPX\b/.test(a.title) : /^lb(inc|shake):/.test(a.key) || !!shiftWhy;
+      const ce = cardEmbed(a, `${hhmm(t.min)} ET · SPX bot alert (copy)`);
+      if (shiftWhy) ce.description = (`✅ **Passed the quality filter:** ${shiftWhy}\n\n` + (ce.description || "")).slice(0, 4000);
+      const cp = !copyOk ? null : await postCopy(env, ce, lbPic);
       if (cp && !cp.ok) errors.push("copy channel post: " + cp.status + (cp.status === 403 ? " (bot can't post there: give it Send Messages + Embed Links)" : ""));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }

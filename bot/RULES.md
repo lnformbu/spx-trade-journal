@@ -740,3 +740,10 @@ A separate paper book (D1 `paper:data`, trades in `paper:datatrades`) takes **ev
 may be open together. Same exits as the main account. Its trades feed the nightly learning at weight 1 (main paper trades weight 2)
 and the exit tuning, and export with `/export?kind=data` (pulled into `data/data.csv` by `scripts/pull-history.mjs`): a real
 option-price record of every setup for backtesting. Silent: no Discord posts.
+
+## **NEW** Market-shift alerts to the second group (11/18)
+
+- Sent to the copy channel with a 3-panel picture (chart + GEX + leaderboard, expected move drawn), only when they pass `shiftGate` (signals.js).
+- Families: trend mode start/end, GEX regime (gamma flip crossed), 1m ribbon flip + conviction, early reversal.
+- Never on a choppy day (except "trend ended"), never with VIX trending against, at most 5 a day. GEX regime at most once an hour.
+- Ribbon flip / early reversal: proven families need +0.10R and 40%+ winners over 20+ scored signals on 3+ days. Until then only A-context: nothing against it, before 2 PM, no momentum chases, 1m only.
