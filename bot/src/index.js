@@ -477,6 +477,16 @@ export default {
     if (url.pathname === "/swing") return json(url.searchParams.get("run") ? await runSwing(env, deps, { t: et(Date.now()) }) : await readJSON(env, "swing:book"));
     if (url.pathname === "/paper/data") { const d = (await readJSON(env, "paper:data")) || {}; return json({ balance: d.balance, open: (d.positions || []).map((x) => ({ label: x.label, under: x.under, qty: x.qtyOpen, entry: x.entry, stop: x.stop, et: x.et, signal: x.signal })), pending: (d.pending || []).map((x) => x.title), log: (d.log || []).slice(-25), updatedAt: d.updatedAt }); }
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
+    // test mode for today (user 11/18): ?on=1 / ?on=0 (the journal's 🧪 button writes the same key)
+    if (url.pathname === "/paper/test") { const on = url.searchParams.get("on"); if (on != null) await writeJSON(env, "paper:test", { on: on === "1", date: et(Date.now()).date, at: Date.now() }); return json((await readJSON(env, "paper:test")) || { on: false }); }
+    // chart picture test: posts nothing unless &post=1; returns the PNG
+    if (url.pathname === "/shot-test") {
+      const { chartShot } = await import("./shot.js");
+      const f = await chartShot(env, deps, { dir: url.searchParams.get("dir") || "bull", e: url.searchParams.get("e") || "", s: url.searchParams.get("s") || "", t: url.searchParams.get("t") || "", label: "TEST chart picture" });
+      if (!f) return json({ ok: false, error: "no BROWSER binding or JOURNAL_URL" });
+      if (url.searchParams.get("post") === "1") await post(env, { title: "🧪 TEST chart picture", description: "Chart pictures are on for SPX paper buys.", color: 0x3b82f6 }, null, f);
+      return new Response(f.data, { headers: { "Content-Type": "image/png" } });
+    }
     if (url.pathname === "/paper/reset-day") { await writeJSON(env, "paper:reset", { date: et(Date.now()).date, done: false }); return json({ ok: true, note: "applied on the next paper run (within a minute)" }); }
     if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));

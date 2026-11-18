@@ -34,15 +34,21 @@ async function push(env, embed) {
   await fetch("https://ntfy.sh/", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ topic: env.NTFY_TOPIC, title: String(embed.title).slice(0, 200), message: String(embed.description || "").replace(/\*\*/g, "").slice(0, 1500) || " " }) }).catch(() => {});
 }
-export async function post(env, embed, replyTo = null) {
+// file = { name: "chart.png", data: Uint8Array } (optional): shown as the embed's picture
+export async function post(env, embed, replyTo = null, file = null) {
   await push(env, embed);
-  if (env.SIGNALS_WEBHOOK) {
-    return fetch(env.SIGNALS_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Signals", embeds: [embed] }) });
+  if (file) embed = { ...embed, image: { url: "attachment://" + file.name } };
+  const payload = { embeds: [embed], ...(env.SIGNALS_WEBHOOK ? { username: "Signals" } : replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}) };
+  let body = JSON.stringify(payload), type = { "Content-Type": "application/json" };
+  if (file) {
+    body = new FormData();
+    body.append("payload_json", JSON.stringify({ ...payload, attachments: [{ id: 0, filename: file.name }] }));
+    body.append("files[0]", new Blob([file.data], { type: "image/png" }), file.name);
+    type = {};   // fetch sets the multipart boundary
   }
+  if (env.SIGNALS_WEBHOOK) return fetch(env.SIGNALS_WEBHOOK, { method: "POST", headers: type, body });
   return fetch(`https://discord.com/api/v10/channels/${env.SIGNALS_CHANNEL_ID}/messages`, {
-    method: "POST",
-    headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "Content-Type": "application/json", "User-Agent": "DiscordBot (spx-bot, 1.0)" },
-    body: JSON.stringify({ embeds: [embed], ...(replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}) }),
+    method: "POST", headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)", ...type }, body,
   });
 }
 
@@ -1746,7 +1752,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         why: (String(a.text).split("**Why:** ")[1] || "").trim() });
     }
     sent.push(alert);
-    if (!dry) {
+    // user 11/18: only SPX signals post to Discord; the other tickers are still scored, learned from and paper traded (data collector)
+    const spxOnly = a.sym === "$SPX" || /SPX/.test(a.title || "");
+    if (!dry && !spxOnly) alert.quiet = true;
+    if (!dry && spxOnly) {
       const r = await post(env, cardEmbed(a, `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot`))
         .catch((e) => ({ ok: false, status: e.message }));
       // what the copy channel gets (wrangler COPY_FILTER): "lb" = leaderboard shakeout alerts only (incoming + watch),

@@ -10,6 +10,7 @@
 // Hard limits every style keeps: max loss 15% of the account per trade, −30% stop at most, daily limits, one position, 3:59 close.
 import { hhmm } from "./levels.js";
 import { post } from "./signals.js";
+import { chartShot } from "./shot.js";
 import { decide, learn, famOf, kindFam, DEFAULT_MODEL, DEFAULT_PARAMS, FAM_NAMES, SCALP_V } from "./learn.js";
 
 const FEE = 0.65;            // Schwab, per contract per side
@@ -105,7 +106,7 @@ const log = (b, t, action, title, why) => { b.log.push({ et: hhmm(t.min), action
 function gate(b, cfg, cand, t, now, events = []) {
   const d = b.day, sb = d.startBal;
   // DATA COLLECTOR: every signal with a contract, 9:32-3:55, no risk / count / window rules (training + forward-test data)
-  if (cfg.collect) return t.min < 572 ? "before 9:32" : t.min >= 955 ? "no new entries after 3:55" : null;
+  if (cfg.collect || cfg.test) return t.min < 572 ? "before 9:32" : t.min >= 955 ? "no new entries after 3:55" : null;
   if (cand.blocked) return cand.blocked;
   if (!TRADED.has(cand.fam)) return "not a tradable setup";
   if (t.min < 573) return "before 9:33 (opening range)";
@@ -152,6 +153,7 @@ async function quotes(schwab, token, syms) {
 // One minute of one book (the champion or a challenger).
 async function stepBook(b, cfg, X) {
   const { candidates, Q, px, now, t, model, champion } = X;
+  const loud = champion || !!cfg.test, tag = cfg.test ? "🧪 TEST " : "";   // test mode (11/18): its trades post to Discord too
   const P = { ...DEFAULT_PARAMS, ...cfg.params };
   P.stopPct = Math.min(0.3, P.stopPct || 0.3);
   if (!b.day || b.day.date !== t.date) freshDay(b, t);
@@ -196,7 +198,15 @@ async function stepBook(b, cfg, X) {
     if ((champion || cfg.collect) && p.under === "$SPX") X.audit.push({ id: p.id, book: champion ? "acct" : "data", symbol: p.symbol, fam: p.fam, dir: p.dir, entry: p.entry,
       rule: p.rule || null, hs: p.hs ? p.hs.score : null, hsWhy: p.hs ? p.hs.why : [], exitPct: r3(price / p.entry - 1), bestPct: r3(p.bestBid / p.entry - 1),
       date: t.date, at: now, until: now + 60 * 60000, after: [], best: r3(price / p.entry - 1) });
-    if (!champion) { b.recent = [{ date: t.date, et: p.et, label: p.label, signal: p.signal, pnl, R: trade.R, why }, ...(b.recent || [])].slice(0, 30); return; }
+    if (!champion) {
+      b.recent = [{ date: t.date, et: p.et, label: p.label, signal: p.signal, pnl, R: trade.R, why }, ...(b.recent || [])].slice(0, 30);
+      if (cfg.test) X.messages.push({ title: `${tag}${pnl >= 0 ? "WIN" : "LOSS"} ${usd(pnl)} · ${p.label}`,
+        text: `Bought ${p.qty} @ ${usd(p.entry)} · sold ${p.exits.map((e) => `${e.qty} @ ${usd(e.px)} (${e.why})`).join(", ")}${p.overrides ? `
+Held through: ${p.overrides.map((o) => `${o.et} ${SOFT_EXITS[o.rule]} (score ${o.score}/6)`).join(", ")}` : ""}
+Test book ${usd(b.balance)} · paper only`,
+        color: pnl >= 0 ? 0x2ec26b : 0xf0556b });
+      return;
+    }
     X.closed.push(trade);
     X.shadow.push({ id: p.id, symbol: p.symbol, until: now + 30 * 60000 });
     X.messages.push({
@@ -210,12 +220,13 @@ async function stepBook(b, cfg, X) {
     const ask = k.ask, bid = k.bid;
     const cost1 = ask * 100, riskPer = cost1 * P.stopPct + 2 * FEE;
     const share = (cfg.sizing === "edge" && (p.est == null || p.est < 0.2) ? 0.25 : 0.5) / MAX_OPEN;
-    let qty = cfg.collect ? 1 : Math.floor((share * b.balance) / cost1);
-    if (!cfg.collect && qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
-    if (!cfg.collect) qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl - (b.day.base || 0) + 0.2 * b.day.startBal - openRisk()) / riskPer));
+    const one = cfg.collect || cfg.test;
+    let qty = one ? 1 : Math.floor((share * b.balance) / cost1);
+    if (!one && qty < 1) { log(b, t, "skipped", p.title, `one ${k.label} costs ${usd(cost1)}, more than ${Math.round(share * 1000) / 10}% of the account (one of ${MAX_OPEN} slots)`); return false; }
+    if (!one) qty = Math.min(qty, Math.floor((0.15 * b.balance / MAX_OPEN) / riskPer), Math.floor((b.day.pnl - (b.day.base || 0) + 0.2 * b.day.startBal - openRisk()) / riskPer));
     if (qty < 1) { log(b, t, "skipped", p.title, "one contract would risk more than the daily loss limit left (open positions included)"); return false; }
     qty = Math.min(qty, MAX_QTY);
-    const ag = cfg.collect ? [] : againstCtx(p.ctx);
+    const ag = one ? [] : againstCtx(p.ctx);
     if (ag.length && qty > 1) { qty = 1; how += ` · 1 contract: fired against the ${ag.join(" + ")}`; }
     // new families trade small until the nightly learning has seen enough (20+ results, +0.10R or better)
     const fs = (X.model && X.model.fams && X.model.fams[p.fam]) || null;
@@ -234,10 +245,12 @@ async function stepBook(b, cfg, X) {
     b.open = b.positions[0];
     b.day.trades++;
     log(b, t, "bought", p.title, `${qty} × ${k.label} @ ${usd(ask)} (${how})`);
-    if (champion) {
+    if (loud) {
       const bull = p.dir === "bull", tk = p.sym.replace("$", "");
       X.messages.push({
-        title: `📄 PAPER BUY ${qty} × ${k.label} @ ${usd(ask)}`,
+        // chart picture with the SPX buy (user 11/18): the journal chart with entry / stop / target drawn
+        shot: p.sym === "$SPX" ? { dir: p.dir, e: r2(underPx ?? p.uEntry), s: p.uStop != null ? r2(p.uStop) : "", t: p.uTarget != null ? r2(p.uTarget) : "", label: `${tag}BUY ${qty} × ${k.label} @ ${usd(ask)}` } : null,
+        title: `${tag || "📄 PAPER "}BUY ${qty} × ${k.label} @ ${usd(ask)}`,
         text: `From: ${p.title} (${p.et} ET) · ${how}${p.why ? `\n**Why taken:** ${p.why}` : ""}\nStop ${usd(pos.stop)} (−${Math.round(P.stopPct * 100)}%) or ${tk} ${bull ? "below" : "above"} ${r2(p.uStop)} · target 1 +${Math.round(P.t1Pct * 100)}% (${usd(ask * (1 + P.t1Pct))})${p.uTarget != null ? ` or ${tk} ${r2(p.uTarget)}` : ""}\nRisk ${usd(pos.risk)} of ${usd(b.balance)} · open positions ${b.positions.length}/${MAX_OPEN} · style: ${cfg.name}${p.est != null ? ` · learned edge ${p.est}R` : ""}`,
         color: bull ? 0x2ec26b : 0xf0556b,
       });
@@ -276,7 +289,7 @@ async function stepBook(b, cfg, X) {
           sell(pos, Math.floor(pos.qtyOpen / 2), bid, uHit && pct < P.t1Pct ? "target 1 (signal's target level)" : `target 1 (+${Math.round(P.t1Pct * 100)}%)`);
           pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop2));
         } else pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop1));
-        if (champion) X.messages.push({ title: `📄 PAPER target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
+        if (loud) X.messages.push({ title: `${tag || "📄 PAPER "}target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
       }
       if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
       // user rule (11/17): once the option has been up 60%+, tight trailing stop: keep 85% of the best gain (every style, manual trades too)
@@ -444,7 +457,7 @@ ${o.botManage ? "The bot manages the exits (its stops, targets and structure exi
     if (g) { log(b, t, "skipped", c.title, g); continue; }
     if (b.positions.length >= SLOTS) { log(b, t, "skipped", c.title, `${SLOTS} positions already open`); continue; }
     if (conflict(c.sym, c.dir)) { log(b, t, "skipped", c.title, `opposite side already open (${conflict(c.sym, c.dir).label})`); continue; }
-    const d = cfg.collect ? { ok: true, est: null, why: "" } : decide(model, c);
+    const d = cfg.collect || cfg.test ? { ok: true, est: null, why: "" } : decide(model, c);
     if (!d.ok) { log(b, t, "skipped", c.title, d.why); continue; }
     if (c.needTrigger) {
       if (b.pending.some((p) => group(p.sym) === group(c.sym) && p.dir === c.dir)) continue;
@@ -496,7 +509,13 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   // one quote call for every book's open contract, the tickers, waiting contracts and the champion's after-exit shadows
   const data = (await readJSON(env, "paper:data")) || newBook();
   const dataCfg = { ...champ, id: "data", name: "Data collector (every signal, 1 contract)", collect: true, window: "all" };
-  const books = [acct, ...Object.values(ch.books).map((x) => x.book), data];
+  // TEST MODE (user 11/18): switched on for one day from the journal (or /paper/test?on=1). Its own book, pullback-tolerant exits,
+  // 1 contract on every SPX signal 9:32-3:55, every buy and sell posted to Discord with "🧪 TEST". Never touches the main account
+  // or the challenger contest; off by itself the next day.
+  const tm = await readJSON(env, "paper:test"), testOn = !!(tm && tm.on && tm.date === t.date);
+  const testBook = testOn ? (await readJSON(env, "paper:testbook")) || newBook() : null;
+  const testCfg = { ...champ, id: "test", name: "Test mode (pullback-tolerant, every SPX signal, 1 contract)", test: true, params: { ...champ.params, pbTol: true } };
+  const books = [acct, ...Object.values(ch.books).map((x) => x.book), data, ...(testBook ? [testBook] : [])];
   // one-time move to the new size: a book that never traded at the old $2,000 start starts over at START
   for (const b of books) if (b.start !== START && b.balance === b.start && !b.open && !(b.positions || []).length && !(b.recent || []).length) {
     b.start = START; b.balance = START; if (b.day) b.day.startBal = START;
@@ -546,6 +565,11 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     try { await stepBook(x.book, x.cfg, { ...X, champion: false }); } catch (e) { console.error("challenger", x.cfg.id, e); }
   }
   try { await stepBook(data, dataCfg, { ...X, candidates: allCands, champion: false }); } catch (e) { console.error("data collector", e); }
+  if (testBook) {
+    try { await stepBook(testBook, testCfg, { ...X, candidates: candidates.filter((c) => c.sym === "$SPX"), champion: false }); } catch (e) { console.error("test book", e); }
+    testBook.updatedAt = now;
+    await writeJSON(env, "paper:testbook", testBook);
+  }
   // exit audit: one sample a minute of each sold option's bid for 60 minutes after the exit; finished ones go to "paper:auditlog"
   {
     for (const a of audit.open) {
@@ -580,7 +604,10 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     tr.items = tr.items.slice(-2000);
     await writeJSON(env, "paper:trades", tr);
   }
-  for (const m of X.messages) await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: `${hhmm(t.min)} ET · paper trade (no real order)` } }).catch(() => {});
+  for (const m of X.messages) {
+    const file = m.shot ? await chartShot(env, deps, m.shot).catch((e) => { console.error("chart shot", e); return null; }) : null;
+    await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: `${hhmm(t.min)} ET · paper trade (no real order)` } }, null, file).catch(() => {});
+  }
   return { balance: acct.balance, open: (acct.positions || []).map((x) => x.label).join(", ") || null, pending: acct.pending.length, closed: X.closed.length, challengers: Object.keys(ch.books).length };
 }
 

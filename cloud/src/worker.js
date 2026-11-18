@@ -68,6 +68,20 @@ function authorized(req, env) {
   return diff === 0;
 }
 
+// The bot's chart pictures (bot/src/shot.js): its headless browser sends a random one-minute pass the bot wrote to the shared
+// database. Read-only (GET) requests only; the pass is cleared as soon as the picture is taken.
+async function shotPass(req, env) {
+  const k = req.headers.get("x-shot-key");
+  if (!k || k.length < 32 || req.method !== "GET") return false;
+  try {
+    const p = JSON.parse((await readBlob(env, "shot:pass")) || "null");
+    if (!p || !p.tok || !(p.exp > Date.now()) || p.tok.length !== k.length) return false;
+    let diff = 0;
+    for (let i = 0; i < k.length; i++) diff |= k.charCodeAt(i) ^ p.tok.charCodeAt(i);
+    return diff === 0;
+  } catch (e) { return false; }
+}
+
 // Adds trades not already in the journal; re-reads just before writing so a
 // concurrent save or sync isn't overwritten.
 async function addTrades(env, trades, dry) {
@@ -468,8 +482,11 @@ async function handle(req, env) {
     const state = date ? await get("bot:day:" + date) : null;
     const greeks = await get("greeks:spx"), greeksSpy = await get("greeks:spy");
     const sig = date ? await get("sig:day:" + date) : null;
+    const tm = await get("paper:test"), tb = tm && tm.on && tm.date === date ? await get("paper:testbook") : null;
     return json({
       ok: true, state, greeks, greeksSpy,
+      test: { on: !!(tm && tm.on && tm.date === new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date())),
+        balance: tb ? tb.balance : null, open: tb ? (tb.positions || []).map((x) => x.label) : [], log: tb ? (tb.log || []).slice(-12) : [] },
       signals: sig ? (sig.alerts || []).slice(-25).reverse() : [],
       planStatus: sig ? sig.planSt || {} : {},
       // the Bot desk chart: today's SPX 1m bars and the SPX trade signals (time, side, price, title)
@@ -491,6 +508,13 @@ async function handle(req, env) {
       library: lib ? lib.items.map(({ context, raw, images, ...x }) => ({ ...x, text: String(raw || "").slice(0, 200) })) : [],
     });
   }
+  // 🧪 test mode for today (bot/src/paper.js): a separate pullback-tolerant book takes every SPX signal, 1 contract, posts to Discord
+  if (url.pathname === "/api/bot/test" && req.method === "POST") {
+    const { on } = await req.json().catch(() => ({}));
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+    await writeBlob(env, "paper:test", JSON.stringify({ on: !!on, date: today, at: Date.now() }));
+    return json({ ok: true, on: !!on, date: today });
+  }
   // today's plan pasted in the journal (used instead of the Discord post)
   if (url.pathname === "/api/bot/plan" && req.method === "POST") {
     const { text } = await req.json().catch(() => ({}));
@@ -509,7 +533,7 @@ export default {
     if (!env.JOURNAL_PASSWORD) {
       return new Response("Journal is locked: set a password first with  npm run password  then  npm run deploy  (in the cloud folder)", { status: 503 });
     }
-    if (!authorized(req, env)) {
+    if (!authorized(req, env) && !(await shotPass(req, env))) {
       return new Response("Password required", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Trade journal", charset="UTF-8"' } });
     }
     try {

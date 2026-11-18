@@ -7,5 +7,8 @@
     "keys": "node scripts/keys.cjs",
     "logs": "npx --yes wrangler@4.154.0 tail"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0"
+  }
 }

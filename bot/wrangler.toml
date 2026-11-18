@@ -29,6 +29,13 @@ PAPER_TICKERS = "$SPX"
 # SPX alert contracts are kept in this premium range (dollars per share); "0-0" turns it off
 CONTRACT_BAND = "5-9"
 
+# the journal (chart pictures for SPX paper buys are taken from its chart)
+JOURNAL_URL = "https://your-journal.pages.dev"
+
+# Cloudflare's headless browser (Browser Rendering, free plan: ~10 browser-minutes a day): chart pictures for Discord
+[browser]
+binding = "BROWSER"
+
 # Cloudflare's built-in AI (free daily allowance): reads chart screenshots
 [ai]
 binding = "AI"

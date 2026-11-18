@@ -84,6 +84,7 @@ export async function runSwing(env, deps, { t, now = Date.now() }) {
   }
   book.lastRun = t.date;
   await writeJSON(env, "swing:book", book);
-  for (const m of messages) await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: "swing (days to weeks) · paper-tracked, no real order" } }).catch(() => {});
+  // user 11/18: Discord gets SPX only; swing ideas on other tickers are still paper-tracked (journal) but not posted
+  for (const m of messages) if (/SPX/.test(m.title || "")) await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: "swing (days to weeks) · paper-tracked, no real order" } }).catch(() => {});
   return { open: book.open.length, posted: messages.length };
 }
