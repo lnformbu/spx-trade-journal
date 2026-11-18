@@ -10,6 +10,7 @@ import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
+import { chartShot } from "./shot.js";
 import { trackLines, lineStats, tfGroup, tfTol } from "./lines.js";
 import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10, breakout1m } from "./setups.js";
 
@@ -35,8 +36,8 @@ async function push(env, embed) {
     body: JSON.stringify({ topic: env.NTFY_TOPIC, title: String(embed.title).slice(0, 200), message: String(embed.description || "").replace(/\*\*/g, "").slice(0, 1500) || " " }) }).catch(() => {});
 }
 // file = { name: "chart.png", data: Uint8Array } (optional): shown as the embed's picture
-export async function post(env, embed, replyTo = null, file = null) {
-  await push(env, embed);
+export async function post(env, embed, replyTo = null, file = null, pushed = false) {
+  if (!pushed) await push(env, embed);
   if (file) embed = { ...embed, image: { url: "attachment://" + file.name } };
   const payload = { embeds: [embed], ...(env.SIGNALS_WEBHOOK ? { username: "Signals" } : replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}) };
   let body = JSON.stringify(payload), type = { "Content-Type": "application/json" };
@@ -46,10 +47,13 @@ export async function post(env, embed, replyTo = null, file = null) {
     body.append("files[0]", new Blob([file.data], { type: "image/png" }), file.name);
     type = {};   // fetch sets the multipart boundary
   }
-  if (env.SIGNALS_WEBHOOK) return fetch(env.SIGNALS_WEBHOOK, { method: "POST", headers: type, body });
-  return fetch(`https://discord.com/api/v10/channels/${env.SIGNALS_CHANNEL_ID}/messages`, {
-    method: "POST", headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)", ...type }, body,
-  });
+  const r = env.SIGNALS_WEBHOOK ? await fetch(env.SIGNALS_WEBHOOK, { method: "POST", headers: type, body })
+    : await fetch(`https://discord.com/api/v10/channels/${env.SIGNALS_CHANNEL_ID}/messages`, {
+      method: "POST", headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)", ...type }, body,
+    });
+  // picture refused (e.g. 403: the bot lacks "Attach Files" in the channel): the alert still goes out, as text
+  if (file && !r.ok) { console.error("picture upload", r.status, await r.text().catch(() => "")); return post(env, { ...embed, image: undefined }, replyTo, null, true); }
+  return r;
 }
 
 // Trade-alert card: the contract to buy is called out at the very top (embed author line), then one line with entry / stop /
@@ -71,13 +75,20 @@ function cardEmbed(a, footer) {
 }
 
 // copy of an alert to a second channel (COPY_CHANNEL_ID); never a reply, failures don't affect the main post
-async function postCopy(env, embed) {
+async function postCopy(env, embed, file = null) {
   if (!env.COPY_CHANNEL_ID || !env.DISCORD_BOT_TOKEN) return null;
-  return fetch(`https://discord.com/api/v10/channels/${env.COPY_CHANNEL_ID}/messages`, {
-    method: "POST",
-    headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "Content-Type": "application/json", "User-Agent": "DiscordBot (spx-bot, 1.0)" },
-    body: JSON.stringify({ embeds: [embed] }),
+  let body = JSON.stringify({ embeds: [embed] }), type = { "Content-Type": "application/json" };
+  if (file) {
+    body = new FormData();
+    body.append("payload_json", JSON.stringify({ embeds: [{ ...embed, image: { url: "attachment://" + file.name } }], attachments: [{ id: 0, filename: file.name }] }));
+    body.append("files[0]", new Blob([file.data], { type: "image/png" }), file.name);
+    type = {};
+  }
+  const r = await fetch(`https://discord.com/api/v10/channels/${env.COPY_CHANNEL_ID}/messages`, {
+    method: "POST", headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)", ...type }, body,
   }).catch(() => null);
+  if (file && r && !r.ok) return postCopy(env, embed, null);   // no Attach Files permission there: text only
+  return r;
 }
 
 function contracts(chain) {
@@ -1360,6 +1371,8 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             found.push({
               kind: "setup", sym, key: `lbinc:${side}:${t.date}:${Math.floor(now / 1800000)}`, once: true, color: COLORS.big,
               track: { dir, entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
+              // the picture shows THIS move: the expected dip/pop to the 3m 21 EMA, the crowded contracts highlighted
+              pic: { hl: crowd.map((x) => x.label).join(","), mv: `Expected ${calls ? "DIP" : "POP"} → ${r2(tgt)}${(e21 - c0) * sgn < 0 ? " (3m 21 EMA)" : ""}` },
               noTradeWhy: "LB shakeout incoming: watch only until it has a record (the data collector trades it)",
               title: `⚠️ LB SHAKEOUT INCOMING: SPX ${crowd.map((x) => `${x.label} +${x.pnlPct}%`).join(", ")} (${calls ? "calls" : "puts"} crowded)`,
               text: `**Expect a ${calls ? "DIP" : "POP"} against the ${calls ? "call" : "put"} holders soon.** ${signs.length}/4 warning signs: ${signs.join(" · ")}.`
@@ -1373,12 +1386,15 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         if (GX && GX.lb && GX.lb.top && t.min >= OPEN + 15 && t.min < CLOSE - 20) {
           for (const c of GX.lb.top.slice(0, 5).filter((x) => x.shakeout)) {
             const calls = c.type === "C";
-            const stack = keyLevels.filter(([, v]) => v != null && (calls ? v < c0 : v > c0))
-              .sort((a, b) => (calls ? b[1] - a[1] : a[1] - b[1])).slice(0, 3).map(([n, v]) => `${n} ${r2(v)}`);
+            const stackL = keyLevels.filter(([, v]) => v != null && (calls ? v < c0 : v > c0)).sort((a, b) => (calls ? b[1] - a[1] : a[1] - b[1])).slice(0, 3);
+            const stack = stackL.map(([n, v]) => `${n} ${r2(v)}`);
             const rg = gexReg(c0);
             const regime = rg === "+" ? "positive GEX (dealers dampen): shakeouts usually stay shallow" : rg === "-" ? "negative GEX (dealers amplify): shakeouts can run deeper, size down" : null;
             found.push({
               kind: "setup", sym, key: `lbshake:${c.label}:${t.date}`, once: true, color: COLORS.big,
+              // picture: the shakeout the crowd is likely to get, from SPX now into the first level of the stack
+              pic: { dir: calls ? "bear" : "bull", e: r2(c0), t: stackL[0] ? r2(stackL[0][1]) : "", hl: c.label,
+                mv: stackL[0] ? `Expected ${calls ? "DIP" : "POP"} → ${stackL[0][0]} ${r2(stackL[0][1])}` : `Expected ${calls ? "DIP" : "POP"} against the ${calls ? "call" : "put"} holders` },
               title: `🏁 LB SHAKEOUT WATCH: SPX ${c.label} +${c.pnlPct}% vs VWAP (${calls ? "calls" : "puts"} crowded)`,
               text: `#${GX.lb.top.indexOf(c) + 1} on the leaderboard · last $${c.last} vs VWAP $${c.vwap} · SPX ${r2(c0)}${regime ? `\n${regime}` : ""}`
                 + `\n**How to trade it:**`
@@ -1756,13 +1772,16 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     const spxOnly = a.sym === "$SPX" || /SPX/.test(a.title || "");
     if (!dry && !spxOnly) alert.quiet = true;
     if (!dry && spxOnly) {
-      const r = await post(env, cardEmbed(a, `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot`))
+      // LB shakeout alerts (user 11/18): picture of the chart + SPX greek exposure + leaderboard (journal ?shot=1&mode=lb)
+      const lbPic = /^lb(inc|shake):/.test(a.key) ? await chartShot(env, { writeJSON }, { mode: "lb", dir: a.track ? a.track.dir : "", e: a.track ? a.track.entry : "", s: a.track ? a.track.stop : "", t: a.track ? a.track.target : "",
+        label: a.title.replace(/^\W+/, "").split(":")[0], ...(a.pic || {}) }).catch((e) => { errors.push("lb picture: " + e.message); return null; }) : null;
+      const r = await post(env, cardEmbed(a, `${hhmm(t.min)} ET · paper-test signal · react ✅ / ❌ to train the bot`), null, lbPic)
         .catch((e) => ({ ok: false, status: e.message }));
       // what the copy channel gets (wrangler COPY_FILTER): "lb" = leaderboard shakeout alerts only (incoming + watch),
       // "spx" = every SPX alert (SPX plan / VIX alerts included), "all" = everything
       const copyMode = env.COPY_FILTER || "lb";
       const copyOk = copyMode === "all" ? true : copyMode === "spx" ? a.sym === "$SPX" || /\bSPX\b/.test(a.title) : /^lb(inc|shake):/.test(a.key);
-      const cp = !copyOk ? null : await postCopy(env, cardEmbed(a, `${hhmm(t.min)} ET · SPX bot alert (copy)`));
+      const cp = !copyOk ? null : await postCopy(env, cardEmbed(a, `${hhmm(t.min)} ET · SPX bot alert (copy)`), lbPic);
       if (cp && !cp.ok) errors.push("copy channel post: " + cp.status + (cp.status === 403 ? " (bot can't post there: give it Send Messages + Embed Links)" : ""));
       if (!r.ok) errors.push("discord post: " + r.status);
       else if (!env.SIGNALS_WEBHOOK) { const j = await r.json().catch(() => null); if (j && j.id) { alert.mid = j.id; alert.key = a.key; } }

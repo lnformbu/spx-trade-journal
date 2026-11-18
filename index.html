@@ -549,7 +549,13 @@
   body.view-paper .mine{display:none !important;} body.view-paper #paperCard{display:block;}
   body.view-bot #paperCard{display:none !important;}
   /* chart picture mode (?shot=1): the bot's headless browser screenshots only the chart for its Discord post */
-  body.shot{overflow:hidden;background:#131722;} body.shot > :not(.ch-next-wrap):not(script):not(style){display:none !important;}
+  body.shot{overflow:hidden;background:#131722;} body.shot > :not(.ch-next-wrap):not(#chRow):not(script):not(style){display:none !important;}
+  /* mode=lb (LB shakeout alerts): chart + greek exposure + leaderboard side by side */
+  body.shot.shot-lb > #chRow{position:fixed;inset:0;padding:8px;box-sizing:border-box;background:#131722;grid-template-columns:minmax(0,1fr) 272px 292px;height:100vh;}
+  body.shot.shot-lb #spxChart{height:calc(100vh - 150px) !important;} body.shot.shot-lb .side-pane{height:calc(100vh - 16px) !important;overflow:hidden;}
+  .shot-hl{outline:2px solid #ffd166 !important;outline-offset:-2px;box-shadow:0 0 0 4px rgba(255,209,102,.25) !important;border-radius:6px;}
+  .shot-proj{position:absolute;inset:0;z-index:3;pointer-events:none;} .shot-proj .bx{position:absolute;opacity:.22;} .shot-proj svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+  .shot-proj .mv{position:absolute;font:700 13px/1.25 ui-monospace,Consolas,monospace;padding:4px 8px;border-radius:4px;color:#0b0d10;white-space:nowrap;transform:translate(-100%,-50%);}
   body.shot > .ch-next-wrap{position:fixed;inset:0;background:#131722;} body.shot #spxChart{height:100vh !important;}
   .shot-tag{position:absolute;right:84px;top:6px;z-index:4;font:700 13px/1.3 ui-monospace,Consolas,monospace;padding:4px 9px;border-radius:4px;color:#0b0d10;}
   .pp-test{display:flex;gap:10px;align-items:center;flex-wrap:wrap;} #ppTestLog{margin-top:8px;font-size:12px;}
@@ -1128,7 +1134,8 @@
 (function(){
   const $=s=>document.querySelector(s);
   const SHOTQ=new URLSearchParams(location.search), SHOT=SHOTQ.get("shot")==="1";   // chart picture mode (bot/src/shot.js)
-  if(SHOT){ document.body.classList.add("shot"); const w=document.querySelector(".ch-next-wrap"); if(w) document.body.appendChild(w); }
+  const SHOTLB=SHOT&&SHOTQ.get("mode")==="lb";
+  if(SHOT){ document.body.classList.add("shot"); if(SHOTLB) document.body.classList.add("shot-lb"); const w=SHOTLB?document.getElementById("chRow"):document.querySelector(".ch-next-wrap"); if(w) document.body.appendChild(w); }
   const $$=s=>[...document.querySelectorAll(s)];
   let trades=[], cfgStart=null, view=new Date();
   let editingId=null, editingExpRaw="";
@@ -1586,9 +1593,33 @@
       const vals=["e","s","t"].map(n).filter(v=>v!=null);
       spxSeries.applyOptions({autoscaleInfoProvider:orig=>{ const r=orig(); if(!r||!vals.length) return r; return {...r,priceRange:{minValue:Math.min(r.priceRange.minValue,...vals),maxValue:Math.max(r.priceRange.maxValue,...vals)}}; }});
       const N=chartOut.length, ts=spxChart.timeScale(), bars=chTf==="1m"?60:chTf==="3m"?40:30;   // 1m: the last hour
-      if(N) ts.setVisibleLogicalRange({from:N-bars,to:N+8});
+      if(N) ts.setVisibleLogicalRange({from:N-bars,to:N+(n("t")!=null?24:8)});   // room on the right for the projected move
     }catch(e){ console.error("shot zoom",e); }
-    requestAnimationFrame(()=>requestAnimationFrame(()=>{ document.documentElement.dataset.shot="ready"; }));
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{ shotProject(); document.documentElement.dataset.shot="ready"; }));
+  }
+  // the move the alert is about, drawn right of the last candle (like a position tool): target zone, stop zone, arrow + text;
+  // the crowded leaderboard contracts and their strikes on the GEX ladder get a yellow outline
+  function shotProject(){
+    try{
+      const n=k=>{ const v=parseFloat(SHOTQ.get(k)); return isFinite(v)?v:null; }, e=n("e"), t=n("t"), s=n("s"), mv=SHOTQ.get("mv")||"";
+      const down=t!=null&&e!=null?t<e:SHOTQ.get("dir")==="bear", col=down?"#f05a6e":"#2ecc8c";
+      const box=$("#spxChart"), N=chartOut.length;
+      if(e!=null&&t!=null&&N&&spxSeries){
+        const ts=spxChart.timeScale(), x0=(ts.logicalToCoordinate(N-1)||0)+6, W=box.clientWidth-spxChart.priceScale("right").width()-6, y=p=>spxSeries.priceToCoordinate(p);
+        const L=document.createElement("div"); L.className="shot-proj"; box.appendChild(L);
+        const rect=(a,b,c)=>{ const ya=y(a), yb=y(b); if(ya==null||yb==null) return; const r=document.createElement("div"); r.className="bx"; r.style.cssText=`left:${x0}px;width:${Math.max(10,W-x0)}px;top:${Math.min(ya,yb)}px;height:${Math.max(2,Math.abs(ya-yb))}px;background:${c}`; L.appendChild(r); };
+        rect(e,t,"#2ecc8c"); if(s!=null) rect(e,s,"#f05a6e");
+        const x1=x0+(W-x0)*0.8, ye=y(e), yt=y(t);
+        if(ye!=null&&yt!=null){
+          L.insertAdjacentHTML("beforeend",`<svg><defs><marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${col}"/></marker></defs><line x1="${x0}" y1="${ye}" x2="${x1}" y2="${yt}" stroke="${col}" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#ah)"/></svg>`);
+          if(mv){ const m=document.createElement("div"); m.className="mv"; m.style.cssText=`left:${x1-12}px;top:${yt+(down?22:-22)}px;background:${col}`; m.textContent=mv; L.appendChild(m); }
+        }
+      }
+      (SHOTQ.get("hl")||"").split(",").map(x=>x.trim().toUpperCase()).filter(Boolean).forEach(k=>{
+        const r=document.querySelector(`.lbc[data-k="${k}"]`); if(r){ r.classList.add("shot-hl"); r.scrollIntoView({block:"nearest"}); }
+        const g=document.querySelector(`.gr[data-k="${k.replace(/\D/g,"")}"]`); if(g) g.classList.add("shot-hl");
+      });
+    }catch(e){ console.error("shot proj",e); }
   }
   // 🧪 test mode card (Paper tab)
   function renderTest(){
@@ -2184,7 +2215,7 @@
       if(!spotDone&&r.strike<spot){ html+=`<div class="gx-spot" role="separator"><span>${gxSym} ${f2(spot)}</span></div>`; spotDone=true; }
       const v=r[gxTab], a=Math.abs(v)/max, col=v>=0?`rgba(var(--win-rgb),${(0.25+0.6*a).toFixed(2)})`:`rgba(var(--loss-rgb),${(0.25+0.6*a).toFixed(2)})`;
       const t=tag(r.strike);
-      html+=`<div class="gr"><span class="k ${Math.abs(r.strike-spot)<(gxSym==="SPY"?0.5:2.5)?"spot":""}">${r.strike}</span><span class="bar"><i style="width:${Math.max(3,a*100)}%;background:${col}"></i>${t?`<b class="tagx">${t}</b>`:""}<span>${big(v)}</span></span></div>`;
+      html+=`<div class="gr" data-k="${r.strike}"><span class="k ${Math.abs(r.strike-spot)<(gxSym==="SPY"?0.5:2.5)?"spot":""}">${r.strike}</span><span class="bar"><i style="width:${Math.max(3,a*100)}%;background:${col}"></i>${t?`<b class="tagx">${t}</b>`:""}<span>${big(v)}</span></span></div>`;
     });
     const lad=$("#gxLadder"); lad.innerHTML=html;
     const sp=lad.querySelector(".gx-spot"); if(sp) lad.scrollTop=Math.max(0,sp.offsetTop-lad.offsetTop-lad.clientHeight/2);
@@ -2199,7 +2230,7 @@
     const lbAt=$(at); if(lbAt) lbAt.textContent=g.et?g.et+" ET":"";
     if(lb&&lb.top&&lb.top.length){ const vmax=Math.max(1,...lb.top.map(c=>+c.vol||0));
       $(box).innerHTML=lb.top.map((c,i)=>{ const put=c.type?c.type==="P":/\dP$/i.test(String(c.label)), up=c.pnlPct>=0, nm="SPX "+(c.strike??String(c.label).replace(/^SPXW?\s*|[CP]$/gi,""));
-        return `<div class="lbc${c.shakeout?" hot":""}" title="${esc(String(c.label))}: volume ${big(c.vol)}, last ${f2(c.last)}, VWAP ${f2(c.vwap)}"><span class="rk">${i+1}</span>
+        return `<div class="lbc${c.shakeout?" hot":""}" data-k="${esc(String(c.strike??String(c.label).replace(/\D/g,"")))}${put?"P":"C"}" title="${esc(String(c.label))}: volume ${big(c.vol)}, last ${f2(c.last)}, VWAP ${f2(c.vwap)}"><span class="rk">${i+1}</span>
           <span class="nm"><span class="cp ${put?"p":"c"}">${put?"PUT":"CALL"}</span>${esc(nm)}${c.itm?' <span class="pill">ITM</span>':""}</span>
           <span class="pc ${up?"up":"dn"}">${up?"+":""}${c.pnlPct}%</span>
           <span class="vb"><i style="width:${Math.max(4,Math.round((+c.vol||0)/vmax*100))}%"></i></span>

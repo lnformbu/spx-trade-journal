@@ -13,9 +13,10 @@ export async function chartShot(env, deps, q) {
   const browser = await puppeteer.launch(env.BROWSER);
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 1100, height: 620, deviceScaleFactor: 2 });
+    // mode "lb" (LB shakeout alerts): chart + SPX greek exposure + leaderboard side by side, so a wider page
+    await page.setViewport(q.mode === "lb" ? { width: 1500, height: 680, deviceScaleFactor: 2 } : { width: 1100, height: 620, deviceScaleFactor: 2 });
     await page.setExtraHTTPHeaders({ "x-shot-key": tok });
-    const qs = new URLSearchParams({ shot: "1", tf: q.tf || "1m", dir: q.dir || "", e: String(q.e ?? ""), s: String(q.s ?? ""), t: String(q.t ?? ""), label: q.label || "" });
+    const qs = new URLSearchParams({ shot: "1", tf: q.tf || "1m", dir: q.dir || "", e: String(q.e ?? ""), s: String(q.s ?? ""), t: String(q.t ?? ""), label: q.label || "", mode: q.mode || "", mv: q.mv || "", hl: q.hl || "" });
     await page.goto(env.JOURNAL_URL.replace(/\/$/, "") + "/?" + qs, { waitUntil: "domcontentloaded", timeout: 20000 });
     await page.waitForSelector('html[data-shot="ready"]', { timeout: 25000 });
     await new Promise((r) => setTimeout(r, 700));   // last paint (clouds, labels)
