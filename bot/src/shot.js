@@ -10,7 +10,8 @@ export async function chartShot(env, deps, q) {
   if (!env.BROWSER || !env.JOURNAL_URL) return null;
   const tok = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
   await deps.writeJSON(env, "shot:pass", { tok, exp: Date.now() + 60000 });
-  const browser = await puppeteer.launch(env.BROWSER);
+  // free plan allows only a few new browsers a minute: two pictures in the same minute -> wait and try once more
+  const browser = await puppeteer.launch(env.BROWSER).catch(async () => { await new Promise((r) => setTimeout(r, 8000)); return puppeteer.launch(env.BROWSER); });
   try {
     const page = await browser.newPage();
     // mode "lb" (LB shakeout alerts): chart + SPX greek exposure + leaderboard side by side, so a wider page

@@ -482,7 +482,7 @@ export default {
     // chart picture test: posts nothing unless &post=1; returns the PNG
     if (url.pathname === "/shot-test") {
       const { chartShot } = await import("./shot.js");
-      const f = await chartShot(env, deps, { mode: url.searchParams.get("mode") || "", mv: url.searchParams.get("mv") || "", hl: url.searchParams.get("hl") || "", dir: url.searchParams.get("dir") || "bull", e: url.searchParams.get("e") || "", s: url.searchParams.get("s") || "", t: url.searchParams.get("t") || "", label: "TEST chart picture" });
+      let f; try { f = await chartShot(env, deps, { mode: url.searchParams.get("mode") || "", mv: url.searchParams.get("mv") || "", hl: url.searchParams.get("hl") || "", dir: url.searchParams.get("dir") || "bull", e: url.searchParams.get("e") || "", s: url.searchParams.get("s") || "", t: url.searchParams.get("t") || "", label: "TEST chart picture" }); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 500) }); }
       if (!f) return json({ ok: false, error: "no BROWSER binding or JOURNAL_URL" });
       if (url.searchParams.get("post") === "1") {   // returns Discord's answer so a failed upload shows
         const r = await post(env, { title: "🧪 TEST chart picture", description: "Chart pictures are on for SPX paper buys and LB shakeout alerts.", color: 0x3b82f6 }, null, f);
