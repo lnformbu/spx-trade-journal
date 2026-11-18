@@ -1,4 +1,4 @@
-// Every 5 minutes, 9:25-16:05 ET: SPX greek exposure board + 0DTE leaderboard (LB).
+// Every minute, 9:25-16:05 ET (was 5 minutes until 11/18; flow spikes and the history rows stay on 5-minute steps): SPX greek exposure board + 0DTE leaderboard (LB).
 //   board  : GEX / DEX / vanna / charm per strike, call wall, put wall, gamma flip, "Eye of Sauron" (huge negative-GEX node)
 //   LB     : top 10 SPX 0DTE contracts by volume, each with its own VWAP (built from the 5-minute volume snapshots),
 //            holders in profit vs VWAP -> shakeout candidates; max-pain spot for in-the-money LB holders (power hour / last 10 min)
@@ -74,12 +74,17 @@ export async function runGreeks(env, deps, { force = false } = {}) {
     c.vol = vol; c.last = px; c.bid = o.bid; c.ask = o.ask;
     if (o.gamma != null && Math.abs(o.strikePrice - spot) <= 60) g0[o.strikePrice] = (g0[o.strikePrice] || 0) + (o.type === "C" ? 1 : -1) * o.gamma * Math.max(o.openInterest || 0, vol) * 100;
   }
-  if (!firstSnap) {
+  // the board refreshes every minute, but flow spikes compare 5-minute buckets (same as before): add up the
+  // per-minute volume and close a bucket once 5 minutes have passed since the last one
+  lb.acc = { c: ((lb.acc && lb.acc.c) || 0) + dCall, p: ((lb.acc && lb.acc.p) || 0) + dPut };
+  if (firstSnap) { lb.flowAt = now; lb.acc = { c: 0, p: 0 }; }   // the first snapshot holds the whole morning's volume, not a bucket
+  if (!firstSnap && now - (lb.flowAt || 0) >= 4.5 * 60000) {
+    dCall = lb.acc.c; dPut = lb.acc.p; lb.acc = { c: 0, p: 0 }; lb.flowAt = now;
     lb.flowHist = [...(lb.flowHist || []), { at: now, c: dCall, p: dPut }].slice(-90);
     const h = lb.flowHist.slice(0, -1), avgC = h.length ? h.reduce((x, y) => x + y.c, 0) / h.length : null, avgP = h.length ? h.reduce((x, y) => x + y.p, 0) / h.length : null;
     lb.flow = { calls: dCall, puts: dPut, callSpike: avgC != null && h.length >= 3 && dCall > 1.8 * avgC, putSpike: avgP != null && h.length >= 3 && dPut > 1.8 * avgP, at: hhmm(t.min) };
   }
-  lb.gHist = [...(lb.gHist || []), { at: now, m: Object.fromEntries(Object.entries(g0).map(([k, v]) => [k, Math.round(v)])) }].slice(-14);
+  lb.gHist = [...(lb.gHist || []), { at: now, m: Object.fromEntries(Object.entries(g0).map(([k, v]) => [k, Math.round(v)])) }].slice(-45);   // ~45 minutes at 1 per minute (the 25-40 min look-back needs it)
   lb.at = now;
   await writeJSON(env, lbKey, lb);
   const top = Object.values(lb.c).sort((a, b) => b.vol - a.vol).slice(0, 10).map((c) => {
@@ -119,10 +124,17 @@ export async function runGreeks(env, deps, { force = false } = {}) {
   g.date = t.date; g.et = hhmm(t.min);
   g.expiries = Object.keys(chain.callExpDateMap || {}).map((x) => x.split(":")[0]);
   await writeJSON(env, "greeks:spx", g);
+  // ---- SPY board (SPY's own options, SPY strikes) for the journal's SPX / SPY switch ----
+  try {
+    const sc = await schwab(token, `/marketdata/v1/chains?symbol=SPY&strikeCount=40&fromDate=${t.date}&toDate=${to}`);
+    const sp = sc.underlyingPrice, e = exposures(sc, sp, now);
+    const nr = e.strikes.filter((r) => Math.abs(r.strike - sp) / sp <= 0.015 && r.gex < 0).sort((a, b) => a.gex - b.gex);
+    await writeJSON(env, "greeks:spy", { ...e, spot: sp, source: "SPY options", eye: nr.length && (nr.length === 1 || nr[0].gex <= 2 * nr[1].gex) ? { strike: nr[0].strike, gex: nr[0].gex } : null, date: t.date, et: hhmm(t.min) });
+  } catch (err) { console.error("greeks spy", err); }
 
   // ---- history (data pool): one board row + the top-10 leaderboard contracts every 5 minutes in market hours,
   // kept forever per day in "hist:day:<date>"; GET /export?kind=board|lb|eod returns it as CSV ----
-  if (t.min >= OPEN && t.min <= CLOSE) {
+  if (t.min >= OPEN && t.min <= CLOSE && t.min % 5 === 0) {   // data pool stays at 5-minute rows
     const hk = "hist:day:" + t.date, H = (await readJSON(env, hk)) || { board: [], lb: [] }, at = hhmm(t.min);
     if (!H.board.some((x) => x.at === at)) {
       H.board.push({ at, spot: r2(spot), src: spxOI > 0 ? "SPX" : "SPY", flip: g.flip ?? null, callWall: g.callWall ?? null, putWall: g.putWall ?? null,

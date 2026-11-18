@@ -667,7 +667,7 @@ time window, setup type, score band, delta, and exit reason, plus estimated vs a
 - It calculates the indicators itself from Schwab's candles; compare its levels with your thinkorswim chart before trusting them.
 - Planned loss is not a guarantee: fast markets can blow through a stop.
 
-## SPX greek exposure board (journal sidebar, every 5 minutes)
+## SPX greek exposure board (journal sidebar, every minute)
 
 - Per strike, 0-3 day expirations, 40 strikes around spot: **GEX** (gamma × OI × 100 × spot² × 1%, calls +, puts −), **DEX** ($ delta),
   **Vanna** ($ delta per +1 IV point, Black-Scholes), **Charm** ($ delta change per day, Black-Scholes).

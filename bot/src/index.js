@@ -44,8 +44,8 @@ async function health(env, st, t, now) {
 }
 import { runGreeks as greekJob } from "./greekjob.js";
 
-const GREEKS_CRON = "*/5 13-21 * * MON-FRI";
-// SPX greek exposure board: 0-3 day expirations, 40 strikes around spot; every 5 minutes
+const GREEKS_CRON = "*/1 13-21 * * MON-FRI";
+// SPX greek exposure board: 0-3 day expirations, 40 strikes around spot; every minute
 const SIGNALS_CRON = "* 13-21 * * MON-FRI";
 
 // ---- training: "Setup:" / "Idea:" / "Lesson:" posts (and "Result:" replies) in the plan channel ----
@@ -393,23 +393,55 @@ async function run(env, { force = false } = {}) {
 
 const deps = { schwabToken, schwab, history, readJSON, writeJSON, plansByTicker };
 
+// one paper pass at a time (they read and write the same books): a D1 lock row that expires after 25 s
+async function withPaperLock(env, wait, fn) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS locks (k TEXT PRIMARY KEY, until INTEGER)").run();
+  for (let i = 0; ; i++) {
+    const now = Date.now();
+    const r = await env.DB.prepare("INSERT INTO locks (k, until) VALUES ('paper', ?) ON CONFLICT(k) DO UPDATE SET until = excluded.until WHERE locks.until < ?").bind(now + 25000, now).run();
+    if (r.meta && r.meta.changes > 0) break;
+    if (!wait || i >= (wait === true ? 40 : wait)) return null;   // quick passes just skip; the full run waits up to ~20 s
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  try { return await fn(); }
+  finally { await env.DB.prepare("UPDATE locks SET until = 0 WHERE k = 'paper'").run().catch(() => {}); }
+}
+
+async function quickPaper(env, start) {
+  for (const off of [15, 25, 45, 55]) {
+    const wait = start + off * 1000 - Date.now();
+    if (wait < 0) continue;
+    await new Promise((res) => setTimeout(res, wait));
+    const c = await readJSON(env, "paper:ctx");
+    if (!c || Date.now() - c.at > 3 * 60000) return;   // no fresh signals run (market closed / bot paused)
+    const { at, ...pctx } = c;
+    await withPaperLock(env, false, () => runPaper(env, deps, { ...pctx, candidates: [], t: et(Date.now()) }));
+  }
+}
+
 export default {
   async scheduled(event, env, ctx) {
     if (event.cron === SIGNALS_CRON) ctx.waitUntil(runSignals(env, deps)
       .then(async (r) => {
         if (!(r && r.paper)) return null;
-        await runPaper(env, deps, { ...r.paper, t: et(Date.now()) });
+        // the context the quick passes reuse (levels, ribbons, flow); new signals only come from this full run
+        const { candidates, events, ...pctx } = r.paper;
+        await writeJSON(env, "paper:ctx", { at: Date.now(), ...pctx }).catch(() => {});
+        await withPaperLock(env, true, () => runPaper(env, deps, { ...r.paper, t: et(Date.now()) }));
         // second check 30 s later: no new signals (they come from completed 1m candles), but open positions get their stops,
         // trailing stops and targets checked again, and A/A+ entries waiting for a price can fill 30 seconds sooner.
-        // The scan takes ~35 s, so this lands around :05 of the next minute, well before that minute's paper run (~:35).
         await new Promise((res) => setTimeout(res, 30000));
-        await runPaper(env, deps, { ...r.paper, candidates: [], t: et(Date.now()) }).catch((e) => console.error("paper +30s", e));
+        await withPaperLock(env, false, () => runPaper(env, deps, { ...pctx, candidates: [], t: et(Date.now()) })).catch((e) => console.error("paper +30s", e));
         return null;
       })
       .catch((e) => console.error("signals/paper", e)));
     else if (event.cron === GREEKS_CRON) ctx.waitUntil(greekJob(env, deps).catch((e) => console.error("greeks", e)));
     else {
       ctx.waitUntil(run(env));
+      // quick paper passes (user 11/17: check more often): your ticket orders, stops, trailing stops and targets get checked
+      // about every 10 s in market hours (the signals run covers ~:35 and ~:05; these fill in :15 :25 :45 :55)
+      const tq = et(Date.now());
+      if (tq.min >= OPEN && tq.min < CLOSE) ctx.waitUntil(quickPaper(env, event.scheduledTime || Date.now()).catch((e) => console.error("quick paper", e)));
       // nightly learning run, 4:10-4:30 PM ET (once per day)
       const t = et(Date.now());
       if (t.min >= 970 && t.min <= 990) ctx.waitUntil(runLearning(env, deps, { t }).catch((e) => console.error("learning", e)));
@@ -420,6 +452,17 @@ export default {
   // private: only with the admin key (for checks and testing)
   async fetch(req, env) {
     const url = new URL(req.url);
+    // instant fill check for your ticket orders (the journal calls this right after you click Buy / Sell). It only processes
+    // orders already saved; a pass at most every 1.5 s
+    if (url.pathname === "/paper/fast" && req.method === "POST") {
+      const c = (await readJSON(env, "paper:ctx")) || {};
+      const { at, ...pctx } = c, fresh = at && Date.now() - at < 3 * 60000;
+      const last = (await readJSON(env, "paper:fastAt")) || 0;
+      if (Date.now() - last < 1500) return new Response(JSON.stringify({ ok: true, skipped: "just ran" }), { headers: { "Content-Type": "application/json" } });
+      await writeJSON(env, "paper:fastAt", Date.now());
+      const r = await withPaperLock(env, 12, () => runPaper(env, deps, { ...(fresh ? pctx : {}), candidates: [], t: et(Date.now()) }).then(() => true));
+      return new Response(JSON.stringify({ ok: true, ran: !!r }), { headers: { "Content-Type": "application/json" } });
+    }
     if (!env.BOT_ADMIN_KEY || req.headers.get("x-bot-key") !== env.BOT_ADMIN_KEY) return new Response("Not found", { status: 404 });
     const json = (o) => new Response(JSON.stringify(o, null, 1), { headers: { "Content-Type": "application/json" } });
     if (url.pathname === "/run") return json(await run(env, { force: true }));

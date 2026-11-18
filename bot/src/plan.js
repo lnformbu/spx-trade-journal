@@ -119,8 +119,11 @@ export function parsePlan(raw, ref, ticker = "SPY") {
     spxPut: grab(new RegExp("Downside:[^\\n]*?SPX\\s*" + NUM + "\\s*p", "i")),
     vixKey: vixNums.length ? vixNums[0] : null,
     vixAlso: vixNums.slice(1),
-    patience: /patience|\bno trade\b|sit on (?:my |our )?hands|stay (?:out|flat)|\bchop(?:py)?\b/i.test(text),
+    patience: /patien(?:ce|t)|\bno trade\b|sit on (?:my |our )?hands|sit(?:ting)? (?:out|this one out)|stay (?:out|flat)|\bchop(?:py)?\b|slow(?:er)? day/i.test(text),
     notes: [], scenarios: [],
+    // "resistance around SPY 742/7440", "support at SPY 735 / SPX 7370": idea levels (zones, not exact)
+    levels: [...text.matchAll(/\b(resistance|support)\b[^.\n]{0,40}?(?:SPY\s*)?(\d{3}(?:\.\d+)?)\s*(?:\/|\|)\s*(?:SPX\s*)?(\d{4}(?:\.\d+)?)/gi)]
+      .map((m) => ({ type: m[1].toLowerCase(), spy: +m[2], spx: +m[3] })),
   };
   ref = ref || (plan.callTrigger && plan.putTrigger ? (plan.callTrigger + plan.putTrigger) / 2 : null);
   for (const line of text.split("\n").map((l) => l.replace(/^[\s•*\-–]+/, "").trim()).filter(Boolean)) {
@@ -148,6 +151,12 @@ const strip = ({ i, ...t }) => t;
 
 // Puts prices on every condition/target using today's levels. ratio = SPX/SPY.
 export function resolvePlan(plan, lv, ratio) {
+  // the posted numbers are the contracts (strikes) to buy once a key level breaks (user 11/17); keep them as strikes and
+  // use the Saty Day call / put triggers (+/-23.6% of the daily ATR from yesterday's close) as the levels that put them in play
+  if (plan.callStrike === undefined) { plan.callStrike = plan.callTrigger; plan.putStrike = plan.putTrigger; }
+  const al = (lv && lv.atrLevels) || {};
+  plan.callTrigger = al["+0.236"] ?? plan.callStrike; plan.putTrigger = al["-0.236"] ?? plan.putStrike;
+  plan.triggerSource = al["+0.236"] != null ? "Saty Day call / put trigger" : "posted";
   const price = (t, dir) => {
     if (t.px) return t.px;
     if (t.spx) return ratio ? Math.round((t.spx / ratio) * 100) / 100 : null;

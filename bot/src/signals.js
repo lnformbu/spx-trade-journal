@@ -5,11 +5,12 @@
 //   🗺️ your plan     trigger crossed / failed, scenario set up, targets reached (any ticker you post a plan for)
 //   ⭐ A / A+        Candlestick Bible pattern at a Saty level + 3m/10m Saty cloud + Phase Oscillator + VWAP + volume + options flow + your plan
 // Posts to #signals (bot login, or a webhook if SIGNALS_WEBHOOK is set).
-import { phaseCtx, et, hhmm, OPEN, CLOSE, dayLevels, aggregate, ema, intradayLevels, ribbon, phaseOsc, modeLevels, cloud2021, compressionBox, volumeStack, avwap, dtrPct, dailyDate, chop, vwapCrosses, divergence } from "./levels.js";
+import { phaseCtx, et, hhmm, OPEN, CLOSE, dayLevels, scalpLevels, aggregate, ema, intradayLevels, ribbon, phaseOsc, modeLevels, cloud2021, compressionBox, volumeStack, avwap, dtrPct, dailyDate, chop, vwapCrosses, divergence } from "./levels.js";
 import { etToMs } from "./time.js";
 import { resolvePlan, LEVEL_NAMES } from "./plan.js";
 import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
+import { trackLines, lineStats, tfGroup, tfTol } from "./lines.js";
 import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10, breakout1m } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
@@ -292,6 +293,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
   const thesis = await readJSON(env, "bot:thesis");
   // levels you draw on the journal's chart (Bot desk): [{ price, label, at }], treated like your thesis levels (zone USER_ZONE)
   const myLevels = ((await readJSON(env, "bot:mylevels")) || {}).items || [];
+  let linesLog = myLevels.length ? (((await readJSON(env, "lines:log")) || {}).items || []) : [];
   const resolved = [];
 
   // ---- VIX on 10m (inverse of SPX): cloud, oscillator, last two 10m closes; refreshed every 10 minutes ----
@@ -341,7 +343,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const q = quotes[sym] && quotes[sym].quote;
       if (!q) continue;
       const price = q.lastPrice;
-      if (!st.daily[sym] || st.daily[sym].ema21w === undefined || st.daily[sym].oscD === undefined || st.daily[sym].multiday === undefined) {
+      if (!st.daily[sym] || st.daily[sym].ema21w === undefined || st.daily[sym].oscD === undefined || st.daily[sym].multiday === undefined || st.daily[sym].dcl === undefined) {
         const d = await history(token, { symbol: sym, periodType: "year", period: "3", frequencyType: "daily", frequency: "1", needExtendedHoursData: "false" });
         const dl = dayLevels(d, t.date);
         const mo = await history(token, { symbol: sym, periodType: "year", period: "20", frequencyType: "monthly", frequency: "1", needExtendedHoursData: "false" });
@@ -356,6 +358,8 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         const ribOf = (bars) => { const r = bars.length >= 21 ? ribbon(bars) : null; return r ? r.state : null; };
         st.daily[sym] = dl && {
           ...dl,
+          // official closes of the last 20 days (the Scalp mode's afternoon periods close here)
+          dcl: Object.fromEntries(d.filter((c) => dailyDate(c) < t.date).slice(-20).map((c) => [dailyDate(c), c.close])),
           multiday: modeLevels(weeks.filter((w) => w.k < curWeek)),
           longterm: modeLevels(years.filter((y) => y.k < t.date.slice(0, 4))),
           bigW: { rib: ribOf(weeks), osc: oscOf(weeks) },
@@ -418,7 +422,7 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       const net30 = flow.filter((f) => now - f.at < 30 * 60000).reduce((s, f) => s + (f.dir === "bull" ? f.prem : -f.prem), 0);
 
       // ---- 1-minute bars today ----
-      const m1 = await history(token, { symbol: sym, frequencyType: "minute", frequency: "1", startDate: String(now - (t.min + 1) * 60000 - (sym === "$SPX" ? 4 * 864e5 : 0)), endDate: String(now) });
+      const m1 = await history(token, { symbol: sym, frequencyType: "minute", frequency: "1", startDate: String(now - (t.min + 1) * 60000 - (sym === "$SPX" ? 6 * 864e5 : 0)), endDate: String(now) });
       const done = m1.filter((c) => c.datetime + 60000 <= now);
       const rows = done.map((c) => ({ ...c, t: et(c.datetime) })).filter((c) => c.t.date === t.date);
       const rth = rows.filter((c) => c.t.min >= OPEN && c.t.min < CLOSE);
@@ -474,6 +478,69 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       // 3m bars (SPX: the last few days too, so the 3m EMAs are settled at the open)
       const b3 = aggregate(done, 3).filter((b) => b.datetime + 180000 <= now);
       const rib3 = b3.length >= 21 ? ribbon(b3) : null;
+      // ---- RIBBON FLIP WITH CONVICTION on 1m / 3m (user 11/17): 13/48 conviction cross + the 8/21 fast cloud the same way ----
+      // Test (scripts/conviction-test.mjs, 33 days): 1m REVERSAL (phase was stretched the other way) 38 trades +0.17R at 2R, 68% +5 before -5,
+      // +0.50R before 11:30; 1m EARLY (cross before the phase turns) 25 trades +0.68R; MOMENTUM chase (phase already rising) -0.17R; 3m weak.
+      // Watch-only: the data collector trades every one so the learning confirms it live.
+      if (sym === "$SPX" && t.min >= OPEN + 5 && t.min < CLOSE - 15) {
+        // regular-hours bars, like your Scalp 1m / 3m charts (the white conviction arrows there)
+        const d1r = done.filter((b) => { const mm = et(b.datetime).min; return mm >= OPEN && mm < CLOSE; });
+        for (const [N, bars] of [[1, d1r], [3, aggregate(d1r, 3).filter((b) => b.datetime + 180000 <= now)]]) {
+          if (!bars || bars.length < 70) continue;
+          const cl = bars.map((b) => b.close), E = { 8: ema(cl, 8), 13: ema(cl, 13), 21: ema(cl, 21), 48: ema(cl, 48) }, i = bars.length - 1;
+          const up = E[13][i] >= E[48][i];
+          // the 13/48 cross happened on this bar or up to 3 bars ago (still on that side), and the 8/21 cloud agrees now
+          let k = -1;
+          for (let q = 0; q <= 3; q++) { const a = E[13][i - q] >= E[48][i - q], b = E[13][i - q - 1] >= E[48][i - q - 1]; if (a !== up) break; if (a !== b) { k = q; break; } }
+          if (k < 0 || (E[8][i] >= E[21][i]) !== up) continue;
+          const crossAt = bars[i - k].datetime;
+          const trs = bars.map((b, j) => (j ? Math.max(b.high, bars[j - 1].close) - Math.min(b.low, bars[j - 1].close) : b.high - b.low));
+          let av = trs.slice(0, 14).reduce((x, y) => x + y, 0) / 14; const atr = trs.map((x, j) => (j < 14 ? null : (av = (av * 13 + x) / 14)));
+          const osc = ema(cl.map((x, j) => (atr[j] ? ((x - E[21][j]) / (3 * atr[j])) * 100 : 0)), 3);
+          const ext = osc.slice(i - 20, i), rev = up ? Math.min(...ext) <= -61.8 : Math.max(...ext) >= 61.8;
+          const mom = up ? osc[i] > 0 && osc[i] > osc[i - 1] : osc[i] < 0 && osc[i] < osc[i - 1];
+          const type = rev ? "REVERSAL" : mom ? "MOMENTUM" : "EARLY";
+          const lo = Math.min(...bars.slice(i - 9).map((b) => b.low)), hi = Math.max(...bars.slice(i - 9).map((b) => b.high)), minS = N === 1 ? 2 : 3;
+          const cap = N === 1 ? 10 : 15;   // a big impulse flip is not skipped (11/17 12:06): the stop is capped instead
+          const stop = up ? Math.max(Math.min(lo, c0 - minS), c0 - cap) : Math.min(Math.max(hi, c0 + minS), c0 + cap), risk = Math.abs(c0 - stop);
+          const tgt = up ? c0 + 2 * risk : c0 - 2 * risk, stat = N === 3 ? "3m version was weak in the test (watch it build a record)"
+            : type === "REVERSAL" ? "test: 68% reached +5 before -5, +0.17R at 2R (+0.50R before 11:30)" : type === "EARLY" ? "test: 56% win, +0.68R at 2R" : "test: chasing after momentum is already running lost (-0.17R); better on a pullback";
+          found.push({
+            kind: "setup", sym, key: `conv${N}m:${up ? "bull" : "bear"}:${t.date}:${crossAt}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: up ? "bull" : "bear", entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
+            noTradeWhy: "ribbon flip with conviction: watch only while it builds a live record (the data collector trades it)",
+            title: `🎯 SPX ${N}m RIBBON FLIP + CONVICTION · ${type} ${up ? "CALLS ▲" : "PUTS ▼"} ${r2(c0)} (watch)`,
+            text: `${N}m 13 EMA crossed ${up ? "above" : "below"} the 48 (conviction arrow) with the 8/21 fast cloud ${up ? "up" : "down"}`
+              + ` · phase ${r2(osc[i])}${rev ? ` (was ${up ? "oversold" : "overbought"} in the last 20 bars: reversal)` : mom ? " (already running: momentum)" : " (turning early)"}.`
+              + `
+**Entry:** ~${r2(c0)} · **Stop:** ${r2(stop)} (${r2(risk)} pts, the last 10 bars' ${up ? "low" : "high"}) · **Target:** 2R ${r2(tgt)}, or ride until the ${N}m 8/21 cloud flips back`
+              + `
+${stat}`,
+          });
+        }
+      }
+      // ---- 3m 21 EMA crossing the 200 EMA (user 11/16: "3mins 21 crossing 200 ... plays that work for scalps too") ----
+      // Test (scripts/ema21x200-test.mjs): alone ~breakeven on 3m (26 crosses / 33 days), +0.19R at 2R on 5m since March (93),
+      // "pullback to the 21 then ride it" +0.69R on 5m. Watch-only: the data collector trades every cross with its full context
+      // (GEX regime, your lines, phase, ribbon) so the learning finds WHEN it works.
+      if (sym === "$SPX" && rib3 && b3.length >= 260 && t.min >= OPEN + 10 && t.min < CLOSE - 15) {
+        const prev3 = ribbon(b3.slice(0, -1));
+        if (prev3 && prev3.longTerm !== rib3.longTerm) {
+          const up = rib3.longTerm === "bullish", e200 = rib3.ema[200], e21x = rib3.ema[21];
+          const stop = up ? Math.min(c0 - 3, e200 - 0.5) : Math.max(c0 + 3, e200 + 0.5), risk = Math.abs(c0 - stop), tgt = up ? c0 + 2 * risk : c0 - 2 * risk;
+          found.push({
+            kind: "setup", sym, key: `x21:${up ? "bull" : "bear"}:${t.date}:${rib3.barTime}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+            track: { dir: up ? "bull" : "bear", entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
+            noTradeWhy: "3m 21/200 cross: watch only until it proves itself live (the data collector trades it)",
+            title: `🔀 SPX 3m 21 EMA CROSSED ${up ? "ABOVE" : "BELOW"} THE 200 · ${up ? "CALLS ▲" : "PUTS ▼"} ${r2(c0)} (watch)`,
+            text: `3m 21 EMA ${r2(e21x)} just crossed ${up ? "above" : "below"} the 200 EMA ${r2(e200)}: the 3m trend turned ${up ? "up" : "down"}.`
+              + `
+**Entry:** ~${r2(c0)}, or better the first pullback to the 3m 21 EMA · **Stop:** ${r2(stop)} (other side of the 200) · **Target:** 2R ${r2(tgt)}`
+              + `
+Backtest: alone about a coin flip on 3m; best as the pullback-to-the-21 entry in the direction of GEX / your levels. Watch only while it builds a live record.`,
+          });
+        }
+      }
       // SPY 3m volume for the quiet-pullback read on SPX (SPX has no volume)
       if (sym === "SPY") st.spyVol3 = b3.slice(-12).map((b) => b.volume);
       const osc3 = phaseOsc(b3);
@@ -511,6 +578,32 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
       }
       const T10 = st.tf10[sym];
       const rib10 = T10.rib, osc10 = T10.osc, AV = T10.avwap, SW = D.swing;
+      // ---- YOUR LINES as training: touch -> held / broke / chop, judged on the timeframe you drew each line on ----
+      if (sym === "$SPX" && myLevels.length && done.length && t.min >= OPEN && t.min < CLOSE) {
+        const lastBar = done[done.length - 1];
+        const gx = gexReg(c0), lctx = { gex: gx === "+" ? "positive" : gx === "-" ? "negative" : null, r3: rib3 ? rib3.state : null, r10: rib10 ? rib10.state : null, min: t.min };
+        const { started, outcomes } = trackLines({ items: myLevels, st, bar: lastBar, now, t, ctx: lctx });
+        if (outcomes.length && !dry) { const lg = (await readJSON(env, "lines:log")) || { items: [] }; lg.items = [...lg.items, ...outcomes].slice(-3000); await writeJSON(env, "lines:log", lg); linesLog = lg.items; }
+        for (const s0 of started) {
+          const x = s0.item, bull = s0.acting === "support", lab = x.label || (x.type === "trend" ? "trendline" : "level");
+          const S1 = lineStats(linesLog, { tf: x.tf, acting: s0.acting }), S2 = lineStats(linesLog, { tf: x.tf, acting: s0.acting, gex: lctx.gex });
+          const rate = (r) => (r.n ? `held ${r.held} / broke ${r.broke} / chop ${r.chop} of ${r.n}` : "no record yet");
+          const stop = bull ? s0.lo - s0.R * 0.6 : s0.hi + s0.R * 0.6, tgt = bull ? c0 + s0.R * 1.5 : c0 - s0.R * 1.5, zone = x.type === "box" ? `${r2(s0.lo)}–${r2(s0.hi)}` : r2(s0.v);
+          found.push({
+            kind: "setup", sym, key: `myline:${x.at}:${t.date}:${t.min}`, once: true, color: bull ? COLORS.bull : COLORS.bear,
+            track: { dir: bull ? "bull" : "bear", entry: r2(c0), stop: r2(stop), target: r2(tgt), needTrigger: false },
+            noTradeWhy: "your line: watch only, the data collector trades the bounce so the bot learns how your lines behave",
+            title: `📍 SPX AT YOUR ${s0.acting.toUpperCase()}${x.type === "box" ? " ZONE" : ""} · ${lab} ${zone} (drawn on ${x.tf || "?"}) · bounce or break?`,
+            text: `SPX ${r2(c0)} touched your ${x.type === "trend" ? "trendline" : x.type === "box" ? "zone" : "line"} **${lab}** ${zone} from ${bull ? "above (acting as support)" : "below (acting as resistance)"}${x.role && x.role !== "auto" && x.role !== s0.acting ? ` · you marked it ${x.role}` : ""}.`
+              + `
+**Your ${tfGroup(x.tf)} ${s0.acting} lines:** ${rate(S1)}${lctx.gex ? ` · in ${lctx.gex} GEX: ${rate(S2)}` : ""}`
+              + `
+GEX ${lctx.gex || "?"} · 3m ${lctx.r3 || "?"} · 10m ${lctx.r10 || "?"} · judged on ${x.tf || "3m"}: held = ${s0.R} pts back ${bull ? "up" : "down"}, broke = ${s0.R} pts through`
+              + `
+**Bounce play:** ${bull ? "calls" : "puts"} ~${r2(c0)}, stop ${r2(stop)} (through the line) · target ${r2(tgt)}. **Break play:** wait for a 3m close through ${bull ? r2(s0.lo) : r2(s0.hi)} and go the other way.`,
+          });
+        }
+      }
       const dtr = dtrPct(intra.hod, intra.lod, D.atr, D.pdc);
 
       // ---- choppy-day guard: Choppiness Index > 61.8 on 10m AND (cloud flipping or 4+ VWAP crosses in the last hour) ----
@@ -553,8 +646,10 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         ...(D.longterm ? [["Yearly pivot", D.longterm.prevClose], ["Yearly call trigger", D.longterm.atrLevels["+0.236"]], ["Yearly put trigger", D.longterm.atrLevels["-0.236"]],
           ["Yearly Golden Gate up", D.longterm.atrLevels["+0.382"]], ["Yearly Golden Gate down", D.longterm.atrLevels["-0.382"]]] : []),
         // your posted weekly thesis levels (#spx-training bigger-picture post), SPX only
-        ...(sym === "$SPX" ? myLevels.filter((x) => x.type !== "trend" && isFinite(x.price)).map((x) => ["your drawn " + (x.label || "level"), +x.price, USER_ZONE]) : []),
+        ...(sym === "$SPX" ? myLevels.filter((x) => x.type !== "trend" && isFinite(x.price)).map((x) => ["your drawn " + (x.label || "level"), +x.price, x.tf ? tfTol(x.tf)[0] * 2 : USER_ZONE]) : []),
         // your trendlines: their value right now (the line extended to the current time)
+        ...(sym === "$SPX" ? ((plans.SPY || plans.SPX || {}).plan || {}).levels || [] : []).filter((x) => x.spx).map((x) => ["your plan " + x.type + " (idea)", x.spx, USER_ZONE]),
+        ...(sym === "$SPX" ? myLevels.filter((x) => x.type === "box" && now / 1000 >= Math.min(x.t1, x.t2)).map((x) => ["your zone " + (x.label || ""), r2((+x.p1 + +x.p2) / 2), Math.abs(x.p1 - x.p2) / 2 + (x.tf ? tfTol(x.tf)[0] : USER_ZONE)]) : []),
         ...(sym === "$SPX" ? myLevels.filter((x) => x.type === "trend" && x.t2 !== x.t1).map((x) => ["your trendline " + (x.label || ""), r2(x.p1 + ((x.p2 - x.p1) * (now / 1000 - x.t1)) / (x.t2 - x.t1)), USER_ZONE]) : []),
         ...(sym === "$SPX" && thesis && thesis.levels ? thesis.levels.map((x) => ["your " + x.name, x.price, x.zone ?? thesis.zone ?? USER_ZONE]) : []),
       ];
@@ -565,6 +660,57 @@ export async function runSignals(env, deps, { force = false, dry = false, half =
         add("GEX call wall " + GX.callWall, GX.callWall); add("GEX put wall " + GX.putWall, GX.putWall); add("gamma flip", GX.flip);
         if (GX.eye) add("Eye of Sauron " + GX.eye.strike, GX.eye.strike);
         [...GX.strikes].sort((a, b) => Math.abs(b.gex) - Math.abs(a.gex)).slice(0, 3).forEach((r) => add(`GEX node ${r.strike}`, r.strike));
+      }
+      // ---- Saty SCALP ATR levels (your 1m chart): refreshed when the 4h period changes (9:30 / 13:00) ----
+      let SC = null;
+      if (sym === "$SPX") {
+        const k4now = t.date + "#" + (t.min >= 780 ? 1 : 0);
+        if ((!st.scalp || st.scalp.k !== k4now) && (!st.scalpTry || now - st.scalpTry > 5 * 60000 || (st.scalp && st.scalp.k !== k4now && t.min >= 781))) {
+          st.scalpTry = now;
+          try {
+            const m1x = await history(token, { symbol: sym, frequencyType: "minute", frequency: "1", startDate: String(now - 15 * 864e5), endDate: String(now), needExtendedHoursData: "false" });
+            const s = scalpLevels(m1x, D.dcl || {}, now); if (s && s.k === k4now) st.scalp = s;
+          } catch (e) {}
+        }
+        SC = st.scalp && st.scalp.k === k4now ? st.scalp : null;
+        // they act as support / resistance on the 1m (user 11/17): key levels for exits and confluence
+        if (SC) for (const [n, v] of Object.entries(SC.atrLevels)) if (Math.abs(v - price) <= 60 && Math.abs(+n) <= 1.236) keyLevels.push(["Scalp ATR " + (n === "+1" || n === "-1" ? n + " ATR" : (+n > 0 ? "+" : "−") + (Math.abs(+n) * 100).toFixed(1) + "%"), v]);
+        if (SC) keyLevels.push(["Scalp prev close", SC.pc]);
+      }
+      // ---- SCALP ATR RETEST (user 11/17, the 12:05 / 12:13 calls): a strong 1m impulse breaks a Scalp ATR level, price comes back,
+      //      tests it and holds (closes back away from it) -> ride to the next Scalp level. Test (10 days): 27 setups, ~breakeven
+      //      alone (better midday and for puts) -> the paper account takes it at 1 contract until it proves itself live.
+      if (sym === "$SPX" && SC && t.min >= OPEN + 15 && t.min < CLOSE - 15 && !(t.min >= 780 && t.min < 792)) {
+        const td = done.filter((c) => et(c.datetime).date === t.date && et(c.datetime).min >= OPEN);
+        const FS = [-1.236, -1, -0.786, -0.618, -0.5, -0.382, -0.236, 0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.236];
+        const lvS = FS.map((f) => r2(SC.pc + SC.atr * f)), nameS = (f) => (f === 0 ? "prev close" : (f > 0 ? "+" : "−") + (Math.abs(f) === 1 ? "1 ATR" : (Math.abs(f) * 100).toFixed(1) + "%"));
+        const i = td.length - 1;
+        if (i >= 15) {
+          const b = td[i], pb = td[i - 1];
+          let hit = null;
+          for (const dir of [1, -1]) for (let j = 0; j < lvS.length && !hit; j++) {
+            const nj = j + dir; if (nj < 0 || nj >= lvS.length) continue;
+            const v = lvS[j], nx = lvS[nj], gap = Math.abs(nx - v), tol = Math.max(1, 0.08 * gap);
+            const prior = td.slice(i - 15, i - 1).some((x) => (dir > 0 ? x.close >= v + 0.15 * gap : x.close <= v - 0.15 * gap));
+            const imp = td.slice(i - 12, i - 1).some((x) => (dir > 0 ? x.close - x.open >= 0.4 * gap && x.close >= v + 0.3 * gap && x.open <= v + 0.1 * gap : x.open - x.close >= 0.4 * gap && x.close <= v - 0.3 * gap && x.open >= v - 0.1 * gap));
+            const ext = dir > 0 ? Math.min(b.low, pb.low) : Math.max(b.high, pb.high);
+            const touch = dir > 0 ? ext <= v + tol && ext >= v - 0.25 * gap : ext >= v - tol && ext <= v + 0.25 * gap;
+            const rej = dir > 0 ? b.close >= v + tol * 0.5 && b.close > b.open && b.close > pb.close : b.close <= v - tol * 0.5 && b.close < b.open && b.close < pb.close;
+            const r10 = rib10 && rib10.state, against10 = r10 === (dir > 0 ? "bearish" : "bullish");
+            if (prior && touch && rej && !against10) hit = { dir, j, v, nx, gap, imp, r10 };
+          }
+          if (hit) {
+            const up = hit.dir > 0, c0 = b.close, stop = r2(hit.v - hit.dir * 0.3 * hit.gap), risk = Math.abs(c0 - stop);
+            found.push({
+              kind: "setup", sym, key: `atrhold:${up ? "bull" : "bear"}:${t.date}:${FS[hit.j]}:${SC.k}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+              track: { dir: up ? "bull" : "bear", entry: r2(c0), stop, target: hit.nx, needTrigger: false },
+              title: `🎚️ SPX SCALP ATR RETEST ${up ? "CALLS ▲" : "PUTS ▼"} · held ${nameS(FS[hit.j])} ${hit.v} → next ${hit.nx}`,
+              text: `Price ${hit.imp ? "broke the Scalp ATR " + nameS(FS[hit.j]) + " level " + hit.v + " with a strong 1m impulse" : "got " + (up ? "above" : "below") + " the Scalp ATR " + nameS(FS[hit.j]) + " level " + hit.v}, came back, tested it and held (closed ${up ? "back above" : "back below"} it). 10m ribbon: ${hit.r10 || "?"}.`
+                + `\n**Entry:** ~${r2(c0)} · **Stop:** ${stop} (${r2(risk)} pts, ${up ? "below" : "above"} the level) · **Target:** next Scalp level ${hit.nx} (${nameS(FS[hit.j + hit.dir])})`
+                + `\nTests: 1m (24 days) +0.18R with the 10m ribbon, +0.34R mixed, −0.05R against (skipped); best 11:30-2:00. 5m since March: negative overall, so 1 contract while it builds a live record.`,
+            });
+          }
+        }
       }
       // key levels for the paper trader's "rejected at a level" exit
       if (big(sym)) (st.kl = st.kl || {})[sym] = keyLevels.filter(([, v]) => v != null && isFinite(v)).map(([n, v]) => [n, r2(v)]);
@@ -1257,7 +1403,10 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         planSide = P.callTrigger != null && c0 > P.callTrigger ? "bull" : P.putTrigger != null && c0 < P.putTrigger ? "bear" : null;
         for (const [dir, trig] of [["bull", P.callTrigger], ["bear", P.putTrigger]]) {
           if (trig == null) continue;
-          const crossed = dir === "bull" ? c3 <= trig && c0 > trig : c3 >= trig && c0 < trig;
+          // in play = price through the key level (Saty Day call / put trigger) AND the ribbon reclaimed / lost (price on that side of the 10m 21 EMA)
+          const e21 = rib10 && rib10.ema ? rib10.ema[21] : null;
+          const through = dir === "bull" ? c0 > trig : c0 < trig, ribOK = e21 == null || (dir === "bull" ? c0 >= e21 : c0 <= e21);
+          const crossed = through && ribOK && t.min >= OPEN + 1;
           if (crossed && !ps[dir]) {
             ps[dir] = { at: now, trig };
             let cc = await contract(dir);
@@ -1266,7 +1415,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             found.push({
               kind: "plan", sym, key: `plan:${sym}:${dir}`, once: true, color: COLORS[dir], contract: (cc && cc.c) || undefined,
               track: { dir, entry: c0, stop: dir === "bull" ? trig * 0.9985 : trig * 1.0015, target: null },
-              title: `🗺️ ${name} crossed your ${dir === "bull" ? "CALL" : "PUT"} trigger ${trig}${asSpx(trig)}`,
+              title: `🗺️ ${dir === "bull" ? "CALLS" : "PUTS"} IN PLAY: ${show(sym)} ${dir === "bull" ? "broke above" : "lost"} ${trig}${asSpx(trig)} with the ribbon ${dir === "bull" ? "reclaimed" : "lost"} · your ${dir === "bull" ? (P.spxCall ? "SPX " + P.spxCall + "c" : P.callStrike + "c") : (P.spxPut ? "SPX " + P.spxPut + "p" : P.putStrike + "p")}`,
               text: `${show(sym)} ${r2(c0)}, ${dir === "bull" ? "above" : "below"} your trigger. VWAP ${vwap ?? "—"}, 3m cloud ${rib3 ? rib3.state : "—"}, 10m cloud ${rib10 ? rib10.state : "—"}, options flow ${money(net30)} net ${net30 >= 0 ? "bullish" : "bearish"} (30 min).${c ? `\nYour contract: ${c}` : ""}`,
             });
           }
@@ -1435,12 +1584,37 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
         ribM: f.track && st.daily[sym] && st.daily[sym].bigM && st.daily[sym].bigM.rib ? (st.daily[sym].bigM.rib === (f.track.dir === "bull" ? "bullish" : "bearish") ? "with" : st.daily[sym].bigM.rib === "mixed" ? "mixed" : "against") : null,   // daily Phase Oscillator zone (Time Warp)
         mag7: f.track && (sym === "$SPX" || sym === "SPY") ? mag7Side(f.track.dir) : null,   // Mag 7 breadth with / against the trade   // 10m Phase Oscillator zone from the trade's side
         plan: P ? (planSide && f.track ? (planSide === f.track.dir ? "with" : "against") : "between") : "none",
+        // MULTI-TIMEFRAME ATR (user 11/17: 1m entries, 10m plays): the 10m Pivot Ribbon, the 10m Day ATR trigger side, and
+        // whether the entry sits on a 1m Scalp level, a 10m Day level, or both (confluence) -> the learning weighs each
+        ...(() => {
+          if (!f.track) return {};
+          const up = f.track.dir === "bull", e = f.track.entry, DD = st.daily[sym];
+          const rb = rib10 && rib10.state, rib10c = rb ? (rb === (up ? "bullish" : "bearish") ? "with" : rb === "mixed" ? "mixed" : "against") : null;
+          let dayAtr = null, lvl = null;
+          if (DD && DD.atrLevels && e != null) {
+            const ct = DD.atrLevels["+0.236"], pt = DD.atrLevels["-0.236"];
+            dayAtr = e > ct ? (up ? "with" : "against") : e < pt ? (up ? "against" : "with") : "between";
+            const scS = sym === "$SPX" && st.scalp && st.scalp.k && st.scalp.k.startsWith(t.date) ? st.scalp : null;
+            const near = (L, tol) => Object.entries(L || {}).some(([n, v]) => Math.abs(+n) <= 1.236 && Math.abs(v - e) <= tol);
+            const onS = scS ? near(scS.atrLevels, Math.max(1.5, scS.atr * 0.02)) || Math.abs(scS.pc - e) <= Math.max(1.5, scS.atr * 0.02) : false;
+            const onD = near(DD.atrLevels, Math.max(1.5, DD.atr * 0.015)) || Math.abs(DD.pdc - e) <= Math.max(1.5, DD.atr * 0.015);
+            lvl = onS && onD ? "confluence" : onS ? "scalp" : onD ? "day" : "none";
+          }
+          return { rib10: rib10c, dayAtr, lvl };
+        })(),
         trend: st.trendDay && st.trendDay.$SPX && st.trendDay.$SPX.active && f.track ? (st.trendDay.$SPX.dir === f.track.dir ? "with" : "against") : "none",
         // PDF 12: 0DTE volume spiking on the trade's side (calls for a call trade) = with; the other side spiking = against
         flow: (() => { const F = GX && GX.lb && GX.lb.flow; if (!F || !f.track || (sym !== "$SPX" && sym !== "SPY")) return null; const up = f.track.dir === "bull";
           const w = up ? F.callSpike && F.calls > F.puts : F.putSpike && F.puts > F.calls, ag = up ? F.putSpike && F.puts > F.calls : F.callSpike && F.calls > F.puts;
           return w ? "with" : ag ? "against" : "quiet"; })(),
       };
+      // counter-context warning on the alert (the paper account takes it at 1 contract; the data collector as usual)
+      for (const f of found) if (f.sym === sym && f.track && f.ctx && !f.agWarned) {
+        const c = f.ctx, ag = [c.trend === "against" && "the trend", c.phase === "against" && "the 10m phase", c.phaseD === "against" && "the daily phase", c.vix === false && "VIX"].filter(Boolean);
+        f.agWarned = true;
+        if (ag.length) f.text += `
+⚠️ **Against ${ag.join(" + ")}:** signals like this went green 14% of the time (11/13-16, avg option -36%). The paper account takes 1 contract.`;
+      }
       // SPX focus: SPY only gauges SPX (its own setups would duplicate SPX's); your plan alerts on SPY prices still post
       if (sym === "SPY") for (const f of found) if (f.sym === sym && f.kind !== "plan") f.drop = "SPY duplicates SPX";
       // VIX must not fight the trade (VIX is the inverse of SPX), and every trade signal says why in plain words
@@ -1554,7 +1728,8 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
     if (lastHour >= MAX_PER_TICKER_HOUR && (a.kind === "big" || a.kind === "momentum")) continue;
     st.fired[a.key] = now;
     const alert = { at: now, et: hhmm(t.min), kind: a.kind, sym: a.sym, title: a.title, text: a.text,
-      ...(a.track ? { dir: a.track.dir, px: a.track.entry } : {}) };   // dir / price: the chart's signal markers
+      ...(a.track ? { dir: a.track.dir, px: a.track.entry, stop: a.track.stop ?? null, target: a.track.target ?? null } : {}),   // dir / price / levels: the chart
+      ...(a.contract && a.contract.symbol ? { contract: { symbol: a.contract.symbol, label: a.contract.label || a.contract.symbol, bid: a.contract.bid ?? null, ask: a.contract.ask ?? null }, fam: famOf(a.key) } : {}) };   // the journal's trade ticket
     st.alerts.push(alert);
     if (!dry && a.track && a.track.entry != null && a.track.stop != null && a.track.entry !== a.track.stop) {
       (st.track = st.track || []).push({ ...a.track, key: a.key, sym: a.sym, kind: a.kind, grade: a.grade || null, score: a.score ?? null, ctx: a.ctx || null, title: a.title, at: now, et: hhmm(t.min),

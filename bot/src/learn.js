@@ -47,7 +47,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 export const FAM_NAMES = {
   star: "A/A+ setups", mom: "Momentum", flip: "Phase flip", squeeze: "Squeeze", box: "10m compression breakout",
   div1m: "1m divergence", div3m: "3m divergence", cbox1m: "1m compression breakout", cbox3m: "3m compression breakout",
-  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch", pb21: "21 EMA pullback", vomy: "Vomy / iVomy", orb: "Opening range break", orb1m: "1m ORB break (open)", flip1m: "1m cloud flip scalp", rev1m: "Early reversal (1m, watch)", lbinc: "LB shakeout incoming", orrt: "OR break & retest (15m)", orsw: "OR sweep + engulfing (watch)", gexbreak: "GEX wall break (-GEX)", gexreject: "GEX wall rejection (+GEX)", gexflip: "GEX regime change", eodplan: "EOD GEX follow/fade call", eodshake: "EOD final 20", pb8: "8 EMA ride", trend: "Trend day alerts", gg: "Golden Gate", ggo: "Golden Gate go", ggpb: "Golden Gate pullback", atr1: "±1 ATR snap-back", bo1m: "1m breakout scalp (AM)", eodfade: "EOD fakeout fade", ckl10: "10m checklist pullback", highlander: "Highlander", open: "Opening read",
+  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch", pb21: "21 EMA pullback", vomy: "Vomy / iVomy", orb: "Opening range break", orb1m: "1m ORB break (open)", flip1m: "1m cloud flip scalp", rev1m: "Early reversal (1m, watch)", lbinc: "LB shakeout incoming", x21: "3m 21×200 cross", atrhold: "Scalp ATR retest (1m)", conv1m: "1m ribbon flip + conviction", conv3m: "3m ribbon flip + conviction", myline: "Your lines (bounce)", orrt: "OR break & retest (15m)", orsw: "OR sweep + engulfing (watch)", gexbreak: "GEX wall break (-GEX)", gexreject: "GEX wall rejection (+GEX)", gexflip: "GEX regime change", eodplan: "EOD GEX follow/fade call", eodshake: "EOD final 20", pb8: "8 EMA ride", trend: "Trend day alerts", gg: "Golden Gate", ggo: "Golden Gate go", ggpb: "Golden Gate pullback", atr1: "±1 ATR snap-back", bo1m: "1m breakout scalp (AM)", eodfade: "EOD fakeout fade", ckl10: "10m checklist pullback", highlander: "Highlander", open: "Opening read",
 };
 export const famOf = (key) => {
   const [p, a, b] = String(key).split(":");
@@ -73,6 +73,9 @@ export function features(x) {
     flow: c.flow || null,
     phase: c.phase || null,
     mag7: c.mag7 || null,
+    rib10: c.rib10 || null,     // 10m Pivot Ribbon with / mixed / against the trade
+    dayAtr: c.dayAtr || null,   // entry beyond the 10m Day call / put trigger on the trade's side
+    lvl: c.lvl || null,         // entry on a 1m Scalp ATR level, a 10m Day ATR level, both (confluence) or none
     phaseD: c.phaseD || null,
     ribW: c.ribW || null,
     ribM: c.ribM || null,
@@ -107,6 +110,9 @@ export function replay(path, P, two) {
     const pct = path[i];
     if (pct > best) { best = pct; bestAt = i; }
     if (best >= P.bePct) stop = Math.max(stop, 0);
+    if (best >= 0.15) stop = Math.max(stop, 0.03);               // user rule: a green trade (+15%) never goes red
+    if (best >= 0.6) stop = Math.max(stop, 0.85 * best);         // user rule: tight trail above +60%
+    if (best >= 1) stop = Math.max(stop, 1);                     // user rule: a double is never given back
     if (best >= (P.trailFrom ?? 9)) stop = Math.max(stop, (P.trailKeep ?? 0.6) * best);
     if (best >= P.lockPct) stop = Math.max(stop, P.lockTo);
     if (!t1 && pct >= P.t1Pct) {

@@ -276,6 +276,8 @@ async function handle(req, env) {
     const tf = url.searchParams.get("tf") || "1m", now = Date.now();
     const Q = {
       "1m": { frequencyType: "minute", frequency: "1", startDate: String(now - 5 * DAY), endDate: String(now) },
+      // Scalp ATR levels like a 10-day 1m thinkorswim chart: the 4h periods are built only from these 10 trading days (~15 calendar days)
+      "1m10": { frequencyType: "minute", frequency: "1", startDate: String(now - 15 * DAY), endDate: String(now) },
       "10m": { frequencyType: "minute", frequency: "10", startDate: String(now - 20 * DAY), endDate: String(now) },
       "30m": { frequencyType: "minute", frequency: "30", startDate: String(now - 90 * DAY), endDate: String(now) },
       D: { periodType: "year", period: "2", frequencyType: "daily", frequency: "1" },
@@ -283,13 +285,43 @@ async function handle(req, env) {
       W: { periodType: "year", period: "5", frequencyType: "weekly", frequency: "1" },
       M: { periodType: "year", period: "20", frequencyType: "monthly", frequency: "1" },
     }[tf];
-    if (!Q) return json({ ok: false, error: "tf must be 1m, 10m, 30m, D, Dlong, W or M" }, 400);
+    // 1meth: SPX 1m with EXTENDED hours (scalp charts). SPX has no prices outside 9:30-4:00, so those minutes come from /ES futures
+    // converted to SPX: ES - basis, basis = ES - SPX at the last regular-hours minute before (the futures premium).
+    if (tf === "1meth") {
+      const s = await schwabState(env);
+      if (!s.refresh) return json({ ok: false, error: "Schwab not connected" });
+      try {
+        const before = s.access, tok = await schwabAccess(env, s);
+        if (s.access !== before) await saveSchwab(env, s);
+        const q = { frequencyType: "minute", frequency: "1", startDate: String(now - 5 * DAY), endDate: String(now) };
+        const [spx, es] = await Promise.all([
+          schwabGet(tok, "/marketdata/v1/pricehistory?" + new URLSearchParams({ symbol: "$SPX", needExtendedHoursData: "false", ...q })),
+          schwabGet(tok, "/marketdata/v1/pricehistory?" + new URLSearchParams({ symbol: "/ES", needExtendedHoursData: "true", ...q })),
+        ]);
+        const r2 = (x) => Math.round(x * 100) / 100, S = spx.candles || [], E = es.candles || [];
+        const esAt = new Map(E.map((c) => [c.datetime, c.close])), spxT = new Set(S.map((c) => c.datetime));
+        const basisPts = S.filter((c) => esAt.has(c.datetime)).map((c) => [c.datetime, esAt.get(c.datetime) - c.close]);
+        const rows = S.map((c) => [Math.round(c.datetime / 1000), r2(c.open), r2(c.high), r2(c.low), r2(c.close)]);
+        let k = -1;
+        for (const c of E) {
+          if (spxT.has(c.datetime)) continue;
+          while (k + 1 < basisPts.length && basisPts[k + 1][0] <= c.datetime) k++;
+          const b = k >= 0 ? basisPts[k][1] : null;
+          if (b == null) continue;   // before the first regular-hours minute in the window
+          rows.push([Math.round(c.datetime / 1000), r2(c.open - b), r2(c.high - b), r2(c.low - b), r2(c.close - b), 1]);
+        }
+        rows.sort((a, b) => a[0] - b[0]);
+        return json({ ok: true, tf, bars: rows, basis: basisPts.length ? r2(basisPts.at(-1)[1]) : null });
+      } catch (e) { return json({ ok: false, error: e.message }); }
+    }
+    if (!Q) return json({ ok: false, error: "tf must be 1m, 1meth, 10m, 30m, D, Dlong, W or M" }, 400);
     const s = await schwabState(env);
     if (!s.refresh) return json({ ok: false, error: "Schwab not connected" });
     try {
       const before = s.access, tok = await schwabAccess(env, s);
       if (s.access !== before) await saveSchwab(env, s);
-      const r = await schwabGet(tok, "/marketdata/v1/pricehistory?" + new URLSearchParams({ symbol: "$SPX", needExtendedHoursData: "false", ...Q }));
+      const sym = ["$SPX", "SPY", "$VIX"].includes(url.searchParams.get("sym")) ? url.searchParams.get("sym") : "$SPX";   // chart ticker
+      const r = await schwabGet(tok, "/marketdata/v1/pricehistory?" + new URLSearchParams({ symbol: sym, needExtendedHoursData: "false", ...Q }));
       const r2 = (x) => Math.round(x * 100) / 100;
       return json({ ok: true, tf, bars: (r.candles || []).map((c) => [Math.round(c.datetime / 1000), r2(c.open), r2(c.high), r2(c.low), r2(c.close)]) });
     } catch (e) { return json({ ok: false, error: e.message }); }
@@ -298,17 +330,122 @@ async function handle(req, env) {
   if (url.pathname === "/api/bot/mylevels") {
     let cur = { items: [] };
     try { cur = JSON.parse((await readBlob(env, "bot:mylevels")) || '{"items":[]}'); } catch (e) {}
-    if (req.method === "GET") return json({ ok: true, items: cur.items || [] });
+    const TFS = ["1m", "3m", "10m", "1h", "4h", "D", "W"], ROLES = ["auto", "support", "resistance"];
+    const tfOf = (v) => (TFS.includes(v) ? v : null), roleOf = (v) => (ROLES.includes(v) ? v : "auto");
+    if (req.method === "GET") {
+      // touch results of your lines (the bot writes D1 "lines:log"): per line, and per timeframe group / role / GEX regime
+      let log = [];
+      try { log = (JSON.parse((await readBlob(env, "lines:log")) || "null") || {}).items || []; } catch (e) {}
+      const grp = (tf) => (tf === "1m" || tf === "3m" ? "scalp" : tf === "10m" ? "day" : tf === "1h" || tf === "4h" ? "swing" : tf === "D" || tf === "W" ? "daily" : "unknown");
+      const perLine = {}, perGroup = {};
+      for (const x of log) {
+        const a = (perLine[x.lineAt] = perLine[x.lineAt] || { held: 0, broke: 0, chop: 0, last: null }); a[x.result]++; a.last = { date: x.date, et: x.et, result: x.result, acting: x.acting };
+        const k = `${grp(x.tf)}|${x.acting}|${(x.ctx && x.ctx.gex) || "?"}`, b = (perGroup[k] = perGroup[k] || { held: 0, broke: 0, chop: 0 }); b[x.result]++;
+      }
+      return json({ ok: true, items: cur.items || [], stats: perLine, groups: perGroup, touches: log.slice(-30).reverse() });
+    }
     if (req.method === "POST") {
       const b = await req.json().catch(() => ({}));
-      if (b.remove != null) cur.items = (cur.items || []).filter((x) => x.at !== b.remove);
+      if (b.clear === true) cur.items = [];
+      else if (b.remove != null) cur.items = (cur.items || []).filter((x) => x.at !== b.remove);
+      // edit a line: new label, new price (level) or new points (trendline)
+      else if (b.update != null) cur.items = (cur.items || []).map((x) => {
+        if (x.at !== b.update) return x;
+        const y = { ...x }, r2 = (v) => Math.round(+v * 100) / 100;
+        if (b.label != null) y.label = String(b.label).slice(0, 40);
+        if (b.role != null) y.role = roleOf(b.role);
+        if (!x.type && isFinite(+b.price)) y.price = r2(b.price);
+        if (["trend", "box", "circle"].includes(x.type) && [b.t1, b.p1, b.t2, b.p2].every((v) => isFinite(+v)) && +b.t1 !== +b.t2) {
+          const pts = [[+b.t1, r2(b.p1)], [+b.t2, r2(b.p2)]].sort((p, q) => p[0] - q[0]);
+          [y.t1, y.p1] = pts[0]; [y.t2, y.p2] = pts[1];
+        }
+        return y;
+      });
       // trendline: two points (unix seconds, price); grp "intra" (minute / hour charts) or "daily" (D / W charts)
-      else if (b.type === "trend" && [b.t1, b.p1, b.t2, b.p2].every((v) => isFinite(+v)) && +b.t2 !== +b.t1)
-        cur.items = [...(cur.items || []), { type: "trend", grp: b.grp === "daily" ? "daily" : "intra", t1: +b.t1, p1: Math.round(+b.p1 * 100) / 100, t2: +b.t2, p2: Math.round(+b.p2 * 100) / 100, label: String(b.label || "trendline").slice(0, 40), at: Date.now() }].slice(-40);
-      else if (isFinite(+b.price)) cur.items = [...(cur.items || []), { price: Math.round(+b.price * 100) / 100, label: String(b.label || "level").slice(0, 40), at: Date.now() }].slice(-40);
+      else if (["trend", "box", "circle"].includes(b.type) && [b.t1, b.p1, b.t2, b.p2].every((v) => isFinite(+v)) && +b.t2 !== +b.t1)
+        cur.items = [...(cur.items || []), { type: b.type, grp: b.grp === "daily" ? "daily" : "intra", tf: tfOf(b.tf), role: roleOf(b.role), t1: +b.t1, p1: Math.round(+b.p1 * 100) / 100, t2: +b.t2, p2: Math.round(+b.p2 * 100) / 100, label: String(b.label || "trendline").slice(0, 40), at: Date.now() }].slice(-40);
+      else if (isFinite(+b.price)) cur.items = [...(cur.items || []), { price: Math.round(+b.price * 100) / 100, label: String(b.label || "level").slice(0, 40), tf: tfOf(b.tf), role: roleOf(b.role), at: Date.now() }].slice(-40);
       await writeBlob(env, "bot:mylevels", JSON.stringify(cur));
       return json({ ok: true, items: cur.items });
     }
+  }
+  // ---- trade ticket (PAPER account only): SPX 0DTE chain, your orders, the paper positions; the bot fills orders every 30 s ----
+  if (url.pathname === "/api/bot/chain" && req.method === "GET") {
+    const s = await schwabState(env);
+    if (!s.refresh) return json({ ok: false, error: "Schwab not connected" });
+    try {
+      const before = s.access, tok = await schwabAccess(env, s);
+      if (s.access !== before) await saveSchwab(env, s);
+      const d = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      const c = await schwabGet(tok, `/marketdata/v1/chains?symbol=%24SPX&contractType=ALL&strikeCount=24&fromDate=${d}&toDate=${d}`);
+      const rows = [];
+      for (const m of ["callExpDateMap", "putExpDateMap"]) for (const e in c[m] || {}) for (const k in c[m][e]) for (const o of c[m][e][k])
+        if (o.daysToExpiration === 0 || String(e).startsWith(d)) rows.push({ symbol: o.symbol, strike: o.strikePrice, putCall: o.putCall, bid: o.bid, ask: o.ask, last: o.last, delta: o.delta, vol: o.totalVolume, oi: o.openInterest });
+      return json({ ok: true, date: d, under: c.underlyingPrice ?? (c.underlying && c.underlying.last) ?? null, rows });
+    } catch (e) { return json({ ok: false, error: e.message }); }
+  }
+  if (url.pathname === "/api/bot/ticket" && req.method === "GET") {
+    const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };
+    const d = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const orders = ((await get("paper:orders")) || { items: [] }).items.filter((o) => o.date === d), fills = (await get("paper:fills")) || {};
+    const acct = await get("paper:acct"), sig = await get("sig:day:" + d);
+    const alerts = ((sig && sig.alerts) || []).filter((a) => a.contract && a.contract.symbol).slice(-30).reverse();
+    // live bid / ask for the alerts' contracts and the open positions (one Schwab quotes call)
+    const quotes = {};
+    const want = String(url.searchParams.get("sym") || "");   // the contract typed in the ticket
+    const syms = [...new Set([...(/^(SPXW?|SPY)\s+\d{6}[CP]\d{8}$/.test(want) ? [want] : []), ...((acct && acct.positions) || []).map((p) => p.symbol), ...alerts.map((a) => a.contract.symbol)])].slice(0, 60);
+    if (syms.length) try {
+      const s = await schwabState(env);
+      if (s.refresh) {
+        const before = s.access, tok = await schwabAccess(env, s);
+        if (s.access !== before) await saveSchwab(env, s);
+        const q = await schwabGet(tok, "/marketdata/v1/quotes?fields=quote&symbols=" + syms.map(encodeURIComponent).join(","));
+        for (const k of syms) { const x = q[k] && q[k].quote; if (x) quotes[k] = { bid: x.bidPrice, ask: x.askPrice, last: x.lastPrice }; }
+      }
+    } catch (e) {}
+    return json({
+      quotes,
+      ok: true, date: d,
+      orders: orders.map((o) => ({ ...o, fill: fills[o.id] || { status: "sent" } })).reverse(),
+      positions: ((acct && acct.positions) || []).map((p) => ({ id: p.id, symbol: p.symbol, label: p.label, qty: p.qtyOpen, entry: p.entry, bid: p.lastBid ?? null, manual: !!p.manual, botManaged: !!p.botManaged, signal: p.signal, et: p.et, at: p.at, stop: p.stop,
+        under: p.under, dir: p.dir, delta: p.delta ?? null, uEntry: p.uEntry ?? null, uStop: p.uStop ?? null, uTarget: p.uTarget ?? null, userStop: p.userStop ?? null, userTarget: p.userTarget ?? null, manualStop: !!p.manualStop, t1: !!p.t1 })),
+      balance: acct ? acct.balance : null, dayPnl: acct && acct.day && acct.day.date === d ? acct.day.pnl : 0,
+      alerts: alerts.map((a) => ({ et: a.et, title: a.title, sym: a.sym, dir: a.dir || null, fam: a.fam || null, contract: a.contract })),
+    });
+  }
+  if (url.pathname === "/api/bot/order" && req.method === "POST") {
+    const b = await req.json().catch(() => ({}));
+    const d = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    let cur = { items: [] };
+    try { cur = JSON.parse((await readBlob(env, "paper:orders")) || '{"items":[]}'); } catch (e) {}
+    cur.items = (cur.items || []).filter((o) => o.date >= d);   // a new day starts clean
+    if (b.cancel) { cur.items = cur.items.map((o) => (o.id === b.cancel ? { ...o, cancel: true } : o)); }
+    else if (b.modify) {
+      // move a position's stop / target (from the chart or the ticket): SPX levels, or the option (premium) stop
+      const lv = (v, lo, hi) => (v === null ? null : v === undefined ? undefined : +v >= lo && +v <= hi ? Math.round(+v * 100) / 100 : NaN);
+      const m = { userStop: lv(b.userStop, 100, 50000), userTarget: lv(b.userTarget, 100, 50000), stop: lv(b.stop, 0.01, 1000) };
+      if (Object.values(m).some((v) => Number.isNaN(v))) return json({ ok: false, error: "bad price" }, 400);
+      cur.items.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), date: d, at: Date.now(), modify: String(b.modify).slice(0, 80), ...m });
+      cur.items = cur.items.slice(-200);
+    }
+    else {
+      const sym = String(b.symbol || "");
+      if (!/^(SPXW?|SPY)\s+\d{6}[CP]\d{8}$/.test(sym)) return json({ ok: false, error: "only SPX / SPY option contracts" }, 400);
+      if (!["buy", "sell"].includes(b.side)) return json({ ok: false, error: "side must be buy or sell" }, 400);
+      const qty = Math.floor(+b.qty), limit = Math.round(+b.limit * 100) / 100;
+      if (!(qty >= 1 && qty <= 3)) return json({ ok: false, error: "1 to 3 contracts" }, 400);
+      if (!(limit > 0 && limit < 1000)) return json({ ok: false, error: "bad limit price" }, 400);
+      const pc = /\d{6}C/.test(sym) ? "CALL" : "PUT";
+      cur.items.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), date: d, at: Date.now(), side: b.side, at_: ["bid", "ask", "limit"].includes(b.at) ? b.at : "ask",
+        symbol: sym, label: String(b.label || sym).slice(0, 40), under: sym.startsWith("SPY") ? "SPY" : "$SPX", putCall: pc, qty, limit,
+        delta: isFinite(+b.delta) ? +b.delta : null, alert: b.alert ? String(b.alert).slice(0, 160) : null, alertET: b.alertET || null, fam: b.fam || null, botManage: !!b.botManage });
+      cur.items = cur.items.slice(-200);
+    }
+    await writeBlob(env, "paper:orders", JSON.stringify(cur));
+    // fill it now: ask the bot (service binding) for an immediate paper pass instead of waiting for the next ~10 s check
+    let fast = null;
+    if (env.BOT) try { const r = await Promise.race([env.BOT.fetch("https://bot/paper/fast", { method: "POST" }), new Promise((res) => setTimeout(() => res(null), 9000))]); fast = r ? await r.json().catch(() => null) : null; } catch (e) {}
+    return json({ ok: true, fast });
   }
   // live SPX price for the Bot desk chart (polled every 5 s while the Bot tab is open in market hours)
   if (url.pathname === "/api/bot/live" && req.method === "GET") {
@@ -317,19 +454,22 @@ async function handle(req, env) {
     try {
       const before = s.access, tok = await schwabAccess(env, s);
       if (s.access !== before) await saveSchwab(env, s);
-      const q = await schwabGet(tok, "/marketdata/v1/quotes?symbols=%24SPX&fields=quote");
-      const x = q && q.$SPX && q.$SPX.quote;
-      return json({ ok: !!x, last: x ? x.lastPrice : null, at: x ? x.tradeTime || x.quoteTime || Date.now() : null });
+      const lsym = ["$SPX", "SPY", "$VIX"].includes(url.searchParams.get("sym")) ? url.searchParams.get("sym") : "$SPX";
+      const q0 = await schwabGet(tok, "/marketdata/v1/quotes?symbols=" + encodeURIComponent(lsym === "$SPX" ? "$SPX,/ES" : lsym) + "&fields=quote");
+      const q = lsym === "$SPX" ? q0 : { $SPX: q0[lsym] };   // the reply below reads $SPX: the chart's ticker
+      const esKey = Object.keys(q || {}).find((k) => k.startsWith("/ES"));   // Schwab answers with the front month, e.g. /ESZ26
+      const x = q && q.$SPX && q.$SPX.quote, f = esKey && q[esKey].quote;
+      return json({ ok: !!x, last: x ? x.lastPrice : null, at: x ? x.tradeTime || x.quoteTime || Date.now() : null, es: f ? f.lastPrice : null });
     } catch (e) { return json({ ok: false, error: e.message }); }
   }
   if (url.pathname === "/api/bot" && req.method === "GET") {
     const date = url.searchParams.get("date") || (await readBlob(env, "bot:latest"));
     const get = async (k) => { try { return JSON.parse((await readBlob(env, k)) || "null"); } catch (e) { return null; } };
     const state = date ? await get("bot:day:" + date) : null;
-    const greeks = await get("greeks:spx");
+    const greeks = await get("greeks:spx"), greeksSpy = await get("greeks:spy");
     const sig = date ? await get("sig:day:" + date) : null;
     return json({
-      ok: true, state, greeks,
+      ok: true, state, greeks, greeksSpy,
       signals: sig ? (sig.alerts || []).slice(-25).reverse() : [],
       planStatus: sig ? sig.planSt || {} : {},
       // the Bot desk chart: today's SPX 1m bars and the SPX trade signals (time, side, price, title)

@@ -49,6 +49,29 @@ export function modeLevels(periods) {
   const a = r2(atr(periods, 14));
   return { prevClose: r2(prev.close), atr: a, atrLevels: levelSet(prev.close, a) };
 }
+// Saty Scalp mode, the same as the journal's 1m chart ("Scalp · 1m"): 4-hour periods (9:30-13:00, 13:00-16:00 ET) built only
+// from the last 10 trading days of regular-hours 1m candles (like a 10-day 1m thinkorswim chart); ATR = TOS WildersAverage(TR, 14)
+// starting at the first bar; the afternoon period closes at the official daily close (dcl: { "YYYY-MM-DD": close }).
+export function scalpLevels(m1, dcl, nowMs) {
+  const k4 = (ms) => { const e = et(ms); return e.date + "#" + (e.min >= 780 ? 1 : 0); };
+  const rows = m1.filter((c) => { const m = et(c.datetime).min; return m >= 570 && m < 960; });
+  const keep = new Set([...new Set(rows.map((c) => et(c.datetime).date))].slice(-10));
+  const P = [];
+  for (const c of rows) {
+    const k = k4(c.datetime); if (!keep.has(k.slice(0, 10))) continue;
+    const x = P[P.length - 1];
+    if (!x || x.k !== k) P.push({ k, high: c.high, low: c.low, close: c.close });
+    else { x.high = Math.max(x.high, c.high); x.low = Math.min(x.low, c.low); x.close = c.close; }
+  }
+  const today = et(nowMs).date;
+  for (const p of P) { const d = p.k.slice(0, 10); if (p.k.endsWith("#1") && d < today && dcl && dcl[d] != null) p.close = dcl[d]; }
+  let w = null;
+  const tos = P.map((p, i) => { const tr = i ? Math.max(p.high, P[i - 1].close) - Math.min(p.low, P[i - 1].close) : p.high - p.low; w = w == null ? tr : w + (tr - w) / 14; return Math.round(w * 100) / 100; });
+  const cur = k4(nowMs), n = P.filter((p) => p.k < cur).length;
+  if (n < 3 || !tos[n - 1]) return null;
+  const pc = P[n - 1].close, a = tos[n - 1];
+  return { k: cur, pc: r2(pc), atr: a, atrLevels: levelSet(pc, a) };
+}
 // Day mode from daily candles + yesterday's high/low/close
 export function dayLevels(daily, today) {
   const done = daily.filter((c) => dailyDate(c) < today);
