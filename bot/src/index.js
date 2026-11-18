@@ -198,7 +198,7 @@ async function discordPosts(env, today, channel = env.DISCORD_CHANNEL_ID, allDat
       const atts = [...(m.attachments || []), ...((snap && snap.attachments) || [])];
       return {
         id: m.id, source: "discord", raw: [m.content, snap && snap.content].filter(Boolean).join("\n"), at: Date.parse(m.edited_timestamp || m.timestamp), postedAt: Date.parse(m.timestamp),
-        author: m.author && m.author.username, forwarded: fwd || undefined,
+        author: m.author && m.author.username, bot: !!(m.author && m.author.bot), forwarded: fwd || undefined,
         images: atts.filter((a) => /image/.test(a.content_type || "") || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(a.url || "")).map((a) => a.url),
         replyTo: !fwd && m.message_reference ? m.message_reference.message_id : undefined,
       };
@@ -359,7 +359,8 @@ async function run(env, { force = false } = {}) {
     if (env.TRAINING_CHANNEL_ID && (force || t.min % 5 === 0)) {
       try {
         const tp = await discordPosts(env, today, env.TRAINING_CHANNEL_ID, true);
-        if (tp) st.trainingPosts = [...(st.trainingPosts || []), ...tp.filter((p) => TRAINING.test(p.raw) || p.replyTo || p.forwarded || (p.images && p.images.length)).map((p) => ({ ...p, training: true }))];
+        // never the bot's own posts (its daily trade reviews live there too, 11/18)
+        if (tp) st.trainingPosts = [...(st.trainingPosts || []), ...tp.filter((p) => !p.bot && (TRAINING.test(p.raw) || p.replyTo || p.forwarded || (p.images && p.images.length))).map((p) => ({ ...p, training: true }))];
       } catch (e) { fail("training channel", e); }
     }
     // training posts -> setup library with a snapshot of the market at that moment
