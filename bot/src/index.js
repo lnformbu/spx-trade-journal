@@ -198,7 +198,11 @@ async function discordPosts(env, today, channel = env.DISCORD_CHANNEL_ID, allDat
       const atts = [...(m.attachments || []), ...((snap && snap.attachments) || [])];
       return {
         id: m.id, source: "discord", raw: [m.content, snap && snap.content].filter(Boolean).join("\n"), at: Date.parse(m.edited_timestamp || m.timestamp), postedAt: Date.parse(m.timestamp),
-        author: m.author && m.author.username, bot: !!(m.author && m.author.bot), forwarded: fwd || undefined,
+        author: m.author && m.author.username, bot: !!(m.author && m.author.bot), forwarded: fwd || undefined, ch: channel,
+        // a reply to one of the bot's own posts (trade review / alert): what it points at, so the reply can train on that trade
+        ref: m.referenced_message && m.referenced_message.author && m.referenced_message.author.bot ? {
+          id: m.referenced_message.id, title: (m.referenced_message.embeds && m.referenced_message.embeds[0] && m.referenced_message.embeds[0].title) || "",
+          footer: (m.referenced_message.embeds && m.referenced_message.embeds[0] && m.referenced_message.embeds[0].footer && m.referenced_message.embeds[0].footer.text) || "" } : undefined,
         images: atts.filter((a) => /image/.test(a.content_type || "") || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(a.url || "")).map((a) => a.url),
         replyTo: !fwd && m.message_reference ? m.message_reference.message_id : undefined,
       };
@@ -359,8 +363,17 @@ async function run(env, { force = false } = {}) {
     if (env.TRAINING_CHANNEL_ID && (force || t.min % 5 === 0)) {
       try {
         const tp = await discordPosts(env, today, env.TRAINING_CHANNEL_ID, true);
-        // never the bot's own posts (its daily trade reviews live there too, 11/18)
-        if (tp) st.trainingPosts = [...(st.trainingPosts || []), ...tp.filter((p) => !p.bot && (TRAINING.test(p.raw) || p.replyTo || p.forwarded || (p.images && p.images.length))).map((p) => ({ ...p, training: true }))];
+        // the daily trade-review threads of the last 2 days are read too (replies in there train the bot)
+        let all = tp || [];
+        for (let i = 0; i < 2; i++) {
+          const d = new Date(Date.parse(today + "T12:00:00Z") - i * 864e5).toISOString().slice(0, 10), R = await readJSON(env, "review:" + d);
+          if (R && R.thread) all = all.concat((await discordPosts(env, today, R.thread, true).catch(() => null)) || []);
+        }
+        // YOUR replies to the bot's own posts (trade reviews): feedback on that trade's setup + saved as a lesson (review.js)
+        const toBot = all.filter((p) => !p.bot && p.ref);
+        if (toBot.length) { const { learnFromReplies } = await import("./review.js"); await learnFromReplies(env, deps, toBot).catch((e) => fail("review replies", e)); }
+        // never the bot's own posts (its daily trade reviews live there too, 11/18), and replies to them are handled above
+        st.trainingPosts = [...(st.trainingPosts || []), ...all.filter((p) => !p.bot && !p.ref && (TRAINING.test(p.raw) || p.replyTo || p.forwarded || (p.images && p.images.length))).map((p) => ({ ...p, training: true }))];
       } catch (e) { fail("training channel", e); }
     }
     // training posts -> setup library with a snapshot of the market at that moment

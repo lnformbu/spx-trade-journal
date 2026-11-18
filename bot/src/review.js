@@ -29,6 +29,37 @@ async function send(env, channel, body, file) {
   return fetch(`${API}/channels/${channel}/messages`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
+// ---- your replies to the bot's posts (user 11/18: "reply to a post it sent to be part of its training") ----
+// 👍 words / ✅ -> +1 for that setup, 👎 words / ❌ -> −1, anything else is kept as a lesson (0). Same weight as a ✅/❌ reaction:
+// the nightly learning moves each setup by up to ±0.3R from your votes. The bot reacts 👍 / 👎 / 🧠 so you see it was read.
+export function replyVote(text) {
+  const t = String(text || "").toLowerCase();
+  const pos = /✅|👍|🔥|💯|\b(good|great|nice|solid|valid|clean|perfect|yes|agree|correct|right call|take (it|these|this)|keep (it|these|this))\b/.test(t);
+  const neg = /❌|👎|🗑|\b(bad|junk|trash|no|skip|avoid|wrong|chas(e|ed|ing)|late|fake|don'?t|shouldn'?t|never|stop (taking|these|this))\b/.test(t);
+  return pos && !neg ? 1 : neg && !pos ? -1 : 0;
+}
+export async function learnFromReplies(env, deps, posts) {
+  const { readJSON, writeJSON } = deps;
+  const fb = (await readJSON(env, "bot:feedback")) || { items: [] }, trades = ((await readJSON(env, "paper:trades")) || {}).items || [];
+  let n = 0;
+  for (const p of posts) {
+    const R = p.ref || {};
+    // which trade / setup: a review post ("… · 1 × SPX 7260p 11-18 · 10:10-10:11 ET", footer "bot trade review · DATE")
+    const date = (String(R.footer).match(/(\d{4}-\d{2}-\d{2})/) || [])[1] || null;
+    const tm = String(R.title).match(/·\s*\d+\s*×\s*(.+?)\s*·\s*(\d{1,2}:\d{2})-/);
+    const tr = tm && date ? trades.find((x) => x.date === date && x.label === tm[1] && x.et === tm[2]) : null;
+    const fam = tr ? tr.fam : null;
+    const v = replyVote(p.raw), prev = fb.items.find((x) => x.mid === p.id);
+    if (prev) { if (prev.text === p.raw) continue; Object.assign(prev, { v, text: String(p.raw).slice(0, 400) }); n++; continue; }
+    fb.items.push({ mid: p.id, date: date || null, key: null, fam, v, title: R.title.slice(0, 200), src: "reply", text: String(p.raw).slice(0, 400), tradeId: tr ? tr.id : null, ref: R.id });
+    n++;
+    if (env.DISCORD_BOT_TOKEN && p.ch) await fetch(`${API}/channels/${p.ch}/messages/${p.id}/reactions/${encodeURIComponent(v > 0 ? "👍" : v < 0 ? "👎" : "🧠")}/@me`,
+      { method: "PUT", headers: { Authorization: "Bot " + env.DISCORD_BOT_TOKEN, "User-Agent": "DiscordBot (spx-bot, 1.0)" } }).catch(() => {});
+  }
+  if (n) { fb.items = fb.items.slice(-3000); await writeJSON(env, "bot:feedback", fb); }
+  return n;
+}
+
 // SPX close at (or just before) a time, from the day's 1m bars [t,o,h,l,c]
 const spxAt = (bars, ms) => { let v = null; for (const b of bars || []) { if (b[0] * 1000 <= ms) v = b[4]; else break; } return v; };
 

@@ -833,6 +833,14 @@ async function collectFeedback(env, readJSON, writeJSON, t) {
     if (!Array.isArray(msgs) || !msgs.length) break;
     for (const m of msgs) {
       const title = m.embeds && m.embeds[0] && m.embeds[0].title, ts = Date.parse(m.timestamp);
+      // your REPLY to an alert (11/18): its words are a vote on that alert's setup, like a ✅ / ❌
+      const ra = m.message_reference && byMid[m.message_reference.message_id];
+      if (ra && m.author && !m.author.bot && m.content && !fb.items.some((x) => x.mid === m.id)) {
+        const { replyVote } = await import("./review.js");
+        const famR = ra.key ? famOf(ra.key) : kindFam(ra);
+        fb.items.push({ mid: m.id, date: ra.date, key: ra.key || null, fam: famR, v: replyVote(m.content), title: ra.title, src: "reply", text: String(m.content).slice(0, 400) }); added++;
+        continue;
+      }
       const a = byMid[m.id] || noMid.find((x) => x.title === title && Math.abs(x.at - ts) < 3 * 60000);
       if (!a || !m.reactions) continue;
       const cnt = (names) => m.reactions.filter((x) => names.includes(x.emoji && x.emoji.name)).reduce((s, x) => s + x.count - (x.me ? 1 : 0), 0);

@@ -772,3 +772,17 @@ option-price record of every setup for backtesting. Silent: no Discord posts.
   - net GEX, the walls, the gamma flip, the eye and max pain;
   - the chart + GEX + leaderboard picture, with the changed contracts outlined.
 - Limits: 9:40-3:55 ET, at most one post every 10 minutes, 20 a day. Test: `/lb-post-test`.
+
+## **NEW** Training by replying to the bot (11/18)
+
+- **Reply to a trade-review post** in #spx-training (in the channel or the day's review thread).
+  - The bot links the reply to that exact trade and its setup.
+  - Your words become a vote, or a lesson when there's no clear vote.
+  - Read every 5 minutes, 4:00 AM-4:20 PM ET. The bot reacts 👍 / 👎 / 🧠 to show it read the reply.
+- **Reply to an alert** in #signals. It counts like a ✅ / ❌ reaction on that alert (read in the nightly learning run).
+- **How replies are read:**
+  - Positive words (good, great, valid, take it, ✅ …) = +1.
+  - Negative words (bad, junk, skip, chased, late, ❌ …) = −1.
+  - Mixed or neutral = lesson only.
+- Votes move each setup by up to ±0.3R in the nightly learning, like reactions. Lessons are stored with the trade (bot:feedback).
+- The bot never learns from its own posts.
