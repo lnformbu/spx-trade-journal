@@ -106,7 +106,7 @@ export function shiftGate(a, fam, st, model, t, now) {
 }
 
 // copy of an alert to a second channel (COPY_CHANNEL_ID); never a reply, failures don't affect the main post
-async function postCopy(env, embed, file = null) {
+export async function postCopy(env, embed, file = null) {
   if (!env.COPY_CHANNEL_ID || !env.DISCORD_BOT_TOKEN) return null;
   let body = JSON.stringify({ embeds: [embed] }), type = { "Content-Type": "application/json" };
   if (file) {

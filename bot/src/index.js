@@ -479,6 +479,8 @@ export default {
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
     // test mode for today (user 11/18): ?on=1 / ?on=0 (the journal's 🧪 button writes the same key)
     if (url.pathname === "/paper/test") { const on = url.searchParams.get("on"); if (on != null) await writeJSON(env, "paper:test", { on: on === "1", date: et(Date.now()).date, at: Date.now() }); return json((await readJSON(env, "paper:test")) || { on: false }); }
+    // leaderboard post test: posts the current SPX leaderboard + greek exposure (with picture) to the copy channel now
+    if (url.pathname === "/lb-post-test") { const { lbChange } = await import("./lbpost.js"); const g = await readJSON(env, "greeks:spx"); return json(await lbChange(env, deps, g, et(Date.now()), Date.now(), { force: true })); }
     // chart picture test: posts nothing unless &post=1; returns the PNG
     if (url.pathname === "/shot-test") {
       const { chartShot } = await import("./shot.js");

@@ -4,6 +4,7 @@
 //            holders in profit vs VWAP -> shakeout candidates; max-pain spot for in-the-money LB holders (power hour / last 10 min)
 import { et, hhmm, OPEN, CLOSE } from "./levels.js";
 import { exposures } from "./greeks.js";
+import { lbChange } from "./lbpost.js";
 
 const r2 = (x) => Math.round(x * 100) / 100;
 
@@ -124,6 +125,8 @@ export async function runGreeks(env, deps, { force = false } = {}) {
   g.date = t.date; g.et = hhmm(t.min);
   g.expiries = Object.keys(chain.callExpDateMap || {}).map((x) => x.split(":")[0]);
   await writeJSON(env, "greeks:spx", g);
+  // leaderboard change -> copy channel with the chart + GEX + leaderboard picture (user 11/18)
+  if (!force) await lbChange(env, deps, g, t, now).catch((e) => console.error("lb change post", e));
   // ---- SPY board (SPY's own options, SPY strikes) for the journal's SPX / SPY switch ----
   try {
     const sc = await schwab(token, `/marketdata/v1/chains?symbol=SPY&strikeCount=40&fromDate=${t.date}&toDate=${to}`);

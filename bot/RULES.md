@@ -758,3 +758,17 @@ option-price record of every setup for backtesting. Silent: no Discord posts.
   - The exit is SPX breaking the last 3m higher low by ~2 points. The structure stop rises with each new higher low.
 - **Test.** `node scripts/structure-sim.mjs` runs an offline test.
 - **Partial sells.** The ticket can sell 1, 2 or 3 contracts of a position. The rest stays open with its stops.
+
+## **NEW** Leaderboard change posts (11/18)
+
+- Every minute the greek job compares the SPX 0DTE leaderboard with the last POSTED one (src/lbpost.js).
+- A change is:
+  - a new #1;
+  - a contract entering the top 5;
+  - the holders of a top-3 contract flipping in or out of profit vs its VWAP.
+- The post goes to the copy channel with:
+  - what changed;
+  - the top 5 (volume, last vs VWAP, shakeout flags);
+  - net GEX, the walls, the gamma flip, the eye and max pain;
+  - the chart + GEX + leaderboard picture, with the changed contracts outlined.
+- Limits: 9:40-3:55 ET, at most one post every 10 minutes, 20 a day. Test: `/lb-post-test`.
