@@ -747,3 +747,14 @@ option-price record of every setup for backtesting. Silent: no Discord posts.
 - Families: trend mode start/end, GEX regime (gamma flip crossed), 1m ribbon flip + conviction, early reversal.
 - Never on a choppy day (except "trend ended"), never with VIX trending against, at most 5 a day. GEX regime at most once an hour.
 - Ribbon flip / early reversal: proven families need +0.10R and 40%+ winners over 20+ scored signals on 3+ days. Until then only A-context: nothing against it, before 2 PM, no momentum chases, 1m only.
+
+## **NEW** Premium stop on the mid + structure mode (11/18)
+
+- **Premium stop on the mid.** It is measured on the option's MID price, from the mid when the trade was bought. A wide 0DTE spread can no longer stop a trade out the minute it is bought (11/18 3:36 PM: bid 20% under the ask, sold instantly).
+- **Structure mode.** Applies to your "bot manages exits" ticket trades and to the pullback-tolerant / test styles, on SPX.
+  - While SPX keeps 3m higher highs + higher lows (or 1m HH+HL with a 3m higher low), pullbacks are held. For puts: lower highs / lower lows.
+  - Soft exits are skipped (1m/3m cloud against, signal's stop, time stop).
+  - The premium stop widens to −35% on the mid.
+  - The exit is SPX breaking the last 3m higher low by ~2 points. The structure stop rises with each new higher low.
+- **Test.** `node scripts/structure-sim.mjs` runs an offline test.
+- **Partial sells.** The ticket can sell 1, 2 or 3 contracts of a position. The rest stays open with its stops.

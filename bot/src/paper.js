@@ -61,6 +61,30 @@ export function holdScore(pos, X, u, bull) {
   return { score: why.length, why };
 }
 
+// ---- swing structure (user 11/18: "3 min pullback but we are in an uptrend: HH, HL on the 1 and 3 min") ----
+// From SPX 1m bars [t,o,h,l,c] grouped into `sec`-second bars: the last two confirmed pivot lows / highs.
+export function swings(b1, sec) {
+  const bars = [];
+  for (const [t, , h, l, c] of b1 || []) {
+    const k = Math.floor(t / sec), x = bars[bars.length - 1];
+    if (x && x.k === k) { x.h = Math.max(x.h, h); x.l = Math.min(x.l, l); x.c = c; } else bars.push({ k, h, l, c });
+  }
+  const lows = [], highs = [];
+  for (let i = 1; i < bars.length - 1; i++) {
+    if (bars[i].l < bars[i - 1].l && bars[i].l <= bars[i + 1].l) lows.push(bars[i].l);
+    if (bars[i].h > bars[i - 1].h && bars[i].h >= bars[i + 1].h) highs.push(bars[i].h);
+  }
+  const L = lows.slice(-2), H = highs.slice(-2);
+  return { hl: L.length === 2 && L[1] > L[0], hh: H.length === 2 && H[1] > H[0], lh: H.length === 2 && H[1] < H[0], ll: L.length === 2 && L[1] < L[0],
+    lastLow: L.length ? L[L.length - 1] : null, lastHigh: H.length ? H[H.length - 1] : null };
+}
+// trend structure intact for the trade's side: 3m higher low (lower high for puts) plus a 3m higher high, or 1m HH+HL
+export function structureOk(b1, bull) {
+  const s3 = swings(b1, 180), s1 = swings(b1, 60);
+  const ok = bull ? s3.hl && (s3.hh || (s1.hh && s1.hl)) : s3.lh && (s3.ll || (s1.ll && s1.lh));
+  return { ok, level: bull ? s3.lastLow : s3.lastHigh, s3, s1 };
+}
+
 // ---- trading styles ----
 export const BASE_STYLE = { name: "Your rules", traits: [], delta: null, window: "rules", sizing: "full" };
 export const TEMPLATES = [
@@ -236,7 +260,7 @@ Test book ${usd(b.balance)} · paper only`,
     const pos = {
       id: now + ":" + k.symbol, date: t.date, symbol: k.symbol, label: k.label, under: p.sym, delta: k.delta, dir: p.dir,
       qty, qtyOpen: qty, entry: ask, spreadPct: bid > 0 ? r3((ask - bid) / ((ask + bid) / 2)) : null,
-      at: now, et: hhmm(t.min), stop: r2(ask * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,
+      at: now, et: hhmm(t.min), stop: r2((bid > 0 ? (ask + bid) / 2 : ask) * (1 - P.stopPct)), bestBid: bid || ask, bestAt: now, t1: null,   // premium stop from the mid (11/18)
       uEntry: underPx ?? p.uEntry, uStop: p.uStop, uTarget: p.uTarget, risk: r2(qty * riskPer), bestU: underPx ?? p.uEntry, rib0: X.tf10[p.sym] || null, tf3up: X.tf3 && X.tf3[p.sym] ? X.tf3[p.sym].up : null,
       fam: p.fam, kind: p.kind, grade: p.grade, score: p.score, ctx: p.ctx, signal: p.title, signalET: p.et, est: p.est, blocked: p.blocked || null,
       exits: [], realized: 0, path: [r3((bid || ask) / ask - 1)], params: { stopPct: P.stopPct, t1Pct: P.t1Pct }, style: cfg.name,
@@ -271,6 +295,20 @@ Test book ${usd(b.balance)} · paper only`,
       if (bid > pos.bestBid) { pos.bestBid = bid; pos.bestAt = now; }
       const pct = bid / E - 1, bestPct = pos.bestBid / E - 1;
       const hs = holdScore(pos, X, u, bull);
+      // premium stop on the MID (11/18: a 0DTE spread put the bid 20% under the ask the minute it was bought -> instant stop-out)
+      const mk = q.mark > 0 ? q.mark : q.ask > 0 && bid > 0 ? (q.ask + bid) / 2 : bid;
+      // STRUCTURE MODE (your "bot manages exits" trades + the pullback-tolerant styles): while SPX keeps its 3m HH/HL (LH/LL for puts)
+      // the pullback is held: soft exits are skipped, the premium stop widens to −35% (on the mid), and the exit is SPX breaking the
+      // last 3m higher low (lower high) by ~2 points.
+      const sm = ((pos.manual && pos.botManaged) || !!P.pbTol) && pos.under === "$SPX" && (X.spx1m || []).length >= 20;
+      const SO = sm ? structureOk(X.spx1m, bull) : null, intact = !!(SO && SO.ok && SO.level != null);
+      if (intact) {
+        const lv = r2(bull ? SO.level - Math.abs(u || SO.level) * 0.0003 : SO.level + Math.abs(u || SO.level) * 0.0003);
+        if (pos.hlStop == null || (bull ? lv > pos.hlStop : lv < pos.hlStop)) {
+          const first = pos.hlStop == null; pos.hlStop = lv;
+          log(b, t, "note", pos.label, `${first ? "structure mode" : "structure stop raised"}: 3m ${bull ? "higher highs / higher lows" : "lower highs / lower lows"} intact, exit if SPX ${bull ? "breaks" : "reclaims"} ${lv}`);
+        }
+      }
       pos.hs = hs;
       const tolMode = !!P.pbTol && (!pos.manual || pos.botManaged), offR = (X.model && X.model.exitStats && X.model.exitStats.off) || {};
       const mayHold = (rule) => tolMode && !offR[rule] && hs.score >= HOLD_MIN && pct > -P.stopPct;
@@ -330,7 +368,7 @@ Test book ${usd(b.balance)} · paper only`,
       if (u != null && yS != null && (bull ? u <= yS : u >= yS)) why = `your stop (${pos.under.replace("$", "")} ${r2(u)} through ${yS})`;
       else if (u != null && yT != null && (bull ? u >= yT : u <= yT)) why = `your target (${pos.under.replace("$", "")} ${yT} reached)`;
       else if (bid <= pos.stop && pos.manualStop) why = `your option stop ($${pos.stop})`;
-      else if (bid <= pos.stop) why = pos.stop > E ? (bestPct >= 1 && pos.stop <= r2(E * 2) ? `+100% lock (was up +${Math.round(bestPct * 100)}%, kept the double)` : bestPct >= 0.6 ? `tight trailing stop (was up +${Math.round(bestPct * 100)}%)` : bestPct >= GREEN_AT && pos.stop <= r2(E * (1 + GREEN_FLOOR) + (2 * FEE) / 100) ? `no-red stop (was up +${Math.round(bestPct * 100)}%, kept it green)` : pos.t1 || pos.bestBid / E - 1 >= (P.trailFrom ?? 9) ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round(P.stopPct * 100)}%)`;
+      else if (pos.stop < E ? mk <= pos.stop && !(intact && mk / E - 1 > -0.35) : bid <= pos.stop) why = pos.stop > E ? (bestPct >= 1 && pos.stop <= r2(E * 2) ? `+100% lock (was up +${Math.round(bestPct * 100)}%, kept the double)` : bestPct >= 0.6 ? `tight trailing stop (was up +${Math.round(bestPct * 100)}%)` : bestPct >= GREEN_AT && pos.stop <= r2(E * (1 + GREEN_FLOOR) + (2 * FEE) / 100) ? `no-red stop (was up +${Math.round(bestPct * 100)}%, kept it green)` : pos.t1 || pos.bestBid / E - 1 >= (P.trailFrom ?? 9) ? "trailing stop" : "locked-profit stop") : pos.stop === E ? "breakeven stop" : `premium stop (−${Math.round((1 - mk / E) * 100)}% on the mid)`;
       else if (u != null && pos.uStop != null && (bull ? u <= pos.uStop : u >= pos.uStop)) rule = "ustop", why = `signal's stop (${pos.under.replace("$", "")} ${r2(u)} through ${r2(pos.uStop)})`;
       else if (rejected) why = `rejected at ${lvl[0]} ${lvl[1]}`;
       else if (flipped) why = "10m Saty cloud flipped against the trade";
@@ -345,6 +383,10 @@ Test book ${usd(b.balance)} · paper only`,
       if (why && !rule) rule = /premium stop/.test(why) ? "premium" : /no-red/.test(why) ? "nored" : /tight trailing/.test(why) ? "trail85" : /\+100% lock/.test(why) ? "lock100"
         : /trailing|locked-profit/.test(why) ? "trail" : /breakeven/.test(why) ? "breakeven" : /rejected/.test(why) ? "rejected" : /10m Saty/.test(why) ? "flip10"
         : /^flow/.test(why) ? "flow" : /^opposite/.test(why) ? "opposite" : /3:59/.test(why) ? "close" : /^your /.test(why) ? "yours" : /target/.test(why) ? "target" : "other";
+      if (why && intact && rule in SOFT_EXITS) { why = null; rule = null; }   // structure mode: a pullback inside HH/HL is held
+      if (!why && pos.hlStop != null && u != null && (bull ? u <= pos.hlStop : u >= pos.hlStop)) {
+        rule = "hlbreak"; why = `structure: SPX ${bull ? "broke the 3m higher low" : "reclaimed the 3m lower high"} (${pos.hlStop})`;
+      }
       // PULLBACK-TOLERANT: a soft exit while the hold score is high -> hold, with a structure stop just past the pullback extreme
       if (why && rule in SOFT_EXITS && rule !== "trail85" && mayHold(rule) && u != null) {
         if (pos.sStop == null) {
@@ -404,7 +446,7 @@ Test book ${usd(b.balance)} · paper only`,
         const pos = {
           id: now + ":" + o.symbol, date: t.date, symbol: o.symbol, label: o.label || o.symbol, under: o.under, delta: o.delta ?? null, dir: bull ? "bull" : "bear",
           qty, qtyOpen: qty, entry: fill, spreadPct: q.bid > 0 ? r3((q.ask - q.bid) / ((q.ask + q.bid) / 2)) : null,
-          at: now, et: hhmm(t.min), stop: r2(fill * (1 - P.stopPct)), bestBid: q.bid || fill, bestAt: now, t1: null,
+          at: now, et: hhmm(t.min), stop: r2((q.bid > 0 && q.ask > 0 ? Math.min(fill, (q.ask + q.bid) / 2) : fill) * (1 - P.stopPct)), bestBid: q.bid || fill, bestAt: now, t1: null,
           uEntry: u, uStop: null, uTarget: null, risk: r2(qty * (fill * 100 * P.stopPct + 2 * FEE)), bestU: u, rib0: X.tf10[o.under] || null, tf3up: X.tf3 && X.tf3[o.under] ? X.tf3[o.under].up : null,
           fam: "manual", kind: "manual", srcFam: o.fam || null, grade: null, score: null, ctx: null, signal: o.alert || "your trade (ticket)", signalET: o.alertET || null,
           manual: true, botManaged: !!o.botManage, orderId: o.id,
@@ -474,7 +516,7 @@ ${o.botManage ? "The bot manages the exits (its stops, targets and structure exi
 }
 
 // candidates = this minute's new signals that were posted with a contract (from runSignals)
-export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, tf1 = {}, tf3 = {}, flow = null, now = Date.now(), t }) {
+export async function runPaper(env, deps, { candidates = [], events = [], kl = {}, tf10 = {}, tf1 = {}, tf3 = {}, flow = null, spx1m = [], now = Date.now(), t }) {
   const { schwabToken, schwab, readJSON, writeJSON } = deps;
   // the main account and the challengers trade PAPER_TICKERS (SPX); the data collector takes every ticker's signals (1 contract)
   const allCands = candidates.filter((c) => c.contract && c.contract.symbol);
@@ -535,7 +577,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   const gx = gq && gq.date === t.date ? { callWall: gq.callWall, putWall: gq.putWall, flip: gq.flip, gex: gq.totals && gq.totals.gex } : null;
   const chains = {};
   const X = {
-    env, candidates, events, kl, tf10, tf1, tf3, flow, gx, Q, model, now, t, patience, closed: [], dataClosed: [], messages: [], shadow: acct.shadow, audit: [],
+    env, candidates, events, kl, tf10, tf1, tf3, flow, spx1m, gx, Q, model, now, t, patience, closed: [], dataClosed: [], messages: [], shadow: acct.shadow, audit: [],
     px: (sym) => (Q[sym] ? Q[sym].last ?? Q[sym].mark : null),
     // SPX 0DTE chain for the delta styles, fetched at most once per side per minute
     chain: (dir) => (chains[dir] = chains[dir] || (async () => {

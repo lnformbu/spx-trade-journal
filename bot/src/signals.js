@@ -1848,6 +1848,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
   const paper = { candidates, events, kl: st.kl || {},
     tf10: Object.fromEntries(Object.entries(st.tf10 || {}).map(([s, v]) => [s, v && v.rib ? v.rib.state : null])),
     tf1: st.tf1 || {}, tf3: st.tf3 || {}, flow: (GX && GX.lb && GX.lb.flow) || null,
+    spx1m: (st.spx1m || []).slice(-90),   // SPX 1m bars [t,o,h,l,c]: 1m / 3m swing structure for the paper exits (11/18)
     plan: { call: (planOf("SPY") || {}).spxCall || (planOf("$SPX") || {}).spxCall || null, put: (planOf("SPY") || {}).spxPut || (planOf("$SPX") || {}).spxPut || null } };
   return { group, plans: Object.keys(plans), sent, errors, found: found.length, paper };
 }

@@ -558,6 +558,7 @@
   .shot-proj .mv{position:absolute;font:700 13px/1.25 ui-monospace,Consolas,monospace;padding:4px 8px;border-radius:4px;color:#0b0d10;white-space:nowrap;transform:translate(-100%,-50%);}
   body.shot > .ch-next-wrap{position:fixed;inset:0;background:#131722;} body.shot #spxChart{height:100vh !important;}
   .shot-tag{position:absolute;right:84px;top:6px;z-index:4;font:700 13px/1.3 ui-monospace,Consolas,monospace;padding:4px 9px;border-radius:4px;color:#0b0d10;}
+  .tk-sqw{font-size:12px;color:var(--ink-3);display:inline-flex;gap:4px;align-items:center;} .tk-sq{width:auto;min-width:54px;padding:2px 4px;}
   .pp-test{display:flex;gap:10px;align-items:center;flex-wrap:wrap;} #ppTestLog{margin-top:8px;font-size:12px;}
   /* the Bot desk (levels, plan, signals, greek board, leaderboard) lives only on the Bot tab */
   body:not(.view-bot) #botCard{display:none !important;}
@@ -1840,6 +1841,7 @@
       rows.push(`<div class="tk-row"><b>${x.qty} × ${esc(x.label)}</b><span>@ ${tkUsd(x.entry)}</span><span>bid ${tkUsd(bid)}</span>${pct!=null?`<span class="${pct>=0?"up":"dn"}">${pct>=0?"+":""}${pct.toFixed(1)}%</span>`:""}<span class="mut">${x.manual?(x.botManaged?"yours · bot manages":"yours"):"bot's trade"} · ${esc(x.et||"")}</span>
         <span class="mut tk-stp">${x.userStop!=null?`stop SPX ${x.userStop} `:""}${x.userTarget!=null?`target SPX ${x.userTarget} `:""}${x.manualStop?`<b title="You moved the stop: the bot's automatic profit locks are paused for this trade">your stop</b> `:""}${x.userStop!=null||x.userTarget!=null||x.manualStop?`<button type="button" data-clr="${esc(x.id)}" title="Back to the bot's stops and automatic profit locks">✕ auto</button>`:""}
           option stop $<input class="inp tk-ostop" data-ostop="${esc(x.id)}" value="${x.stop!=null?(+x.stop).toFixed(2):""}" inputmode="decimal" aria-label="Option stop price"></span>
+        <label class="tk-sqw" title="How many contracts to sell (the rest stays open)">sell <select class="inp tk-sq" data-sq="${esc(x.symbol)}">${Array.from({length:Math.max(1,x.qty)},(_,i)=>i+1).map(n=>`<option value="${n}"${n===x.qty?" selected":""}>${n}${n===x.qty&&x.qty>1?" (all)":""}</option>`).join("")}</select></label>
         <button type="button" data-sell="${esc(x.symbol)}" data-qty="${x.qty}" data-at="bid">Sell bid</button><button type="button" data-sell="${esc(x.symbol)}" data-qty="${x.qty}" data-at="ask">Sell ask</button></div>`); });
     (tkData.orders||[]).filter(o=>{ const f=o.fill||{}; return !o.modify&& !["filled","canceled","expired","rejected"].includes(f.status)&&!(o.cancel&&f.status==="canceled"); }).slice(0,6).forEach(o=>{ const f=o.fill||{}, st=o.cancel&&f.status!=="filled"?(f.status==="canceled"?"canceled":"canceling…"):f.status;
       rows.push(`<div class="tk-row"><span class="${o.side==="buy"?"up":"dn"}">${o.side.toUpperCase()}</span><span>${o.qty} × ${esc(o.label)} @ ${tkUsd(o.limit)} (${o.at_})</span><span class="mut">${st==="sent"?"sent, checking the fill…":st==="working"?"working":st==="filled"?`filled ${f.qty} @ ${tkUsd(f.px)} · ${esc(f.et||"")}`:esc(st)+(f.why?": "+esc(f.why):"")}</span>
@@ -1852,7 +1854,9 @@
       inp.addEventListener("keydown",e=>{ if(e.key!=="Enter") return; const v=parseFloat(inp.value), p=pos.find(x=>x.id===inp.dataset.ostop); if(p&&v>0){ tkEditing=false; inp.blur(); posModify(p,{stop:v}); } }); });
     box.querySelectorAll("[data-sell]").forEach(b=>b.addEventListener("click",()=>{ const sym=b.dataset.sell, q=tkQuote(sym), px=q?(b.dataset.at==="bid"?q.bid:q.ask):null;
       if(!(px>0)) return alert("No "+b.dataset.at+" price for this contract right now.");
-      const p=pos.find(x=>x.symbol===sym); tkSend({side:"sell",at:b.dataset.at,symbol:sym,label:p?p.label:tkShort(sym),qty:+b.dataset.qty,limit:px}); })); }
+      const p=pos.find(x=>x.symbol===sym), sq=b.closest(".tk-row")&&b.closest(".tk-row").querySelector("[data-sq]"), n=sq?+sq.value:+b.dataset.qty;   // 1, 2 or 3 contracts (11/18)
+      tkSend({side:"sell",at:b.dataset.at,symbol:sym,label:p?p.label:tkShort(sym),qty:Math.max(1,Math.min(n,+b.dataset.qty)),limit:px}); }));
+    box.querySelectorAll("[data-sq]").forEach(sel=>{ sel.addEventListener("focus",()=>{ tkEditing=true; }); sel.addEventListener("blur",()=>{ tkEditing=false; }); }); }
   async function tkSend(body){ let j=null; try{ const r=await fetch("/api/bot/order",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); j=await r.json(); }catch(e){}
     if(!j||!j.ok) alert("Order not sent: "+((j&&j.error)||"network error")); await tkLoad(); tkRenderBook(); tkShowQuote(); }
   function tkWire(){ const inp=$("#tkStrike"); if(!inp||inp.dataset.wired) return; inp.dataset.wired="1";
