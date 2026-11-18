@@ -209,7 +209,7 @@ Test book ${usd(b.balance)} · paper only`,
     }
     X.closed.push(trade);
     X.shadow.push({ id: p.id, symbol: p.symbol, until: now + 30 * 60000 });
-    X.messages.push({
+    X.messages.push({ manual: !!p.manual,
       title: `📄 PAPER ${pnl >= 0 ? "WIN" : "LOSS"} ${usd(pnl)} · ${p.label}`,
       text: `Bought ${p.qty} @ ${usd(p.entry)} · sold ${p.exits.map((e) => `${e.qty} @ ${usd(e.px)} (${e.why})`).join(", ")}\n${r2(pnl / p.risk)}R · day ${usd(d.pnl)} · paper account ${usd(b.balance)}`,
       color: pnl >= 0 ? 0x2ec26b : 0xf0556b,
@@ -289,7 +289,7 @@ Test book ${usd(b.balance)} · paper only`,
           sell(pos, Math.floor(pos.qtyOpen / 2), bid, uHit && pct < P.t1Pct ? "target 1 (signal's target level)" : `target 1 (+${Math.round(P.t1Pct * 100)}%)`);
           pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop2));
         } else pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop1));
-        if (loud) X.messages.push({ title: `${tag || "📄 PAPER "}target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
+        if (loud) X.messages.push({ manual: !!pos.manual, title: `${tag || "📄 PAPER "}target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
       }
       if (pos.t1) pos.stop = Math.max(pos.stop, E + (pos.qty >= 2 ? P.keep2 : P.keep1) * (pos.bestBid - E));
       // user rule (11/17): once the option has been up 60%+, tight trailing stop: keep 85% of the best gain (every style, manual trades too)
@@ -412,7 +412,7 @@ Test book ${usd(b.balance)} · paper only`,
         };
         b.positions.push(pos); b.open = b.positions[0]; b.day.trades++;
         log(b, t, "bought", pos.signal, `YOU: ${qty} × ${pos.label} @ ${usd(fill)} (limit ${usd(L)}${o.botManage ? ", bot manages the exits" : ", you manage the exits"})`);
-        X.messages.push({ title: `📄 PAPER BUY (you) ${qty} × ${pos.label} @ ${usd(fill)}`, text: `From the journal's trade ticket${o.alert ? ` · alert: ${o.alert}` : ""}
+        X.messages.push({ manual: true, title: `📄 PAPER BUY (you) ${qty} × ${pos.label} @ ${usd(fill)}`, text: `From the journal's trade ticket${o.alert ? ` · alert: ${o.alert}` : ""}
 ${o.botManage ? "The bot manages the exits (its stops, targets and structure exits)." : "You manage the exits (the bot only closes it at 3:59)."} · paper account ${usd(b.balance)}`, color: bull ? 0x2ec26b : 0xf0556b });
         done("filled", { px: fill, qty });
       } else {
@@ -604,7 +604,8 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     tr.items = tr.items.slice(-2000);
     await writeJSON(env, "paper:trades", tr);
   }
-  for (const m of X.messages) {
+  // user 11/18: your own ticket trades (buy, target 1, win/loss) stay off Discord; they still show in the journal
+  for (const m of X.messages.filter((x) => !x.manual)) {
     const file = m.shot ? await chartShot(env, deps, m.shot).catch((e) => { console.error("chart shot", e); return null; }) : null;
     await post(env, { title: m.title, description: m.text, color: m.color, footer: { text: `${hhmm(t.min)} ET · paper trade (no real order)` } }, null, file).catch(() => {});
   }
