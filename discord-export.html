@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Discord Export</title>
+<style>
+:root{--bg:#0f1318;--card:#171d25;--line:#2a3340;--text:#e6ebf2;--mute:#8d99aa;--acc:#4f9dff;--ok:#2ec26b;--bad:#f0556b;--warn:#f5b942}
+@media (prefers-color-scheme: light){:root{--bg:#f4f6f9;--card:#fff;--line:#d5dbe4;--text:#18202b;--mute:#5d6877;--acc:#1f6fe0;--ok:#168a48;--bad:#c93049;--warn:#a86b00}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--mute);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin:0 0 14px}
+.card h2{font-size:15px;margin:0 0 10px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+input[type=text],input[type=password],input[type=date],select{width:100%;padding:9px 10px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:150px}
+.chk{display:flex;align-items:flex-start;gap:8px;color:var(--text);font-size:14px;margin:8px 0}
+.chk input{margin-top:4px}
+button{background:var(--acc);color:#fff;border:0;border-radius:7px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+button:disabled{opacity:.5;cursor:default}
+.warn{border-left:4px solid var(--warn);background:rgba(245,185,66,.08);padding:10px 12px;border-radius:6px;font-size:13.5px}
+.note{color:var(--mute);font-size:13px}
+#threads{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:7px;margin-top:8px}
+#threads div{padding:6px 10px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;font-size:14px}
+#threads div:last-child{border-bottom:0}
+#log{font:12.5px/1.45 ui-monospace,Consolas,monospace;background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:240px;overflow:auto;white-space:pre-wrap}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+a.dl{display:inline-block;margin:6px 10px 0 0;color:var(--acc);font-weight:600}
+.err{color:var(--bad)}.ok{color:var(--ok)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Discord Export</h1>
+  <p class="sub">Save a channel or thread as a text / JSON / CSV file. Based on <a href="https://github.com/Tyrrrz/DiscordChatExporter" target="_blank" rel="noopener" style="color:var(--acc)">DiscordChatExporter</a>, with a thread picker added. Runs in your browser: the token goes to Discord only, never to this site.</p>
+
+  <div class="warn">
+    <b>Read first.</b> A <b>bot</b> token (a bot you added to the server) is the allowed way. Using your <b>own account's</b> token breaks Discord's terms of service and can get the account banned, so only do it for reading content you already can see, in small amounts, and at your own risk. The token is kept in memory only unless you tick “remember”. See the DiscordChatExporter docs (Token and IDs guide) for where tokens come from.
+  </div>
+
+  <div class="card">
+    <h2>1. Token</h2>
+    <div class="row">
+      <div><label for="tok">Token</label><input id="tok" type="password" autocomplete="off" placeholder="paste token"></div>
+      <div><label for="ttype">Token type</label>
+        <select id="ttype"><option value="bot">Bot token</option><option value="user">User (account) token</option></select></div>
+    </div>
+    <label class="chk"><input id="rem" type="checkbox"> <span>Remember on this device (stored in this browser only)</span></label>
+  </div>
+
+  <div class="card">
+    <h2>2. What to export</h2>
+    <label for="target">Channel or thread link (or its ID)</label>
+    <input id="target" type="text" placeholder="https://discord.com/channels/GUILD/CHANNEL  (a thread link works too)">
+    <p style="margin:10px 0 0"><button id="look">Look up channel &amp; threads</button></p>
+    <div id="info" class="note" style="margin-top:8px"></div>
+    <div id="threads" hidden></div>
+    <p id="tbtns" hidden style="margin:8px 0 0"><button class="alt" id="all">Select all</button> <button class="alt" id="none">Select none</button></p>
+  </div>
+
+  <div class="card">
+    <h2>3. Options</h2>
+    <label class="chk"><input id="inc" type="checkbox" checked> <span><b>Include threads</b> started from messages in this channel (like DiscordChatExporter's “Include threads”). Each thread's messages are placed right after the message that started it.</span></label>
+    <label class="chk"><input id="exp" type="checkbox" checked> <span>Also export the threads ticked above (active and archived, including forum posts) as their own sections.</span></label>
+    <label class="chk"><input id="main" type="checkbox" checked> <span>Export the channel's own messages (untick to export only threads).</span></label>
+    <label class="chk"><input id="emb" type="checkbox" checked> <span><b>Save the pictures inside the .html file</b> (web page format only). Discord's picture links stop working after a while, so this keeps them. The file gets bigger (about 100-300 KB per chart); untick for a small file that only works for a few days.</span></label>
+    <div class="row">
+      <div><label for="from">From date (optional)</label><input id="from" type="date"></div>
+      <div><label for="to">To date (optional)</label><input id="to" type="date"></div>
+      <div><label for="fmt">Format</label><select id="fmt"><option value="html">Web page with pictures (.html)</option><option value="txt">Text (.txt)</option><option value="json">JSON (.json)</option><option value="csv">CSV (.csv)</option></select></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4. Export</h2>
+    <button id="go">Start export</button> <button class="alt" id="stop" disabled>Stop</button>
+    <div class="bar"><i id="pb"></i></div>
+    <div id="log">Ready.</div>
+    <div id="out"></div>
+  </div>
+</main>
+
+<script>
+(()=>{
+"use strict";
+const API="https://discord.com/api/v10";
+const $=(id)=>document.getElementById(id);
+const sleep=(ms)=>new Promise((r)=>setTimeout(r,ms));
+let stop=false, chan=null, threadList=[];
+
+try{ const t=localStorage.getItem("dcx_tok"); if(t){$("tok").value=t;$("rem").checked=true;} const ty=localStorage.getItem("dcx_type"); if(ty)$("ttype").value=ty; }catch(e){}
+
+const logEl=$("log");
+const log=(s,cls)=>{ const d=document.createElement("div"); if(cls)d.className=cls; d.textContent=s; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; };
+const authHeader=()=>{ const t=$("tok").value.trim().replace(/^"|"$/g,""); return $("ttype").value==="bot"&&!/^Bot /i.test(t)?"Bot "+t:t; };
+
+async function api(path){
+  for(let attempt=0;attempt<8;attempt++){
+    let r;
+    try{ r=await fetch(API+path,{headers:{Authorization:authHeader()}}); }
+    catch(e){ throw new Error("Network or CORS error talking to Discord ("+e.message+")"); }
+    if(r.status===429){ const j=await r.json().catch(()=>({})); const w=((j.retry_after||1)+0.3)*1000; log("Rate limited, waiting "+Math.round(w/1000)+"s…"); await sleep(w); continue; }
+    if(r.status===401) throw new Error("Discord rejected the token (401). Check the token and the token type.");
+    if(r.status===403) throw new Error("No access to that (403). The token's account / bot can't see it.");
+    if(r.status===404) throw new Error("Not found (404). Check the link / ID.");
+    if(!r.ok) throw new Error("Discord error HTTP "+r.status);
+    await sleep(220);                                  // gentle pacing
+    return r.json();
+  }
+  throw new Error("Too many rate-limit retries");
+}
+
+// link or ID -> {guild, channel}
+function parseTarget(s){
+  s=s.trim(); const m=s.match(/channels\/(@me|\d+)\/(\d+)/);
+  if(m) return {guild:m[1],channel:m[2]};
+  if(/^\d{15,25}$/.test(s)) return {guild:null,channel:s};
+  return null;
+}
+const TYPES={0:"text channel",2:"voice",4:"category",5:"announcement channel",10:"announcement thread",11:"public thread",12:"private thread",13:"stage",15:"forum",16:"media"};
+const isThread=(c)=>[10,11,12].includes(c.type);
+
+async function lookup(){
+  const p=parseTarget($("target").value); if(!p){ $("info").textContent="Paste a Discord link like https://discord.com/channels/…/… or a channel ID."; return; }
+  $("info").textContent="Looking up…"; $("threads").hidden=true; $("tbtns").hidden=true; threadList=[];
+  try{
+    chan=await api("/channels/"+p.channel);
+    const guild=chan.guild_id||p.guild;
+    const kind=TYPES[chan.type]||("type "+chan.type);
+    if(isThread(chan)){ $("info").textContent=`Thread “${chan.name}” (${kind}). It will be exported as it is.`; $("inc").checked=false; $("exp").checked=false; return; }
+    $("info").textContent=`#${chan.name} (${kind}). Finding threads…`;
+    const found=new Map();
+    if(guild && guild!=="@me"){
+      try{ const a=await api(`/guilds/${guild}/threads/active`); (a.threads||[]).filter((t)=>t.parent_id===chan.id).forEach((t)=>found.set(t.id,{...t,state:"active"})); }
+      catch(e){ log("Active threads: "+e.message,"err"); }
+    }
+    for(const kindPath of ["public","private"]){
+      let before="";
+      for(let page=0;page<200;page++){
+        let res; try{ res=await api(`/channels/${chan.id}/threads/archived/${kindPath}?limit=100${before?"&before="+encodeURIComponent(before):""}`); }catch(e){ if(kindPath==="public")log("Archived "+kindPath+" threads: "+e.message,"err"); break; }
+        (res.threads||[]).forEach((t)=>found.set(t.id,{...t,state:"archived"}));
+        if(!res.has_more||!(res.threads||[]).length) break;
+        const last=res.threads[res.threads.length-1]; before=last.thread_metadata&&last.thread_metadata.archive_timestamp; if(!before)break;
+        $("info").textContent=`#${chan.name}: ${found.size} threads found so far…`;
+      }
+    }
+    threadList=[...found.values()].sort((a,b)=>(b.id>a.id?1:-1));
+    $("info").textContent=`#${chan.name} (${kind}): ${threadList.length} thread${threadList.length===1?"":"s"} found. Threads started from a message in the channel are also picked up by “Include threads” below.`;
+    renderThreads();
+  }catch(e){ $("info").innerHTML=""; const s=document.createElement("span"); s.className="err"; s.textContent=e.message; $("info").appendChild(s); chan=null; }
+}
+function renderThreads(){
+  const box=$("threads"); box.textContent="";
+  threadList.forEach((t,i)=>{
+    const d=document.createElement("div"), c=document.createElement("input"); c.type="checkbox"; c.checked=true; c.dataset.i=i;
+    const n=document.createElement("span"); n.textContent=`${t.name}  ·  ${t.state}  ·  ${t.message_count!=null?t.message_count+" msgs":""}  ·  ${new Date(Number(BigInt(t.id)>>22n)+1420070400000).toLocaleDateString()}`;
+    d.append(c,n); box.appendChild(d);
+  });
+  box.hidden=!threadList.length; $("tbtns").hidden=!threadList.length;
+}
+$("all").onclick=()=>document.querySelectorAll("#threads input").forEach((c)=>c.checked=true);
+$("none").onclick=()=>document.querySelectorAll("#threads input").forEach((c)=>c.checked=false);
+$("look").onclick=lookup;
+
+// ---- fetching ----
+const snow=(d)=>String((BigInt(d.getTime()-1420070400000)<<22n));
+async function fetchMessages(id,label,range,withThreads){
+  const out=[]; let before=range.to?snow(range.to):"";
+  for(;;){
+    if(stop) break;
+    const batch=await api(`/channels/${id}/messages?limit=100${before?"&before="+before:""}`);
+    if(!batch.length) break;
+    let done=false;
+    for(const m of batch){
+      if(range.from && new Date(m.timestamp)<range.from){ done=true; break; }
+      out.push(m);
+    }
+    before=batch[batch.length-1].id;
+    $("pb").style.width="0%"; log(`${label}: ${out.length} messages…`);
+    if(done||batch.length<100) break;
+  }
+  out.reverse();
+  if(withThreads){
+    const withT=out.filter((m)=>m.thread&&m.thread.id);
+    let i=0;
+    for(const m of withT){
+      if(stop) break; i++;
+      try{ m._thread={id:m.thread.id,name:m.thread.name,messages:(await fetchMessages(m.thread.id,`  thread “${m.thread.name}” (${i}/${withT.length})`,{},false))}; }
+      catch(e){ log(`  thread “${m.thread.name}”: ${e.message}`,"err"); }
+      $("pb").style.width=Math.round(i/withT.length*100)+"%";
+    }
+  }
+  return out;
+}
+
+// ---- formatting ----
+const fdate=(iso)=>{ const d=new Date(iso); let h=d.getHours()%12||12; return `[${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()} ${h}:${String(d.getMinutes()).padStart(2,"0")} ${d.getHours()<12?"AM":"PM"}]`; };
+const author=(m)=>(m.author&&(m.author.global_name||m.author.username))||"unknown";
+function msgTxt(m,ind){
+  const p=ind||""; let s=`${p}${fdate(m.timestamp)} ${author(m)}: ${m.content||""}`;
+  (m.attachments||[]).forEach((a)=>{ s+=`\n${p}  IMG: ${a.filename}  ${a.url}`; });
+  (m.embeds||[]).forEach((e)=>{ const t=[e.title,e.description].filter(Boolean).join(" — "); if(t) s+=`\n${p}  EMBED: ${t}`; });
+  return s;
+}
+function buildTxt(sections){
+  const L=[];
+  for(const sec of sections){
+    L.push(`===== ${sec.title} =====`,"");
+    for(const m of sec.msgs){
+      L.push(msgTxt(m),"");
+      if(m._thread){ L.push(`  ----- THREAD: ${m._thread.name} (${m._thread.id}) -----`); m._thread.messages.forEach((t)=>L.push(msgTxt(t,"  "))); L.push("  ----- END THREAD -----",""); }
+    }
+  }
+  return L.join("\n");
+}
+const slim=(m)=>({id:m.id,time:m.timestamp,author:author(m),text:m.content||"",attachments:(m.attachments||[]).map((a)=>({name:a.filename,url:a.url})),embeds:(m.embeds||[]).map((e)=>({title:e.title||"",description:e.description||""})),reactions:(m.reactions||[]).map((r)=>({emoji:r.emoji&&r.emoji.name,count:r.count}))});
+function buildJson(sections){
+  return JSON.stringify(sections.map((s)=>({title:s.title,id:s.id,messages:s.msgs.map((m)=>({...slim(m),thread:m._thread?{id:m._thread.id,name:m._thread.name,messages:m._thread.messages.map(slim)}:undefined}))})),null,1);
+}
+const q=(s)=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+function buildCsv(sections){
+  const rows=["section,thread,id,time,author,text,attachments"];
+  const add=(sec,th,m)=>rows.push([q(sec),q(th),q(m.id),q(m.timestamp),q(author(m)),q(m.content),q((m.attachments||[]).map((a)=>a.url).join(" "))].join(","));
+  for(const s of sections) for(const m of s.msgs){ add(s.title,"",m); if(m._thread) m._thread.messages.forEach((t)=>add(s.title,m._thread.name,t)); }
+  return rows.join("\n");
+}
+
+// ---- HTML with pictures ----
+const esc=(t)=>String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const linkify=(t)=>esc(t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/\n/g,"<br>");
+const isImg=(a)=>/^image\//.test(a.content_type||"")||/\.(png|jpe?g|gif|webp)$/i.test(a.filename||"");
+function allMsgs(sections){ const o=[]; for(const s of sections) for(const m of s.msgs){ o.push(m); if(m._thread) o.push(...m._thread.messages); } return o; }
+async function toDataUrl(url){
+  const r=await fetch(url); if(!r.ok) throw new Error("HTTP "+r.status);
+  const b=await r.blob();
+  if(b.type==="image/gif"||!self.createImageBitmap) return await new Promise((ok,no)=>{ const f=new FileReader(); f.onload=()=>ok(f.result); f.onerror=no; f.readAsDataURL(b); });
+  const bm=await createImageBitmap(b), sc=Math.min(1,1400/bm.width), cv=document.createElement("canvas");
+  cv.width=Math.round(bm.width*sc); cv.height=Math.round(bm.height*sc); cv.getContext("2d").drawImage(bm,0,0,cv.width,cv.height);
+  return cv.toDataURL("image/jpeg",0.82);
+}
+async function embedPictures(sections){
+  const list=allMsgs(sections).flatMap((m)=>(m.attachments||[]).filter(isImg)); let done=0,fail=0,bytes=0;
+  const queue=[...list]; log(`Saving ${list.length} pictures into the file…`);
+  await Promise.all([0,1,2,3].map(async()=>{
+    while(queue.length&&!stop){ const a=queue.shift();
+      try{ a.dataUrl=await toDataUrl(a.url); bytes+=a.dataUrl.length; }catch(e){ fail++; }
+      done++; if(done%10===0||done===list.length){ $("pb").style.width=Math.round(done/list.length*100)+"%"; log(`  pictures ${done}/${list.length} (${Math.round(bytes/1048576)} MB${fail?", "+fail+" kept as links":""})`); }
+    }
+  }));
+  return bytes;
+}
+function msgHtml(m){
+  const t=new Date(m.timestamp).toLocaleString();
+  let h=`<div class="m"><div class="h"><b>${esc(author(m))}</b> <span>${esc(t)}</span></div>`;
+  if(m.content) h+=`<div class="t">${linkify(m.content)}</div>`;
+  (m.attachments||[]).forEach((a)=>{ const src=a.dataUrl||a.url; h+=isImg(a)?`<a href="${esc(src)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(src)}" alt="${esc(a.filename)}"></a>`:`<div class="f"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.filename)}</a></div>`; });
+  (m.embeds||[]).forEach((e)=>{ if(e.title||e.description) h+=`<div class="e">${e.title?`<b>${esc(e.title)}</b><br>`:""}${linkify(e.description||"")}</div>`; });
+  return h+"</div>";
+}
+function buildHtml(sections){
+  let b=""; 
+  for(const s of sections){
+    b+=`<h2>${esc(s.title)}</h2>`;
+    for(const m of s.msgs){
+      b+=msgHtml(m);
+      if(m._thread) b+=`<div class="th"><div class="tt">Thread: ${esc(m._thread.name)}</div>${m._thread.messages.map(msgHtml).join("")}</div>`;
+    }
+  }
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Discord export</title><style>
+:root{color-scheme:dark light}body{margin:0;background:#0f1318;color:#e6ebf2;font:15px/1.5 system-ui,Segoe UI,sans-serif}
+@media (prefers-color-scheme:light){body{background:#f4f6f9;color:#18202b}.m{border-color:#d5dbe4!important}}
+main{max-width:980px;margin:0 auto;padding:16px}h2{margin:26px 0 10px;border-bottom:1px solid #2a3340;padding-bottom:6px}
+.m{padding:8px 0;border-bottom:1px solid #222a35}.h span{color:#8d99aa;font-size:12.5px;margin-left:6px}.t{margin:2px 0;word-wrap:break-word}
+img{max-width:100%;height:auto;border-radius:6px;margin:6px 0;display:block}a{color:#4f9dff}.e{border-left:3px solid #4f9dff;padding:2px 10px;margin:6px 0;color:#9fb0c6}
+.th{margin:8px 0 8px 18px;padding-left:14px;border-left:3px solid #4f9dff}.tt{font-weight:700;color:#4f9dff;margin-bottom:4px}
+</style></head><body><main><h1>Discord export</h1><p style="color:#8d99aa">Saved ${esc(new Date().toLocaleString())}</p>${b}</main></body></html>`;
+}
+function offer(name,text,mime){
+  const url=URL.createObjectURL(new Blob([text],{type:mime+";charset=utf-8"}));
+  const a=document.createElement("a"); a.className="dl"; a.href=url; a.download=name; a.textContent=`Download ${name} (${Math.round(text.length/1024)} KB)`; $("out").appendChild(a);
+}
+
+// ---- run ----
+async function run(){
+  if(!$("tok").value.trim()){ log("Paste a token first.","err"); return; }
+  if(!chan){ await lookup(); if(!chan) return; }
+  try{ if($("rem").checked){ localStorage.setItem("dcx_tok",$("tok").value.trim()); localStorage.setItem("dcx_type",$("ttype").value); } else { localStorage.removeItem("dcx_tok"); } }catch(e){}
+  stop=false; $("go").disabled=true; $("stop").disabled=false; $("out").textContent=""; logEl.textContent=""; $("pb").style.width="0%";
+  const range={from:$("from").value?new Date($("from").value+"T00:00:00"):null,to:$("to").value?new Date($("to").value+"T23:59:59"):null};
+  const sections=[];
+  try{
+    if(isThread(chan)||$("main").checked){
+      log(`Exporting ${isThread(chan)?"thread":"#"}${chan.name}…`);
+      const msgs=await fetchMessages(chan.id,chan.name,range,!isThread(chan)&&$("inc").checked);
+      sections.push({title:(isThread(chan)?"THREAD ":"#")+chan.name,id:chan.id,msgs});
+    }
+    if(!isThread(chan)&&$("exp").checked){
+      const picked=[...document.querySelectorAll("#threads input:checked")].map((c)=>threadList[+c.dataset.i]);
+      let i=0;
+      for(const t of picked){
+        if(stop) break; i++;
+        try{ sections.push({title:`THREAD ${t.name}`,id:t.id,msgs:await fetchMessages(t.id,`thread “${t.name}” (${i}/${picked.length})`,range,false)}); }
+        catch(e){ log(`thread “${t.name}”: ${e.message}`,"err"); }
+        $("pb").style.width=Math.round(i/picked.length*100)+"%";
+      }
+    }
+    const n=sections.reduce((s,x)=>s+x.msgs.length+x.msgs.reduce((a,m)=>a+(m._thread?m._thread.messages.length:0),0),0);
+    log(`${stop?"Stopped. ":"Done. "}${n} messages in ${sections.length} section${sections.length===1?"":"s"}.`,"ok");
+    if(sections.length){
+      if($("fmt").value==="html"&&$("emb").checked&&!stop) await embedPictures(sections);
+      const base=(chan.name||"export").replace(/[^\w-]+/g,"_")+"-"+new Date().toISOString().slice(0,10), f=$("fmt").value;
+      if(f==="html") offer(base+".html",buildHtml(sections),"text/html");
+      else if(f==="txt") offer(base+".txt",buildTxt(sections),"text/plain");
+      else if(f==="json") offer(base+".json",buildJson(sections),"application/json");
+      else offer(base+".csv",buildCsv(sections),"text/csv");
+    }
+    $("pb").style.width="100%";
+  }catch(e){ log("Stopped: "+e.message,"err"); }
+  $("go").disabled=false; $("stop").disabled=true;
+}
+$("go").onclick=run; $("stop").onclick=()=>{ stop=true; log("Stopping after this request…"); };
+})();
+</script>
+</body>
+</html>

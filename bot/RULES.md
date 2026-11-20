@@ -6,9 +6,9 @@ SPY is read to gauge SPX (it has volume and premarket); trades and levels are sh
 
 ## Money (scales with the account)
 
-| Rule | Setting | Example: $25,000 account |
+| Rule | Setting | At $25,000 |
 |---|---|---|
-| Account | paper account (your starting amount; example $25,000), follows the bot's own P/L (one 0DTE SPX contract costs ~$1,700-2,500) | $25,000 |
+| Account | paper account, starts at **$25,000** and follows the bot's own P/L (one 0DTE SPX contract costs ~$1,700-2,500) | $25,000 |
 | Position size | **50% of the account ÷ 3 slots** in premium: contracts = account × 16.7% ÷ (price × 100), at least 1 | ~$4,150 (e.g. 6 × $7.00) |
 | Max loss per trade | **15% of the account ÷ 3 slots** (premium stop at **−15%**: cut losers fast), including fees and slippage | $1,250 cap (3 × $7 contracts risk ~$420) |
 | **Max contracts per trade** | **3** (user 2026-11-16) | |
@@ -786,3 +786,23 @@ option-price record of every setup for backtesting. Silent: no Discord posts.
   - Mixed or neutral = lesson only.
 - Votes move each setup by up to ±0.3R in the nightly learning, like reactions. Lessons are stored with the trade (bot:feedback).
 - The bot never learns from its own posts.
+
+## Real GEX from Cboe (11/18)
+- `src/cboegex.js`: Cboe's free delayed SPX chain (cdn.cboe.com → cdn-api.cboe.com, ~14 MB, no key) → open interest + IV for every SPX/SPXW option, gamma recomputed from IV (Cboe's own gamma is rounded to 4 decimals) through the same `exposures()` as the live board.
+- Runs once after the close (16:15–16:40 ET, that day's expiries dropped = tomorrow's positioning) and once before the open (8:45–9:20 ET). Saved as `gex:cboe:<date>:<eod|pre>` plus `gex:cboe:last`, with the live board's flip/walls next to it for comparison. Manual: `/gex/cboe?run=1&kind=eod`, last saved: `/gex/cboe`.
+- Caveat: calls +, puts − makes SPX net GEX negative almost every day (hedgers hold the puts), so "negative GEX" barely separates days. The walls and per-strike sizes are the useful part.
+
+## **NEW** Lessons-channel study (2026-11-19/20): 185 threads, 484 charts
+
+Source: Saty's "lessons" channel (exported with threads). What it added to the bot:
+
+- **Level-to-level odds** (Tezak study, Saty ATR Day mode, same period): trigger → Golden Gate 80%, 38.2 → 50 80%, 50 → 61.8 80%,
+  61.8 → 78.6 69%, 78.6 → 100 60%, 100 → 123.6 55%; Golden Gate setup (38.2 → 61.8) 64%; momentum GG (61.8 → 161.8) 64%;
+  previous close → ±1 ATR 14%, → ±2 ATR 0.7%. Stored as `STEP_PROB` / `stepProb()` (setups.js) and shown on the trendline-break alert.
+- **Trendline break** (his 3m/10m pullback entry; also "enter at the break of the trendline", "take the break of the wedge using the ribbon breakdown as risk"): the `tlbrk` family, paper-traded by the "Trendline-break" challenger only.
+- **Exits** (his rule: "take profit off at 25/50/100%; SPX 50/100/200%… if strong support (puts) or resistance (calls) is met, move stops or take profit"; recaps show scales at the call trigger ≈ +90%, prior resistance ≈ +70%, runners to the Golden Gate): the "Saty exits" challenger sells half at the first key level past the entry, then a breakeven stop.
+- **Trade count** (8/19/2025: "I overtraded… a normal 3-trade max day"): the Saty challengers allow a 4th+ trade only if it is high-probability (A+ / 90+, or a core family with a proven learned edge). The main account's limits are unchanged.
+- **High-probability override**: the after-2:00 and after-3:00 entry filters no longer skip an A+ / 90+ card or a core setup with 15+ results at +0.20R or better.
+- His setup selector ("FOMO is stupid"): trend change → Vomy; consolidation breakout → squeeze; clear trend → ribbon pullback / ATR probabilities / Golden Gate; extended → mean reversion.
+- Sizing: risk a fixed % (R) per trade; winners must be bigger than losers (1 win of 3 at +3R, one break-even cut, one -1R is still +10%).
+- Order types: buy on the bid on a pullback to the entry, buy the ask only on a hold of support/resistance, never market buy; sell the ask into a target.

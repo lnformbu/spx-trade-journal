@@ -35,6 +35,10 @@ export async function runGreeks(env, deps, { force = false } = {}) {
   if (spxOI > 0) {
     g = exposures(chain, spot, now);
     g.source = "SPX options";
+    // 0DTE-only board: today's expiration alone, same rules as the thinkorswim SPX_GEX_live study (the main board adds the next ~3 days of expirations)
+    try { const z = exposures(chain, spot, now, { only: t.date });
+      if (z.strikes.length) { const nz = z.strikes.filter((r) => Math.abs(r.strike - spot) / spot <= 0.015 && r.gex < 0).sort((a, b) => a.gex - b.gex);
+        g.zero = { totals: z.totals, flip: z.flip, callWall: z.callWall, putWall: z.putWall, strikes: z.strikes, eye: nz.length && (nz.length === 1 || nz[0].gex <= 2 * nz[1].gex) ? { strike: nz[0].strike, gex: nz[0].gex } : null }; } } catch (e) { console.error("0dte board", e); }
   } else {
     const spy = await schwab(token, `/marketdata/v1/chains?symbol=SPY&strikeCount=40&fromDate=${t.date}&toDate=${to}`);
     const ratio = spot / spy.underlyingPrice;

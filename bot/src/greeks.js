@@ -28,12 +28,13 @@ function bs(S, K, T, s, isCall) {
 }
 
 // chain = Schwab /marketdata/v1/chains response; nowMs for time to expiry (16:00 ET close)
-export function exposures(chain, spot, nowMs) {
+export function exposures(chain, spot, nowMs, opts = {}) {
   const rows = new Map();
   const legs = [];
   for (const [map, isCall] of [[chain.callExpDateMap, true], [chain.putExpDateMap, false]]) {
     for (const exp in map || {}) {
       const expDate = exp.split(":")[0];
+      if (opts.only && expDate !== opts.only) continue;   // 0DTE-only view: just that expiration (same rule as the thinkorswim SPX_GEX_live study)
       // years to 16:00 New York on the expiry date (at least 15 minutes)
       const close = Date.parse(expDate + "T21:00:00Z") - (isDST(expDate) ? 3600e3 : 0);
       const T = Math.max((close - nowMs) / (365 * 864e5), 15 / (365 * 24 * 60));

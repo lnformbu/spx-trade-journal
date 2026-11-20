@@ -28,6 +28,8 @@ const usd = (x) => (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2);
 export const CORE = new Set(["vomy", "pb8", "ckl10", "atr1", "div1m", "ggpb", "ggo", "pb21"]);
 // 11/17: "flip" (phase flip) is watch-only for the main account (11/13-16: 13% of its options green, avg -42%); the data collector still trades it
 const TRADED = new Set(["atrhold", "star", "squeeze", "box", "div1m", "cbox1m", "cbox3m", "plan-trigger", "plan-scenario", "pb21", "vomy", "orb", "orb1m", "flip1m", "orrt", "pb8", "ggo", "ggpb", "atr1", "ckl10"]);
+// experimental families: graded on the scorecard and collected by the data book, but only a style with exp:true trades them
+const EXP_FAMS = new Set(["tlbrk"]);
 const EOD_FAMS = new Set(["eodplan", "eodshake", "eodfade", "maxpain", "lbinc", "lbshake"]);
 // the signal fired against its context: trend, 10m phase, daily phase or VIX (11/13-16: 14% green, avg -36% vs +7% for the rest)
 export const againstCtx = (ctx) => { const c = ctx || {}; return [c.trend === "against" && "trend", c.phase === "against" && "10m phase", c.phaseD === "against" && "daily phase", c.vix === false && "VIX"].filter(Boolean); };
@@ -101,6 +103,10 @@ export const TEMPLATES = [
   // replay with every rule, one position at a time: core playbook 162 trades 57% +0.32R PF 1.84 vs all families +0.16R PF 1.35
   // user 11/18: pullbacks were being sold (1m cloud exits: +55% if held 30 min); hold through them when the hold score says the trade still works
   { id: "pbhold", name: "Pullback-tolerant (hold score overrides soft exits)", apply: (c) => ({ ...c, params: { ...c.params, pbTol: true } }) },
+  // Saty exits (11/19 chart study): sell half at the first key level reached past the entry (ATR level, trigger, PDC, HOD/LOD, 21 / 200 EMA), then a breakeven stop on the runner
+  { id: "lvlscale", name: "Saty exits + 3-trade day (scale at the first key level, runner at breakeven)", apply: (c) => ({ ...c, softCap: 3, params: { ...c.params, lvlScale: true, t1Pct: 9, runnerStop2: 0, runnerStop1: 0, keep1: 0.6, keep2: 0.6 } }) },
+  // Saty entry: trendline break of the pullback in a stacked ribbon, plus Saty exits
+  { id: "tlbrk", name: "Trendline-break entries + Saty exits", apply: (c) => ({ ...c, exp: true, softCap: 3, params: { ...c.params, lvlScale: true, t1Pct: 9, runnerStop2: 0, runnerStop1: 0, keep1: 0.6, keep2: 0.6 } }) },
   { id: "core", name: "Core playbook only", apply: (c) => ({ ...c, fams: "core" }) },
 ];
 export function championCfg(model) {
@@ -109,7 +115,7 @@ export function championCfg(model) {
 }
 export function makeChallengers(champ, gen, date) {
   const books = {};
-  const sig = (c) => JSON.stringify([c.params, c.delta, c.window, c.sizing, c.fams || null]);
+  const sig = (c) => JSON.stringify([c.params, c.delta, c.window, c.sizing, c.fams || null, !!c.exp, c.softCap || 0]);
   for (const tp of TEMPLATES) {
     const cfg = tp.apply({ ...champ, params: { ...champ.params } });
     if (sig(cfg) === sig(champ)) continue;
@@ -127,19 +133,26 @@ function freshDay(b, t) {
 const log = (b, t, action, title, why) => { b.log.push({ et: hhmm(t.min), action, title, why: why || "" }); b.log = b.log.slice(-80); };
 
 // hard rules (every style) + the style's trading hours
-function gate(b, cfg, cand, t, now, events = []) {
-  const d = b.day, sb = d.startBal;
+// A high-probability setup is never skipped for the clock (user 11/19): a core family with a proven learned edge (15+ results, +0.20R or better)
+// or an A+ / 90+ card passes the afternoon filters. It still has to pass the risk limits and the learned-edge check.
+function highProb(cand, model) {
+  if (cand.fam === "star") return cand.grade === "A+" || cand.score >= 90;
+  const F = model && model.fams && model.fams[cand.fam];
+  return CORE.has(cand.fam) && !!F && F.n >= 15 && F.r >= 0.2;
+}
+function gate(b, cfg, cand, t, now, events = [], model = null) {
+  const d = b.day, sb = d.startBal, hi = highProb(cand, model);
   // DATA COLLECTOR: every signal with a contract, 9:32-3:55, no risk / count / window rules (training + forward-test data)
   if (cfg.collect || cfg.test) return t.min < 572 ? "before 9:32" : t.min >= 955 ? "no new entries after 3:55" : null;
   if (cand.blocked) return cand.blocked;
-  if (!TRADED.has(cand.fam)) return "not a tradable setup";
+  if (!TRADED.has(cand.fam) && !(EXP_FAMS.has(cand.fam) && cfg.exp)) return "not a tradable setup";
   if (t.min < 573) return "before 9:33 (opening range)";
   if (t.min >= 955) return "no new entries after 3:55";
   if (t.min < 600 && cand.fam !== "orb" && cand.fam !== "orb1m" && cand.fam !== "ggo" && !(cand.fam === "star" && cand.grade === "A+")) return "opening window (9:33-10:00): only ORB breaks and A+ cards";
   // PDF 16 check (replay): after 3:30 signals averaged −0.09R; only A/A+ cards held up (+0.13R, 49), the rest −0.17R (139)
-  if (t.min >= 900 && !EOD_FAMS.has(cand.fam)) return "after 3:00: no new entries except EOD / leaderboard plays (11/13-16: 4% of 3-4 PM signals went green)";
+  if (t.min >= 900 && !EOD_FAMS.has(cand.fam) && !hi) return "after 3:00: no new entries except EOD / leaderboard plays (11/13-16: 4% of 3-4 PM signals went green)";
   // QuantConnect 2025 on real SPXW 0DTE: core setups entered 2:00-4:00 lost 46% of the premium on average (29 trades, PF 0.47)
-  if (t.min >= 840 && cand.fam !== "star") return "afternoon window (after 2:00): only A/A+ cards (0DTE decay)";
+  if (t.min >= 840 && cand.fam !== "star" && !hi) return "afternoon window (after 2:00): only A/A+ cards (0DTE decay)";
   // Kill the Leaderboard risk rule: EOD trades come out of the day's profits only
   if (t.min >= 930 && !(d.pnl > 0)) return "end of day: profits only (this book is not green today)";
   // event days (your plan's "Event:" line): no entries 15 min either side; a pre-market event = A+ only until 9:45
@@ -157,6 +170,8 @@ function gate(b, cfg, cand, t, now, events = []) {
   if (dp >= 0.25 * sb) return (d.done = "daily target (+25%) reached");
   if (best >= 0.10 * sb && dp < best / 2) return (d.done = "profit lock: gave back half of the day's best");
   if (d.trades >= 20) return "20 trades today";
+  // Saty (8/19/2025 recap: "I overtraded... a normal 3-trade max day"): a style with softCap lets the 4th+ trade through only when it is high-probability
+  if (cfg.softCap && d.trades >= cfg.softCap && !hi) return `${cfg.softCap} trades done today: only high-probability setups after that (Saty's normal day is 3 trades max)`;
   if (d.consecLoss >= 4) return (d.done = "4 losses in a row");
   // no cooldown after a loss (user 2026-11-16, training: it blocked two +50-70% winners); the daily limit and 4-loss stop remain
   if (d.stopOuts.some((s) => s.sym === group(cand.sym) && s.dir === cand.dir && Math.abs(s.level - cand.uEntry) <= Math.abs(cand.uEntry) * 0.0008)) return "already stopped out at this level in this direction";
@@ -169,7 +184,7 @@ async function quotes(schwab, token, syms) {
   const out = {};
   for (const s of syms) {
     const x = q[s] && q[s].quote;
-    if (x) out[s] = { bid: x.bidPrice, ask: x.askPrice, last: x.lastPrice, mark: x.mark ?? x.lastPrice };
+    if (x) out[s] = { bid: x.bidPrice, ask: x.askPrice, last: x.lastPrice, mark: x.mark ?? x.lastPrice, at: x.quoteTime || x.tradeTime || null };
   }
   return out;
 }
@@ -195,7 +210,7 @@ async function stepBook(b, cfg, X) {
     const list = await X.chain(c.dir);
     const o = list.filter((o) => o.ask > 0 && o.bid > 0 && o.delta != null && (o.ask - o.bid) / ((o.ask + o.bid) / 2) <= 0.08)
       .sort((a, z) => Math.abs(Math.abs(a.delta) - cfg.delta) - Math.abs(Math.abs(z.delta) - cfg.delta))[0];
-    return o ? { symbol: o.symbol, label: `SPX ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} 0DTE`, bid: o.bid, ask: o.ask, delta: o.delta } : null;
+    return o ? { symbol: o.symbol, label: `SPX ${o.strikePrice}${o.putCall === "CALL" ? "c" : "p"} 0DTE`, bid: o.bid, ask: o.ask, delta: o.delta, quoteAt: o.quoteTimeInLong || null } : null;
   }
 
   function sell(p, qty, price, why) {
@@ -242,6 +257,9 @@ Test book ${usd(b.balance)} · paper only`,
 
   function enter(p, k, underPx, how) {
     const ask = k.ask, bid = k.bid;
+    // live data only: never open a trade on an option quote older than 2 minutes (Schwab stamps every quote with its time)
+    const qAt = (Q && Q[k.symbol] && Q[k.symbol].at) || k.quoteAt || null;
+    if (qAt && now - qAt > 120000) { log(b, t, "skipped", p.title, `option quote is ${Math.round((now - qAt) / 1000)}s old (live data only)`); return false; }
     const cost1 = ask * 100, riskPer = cost1 * P.stopPct + 2 * FEE;
     const share = (cfg.sizing === "edge" && (p.est == null || p.est < 0.2) ? 0.25 : 0.5) / MAX_OPEN;
     const one = cfg.collect || cfg.test;
@@ -321,10 +339,12 @@ Test book ${usd(b.balance)} · paper only`,
       if (bestPct >= (P.trailFrom ?? 9)) pos.stop = Math.max(pos.stop, E + (P.trailKeep ?? 0.6) * (pos.bestBid - E));   // trailing from +20%
       if (bestPct >= P.lockPct) pos.stop = Math.max(pos.stop, E * (1 + P.lockTo));
       const uHit = pos.uTarget != null && u != null && (bull ? u >= pos.uTarget : u <= pos.uTarget);
-      if (!pos.t1 && (!pos.manual || pos.botManaged) && (pct >= P.t1Pct || (uHit && pct >= 0.15))) {
+      // Saty exit: price reached the first key level beyond the entry (>= ~4 SPX pts away) while the option is up 10%+
+      const lvHit = !!P.lvlScale && u != null && pct >= 0.10 && (X.kl[pos.under] || []).some(([, v]) => (bull ? v > pos.uEntry + Math.abs(pos.uEntry) * 0.0006 && u >= v - Math.abs(u) * 0.0002 : v < pos.uEntry - Math.abs(pos.uEntry) * 0.0006 && u <= v + Math.abs(u) * 0.0002));
+      if (!pos.t1 && (!pos.manual || pos.botManaged) && (pct >= P.t1Pct || (uHit && pct >= 0.15) || lvHit)) {
         pos.t1 = now;
         if (pos.qtyOpen >= 2) {
-          sell(pos, Math.floor(pos.qtyOpen / 2), bid, uHit && pct < P.t1Pct ? "target 1 (signal's target level)" : `target 1 (+${Math.round(P.t1Pct * 100)}%)`);
+          sell(pos, Math.floor(pos.qtyOpen / 2), bid, lvHit && !uHit && pct < P.t1Pct ? "target 1 (first key level reached)" : uHit && pct < P.t1Pct ? "target 1 (signal's target level)" : `target 1 (+${Math.round(P.t1Pct * 100)}%)`);
           pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop2));
         } else pos.stop = Math.max(pos.stop, E * (1 + P.runnerStop1));
         if (loud) X.messages.push({ manual: !!pos.manual, title: `${tag || "📄 PAPER "}target 1 · ${pos.label}`, text: `Option ${usd(bid)} (+${Math.round(pct * 100)}%). ${pos.qty >= 2 ? "Sold half; runner" : "Stop"} now ${usd(pos.stop)}, trailing.`, color: 0xffd700 });
@@ -478,7 +498,7 @@ ${o.botManage ? "The bot manages the exits (its stops, targets and structure exi
       if (p.done || b.positions.length >= SLOTS) continue;
       if (conflict(p.sym, p.dir)) continue;   // keeps waiting while the opposite side is open
       const bull = p.dir === "bull", u = px(p.sym);
-      const g = gate(b, cfg, p, t, now, X.events);
+      const g = gate(b, cfg, p, t, now, X.events, model);
       if (g) { p.done = true; log(b, t, "skipped", p.title, g); continue; }
       if (now - p.at > 9 * 60000) { p.done = true; log(b, t, "dropped", p.title, `entry ${r2(p.uEntry)} not reached within 9 minutes`); continue; }
       if (u == null) continue;
@@ -495,7 +515,7 @@ ${o.botManage ? "The bot manages the exits (its stops, targets and structure exi
 
   // ---- this minute's new signals ----
   for (const c of candidates) {
-    const g = gate(b, cfg, c, t, now, X.events);
+    const g = gate(b, cfg, c, t, now, X.events, model);
     if (g) { log(b, t, "skipped", c.title, g); continue; }
     if (b.positions.length >= SLOTS) { log(b, t, "skipped", c.title, `${SLOTS} positions already open`); continue; }
     if (conflict(c.sym, c.dir)) { log(b, t, "skipped", c.title, `opposite side already open (${conflict(c.sym, c.dir).label})`); continue; }
@@ -546,6 +566,14 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
     log(acct, t, "reset", "Daily loss budget", `restarted from ${usd(acct.balance)} (earlier loss ${usd(d.pnl)} came from the old sizing)`);
     await writeJSON(env, "paper:reset", { ...rs, done: true, at: now });
   }
+  // one-time "reset the paper account to $X" (journal button -> D1 "paper:balreset"): balance and start become X, today's loss budget restarts
+  const br = await readJSON(env, "paper:balreset");
+  if (br && !br.done && Number.isFinite(+br.amount)) {
+    const amt = +br.amount; acct.start = amt; acct.balance = amt; acct.fixedStart = true;
+    const d = acct.day; if (d && d.date === t.date) { d.startBal = amt; d.base = d.pnl; d.best = d.pnl; d.consecLoss = 0; d.lastLossAt = 0; d.done = null; d.stopOuts = []; }
+    log(acct, t, "reset", "Paper account", `reset to ${usd(amt)} (trade history kept)`);
+    await writeJSON(env, "paper:balreset", { ...br, done: true, doneAt: now });
+  }
   const token = await schwabToken(env);
 
   // one quote call for every book's open contract, the tickers, waiting contracts and the champion's after-exit shadows
@@ -559,7 +587,7 @@ export async function runPaper(env, deps, { candidates = [], events = [], kl = {
   const testCfg = { ...champ, id: "test", name: "Test mode (pullback-tolerant, every SPX signal, 1 contract)", test: true, params: { ...champ.params, pbTol: true } };
   const books = [acct, ...Object.values(ch.books).map((x) => x.book), data, ...(testBook ? [testBook] : [])];
   // one-time move to the new size: a book that never traded at the old $2,000 start starts over at START
-  for (const b of books) if (b.start !== START && b.balance === b.start && !b.open && !(b.positions || []).length && !(b.recent || []).length) {
+  for (const b of books) if (!b.fixedStart && b.start !== START && b.balance === b.start && !b.open && !(b.positions || []).length && !(b.recent || []).length) {
     b.start = START; b.balance = START; if (b.day) b.day.startBal = START;
   }
   const dayState = await readJSON(env, "bot:day:" + t.date), patience = !!(dayState && dayState.plan && dayState.plan.parsed && dayState.plan.parsed.patience);

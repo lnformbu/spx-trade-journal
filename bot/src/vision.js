@@ -40,14 +40,22 @@ export async function readChart(env, url) {
   const type = r.headers.get("content-type") || "image/png";
   const buf = await r.arrayBuffer();
   if (buf.byteLength > 3.5e6) throw new Error("image too large (" + Math.round(buf.byteLength / 1e6) + " MB)");
+  return askModel(env, `data:${type};base64,${b64(buf)}`, buf.byteLength);
+}
+// a picture already stored as a base64 data URL (Saty picture library)
+export async function readChartData(env, dataUrl) {
+  if (!env.AI) throw new Error("AI binding missing");
+  return askModel(env, dataUrl, Math.round(dataUrl.length * 0.75));
+}
+async function askModel(env, dataUrl, bytes) {
   const out = await env.AI.run(MODEL, {
     messages: [{ role: "user", content: [
       { type: "text", text: PROMPT },
-      { type: "image_url", image_url: { url: `data:${type};base64,${b64(buf)}` } },
+      { type: "image_url", image_url: { url: dataUrl } },
     ] }],
-    max_tokens: 700,
+    max_tokens: 500,
   });
   const text = typeof out === "string" ? out : out.response ?? JSON.stringify(out);
   const json = typeof out.response === "object" ? out.response : firstJSON(text);
-  return { model: MODEL, bytes: buf.byteLength, data: json, raw: json ? undefined : String(text).slice(0, 800) };
+  return { model: MODEL, bytes, data: json, raw: json ? undefined : String(text).slice(0, 800) };
 }

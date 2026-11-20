@@ -12,7 +12,7 @@ import { patterns, atLevel } from "./patterns.js";
 import { famOf } from "./learn.js";
 import { chartShot } from "./shot.js";
 import { trackLines, lineStats, tfGroup, tfTol } from "./lines.js";
-import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10, breakout1m } from "./setups.js";
+import { trendScore, pullback21, pullback8, vomy, vomyRetest13, marketPivot, pbConfluence, orbBreak, ggPullback, barAtr, atrSnap, checklist10, breakout1m, trendBreak, stepProb } from "./setups.js";
 
 export const TICKERS = ["SPY", "$SPX", "TSLA", "MU", "META", "AVGO", "SPCX", "MSTR", "GOOGL", "AAPL"];
 const show = (s) => s.replace("$", "");
@@ -871,6 +871,26 @@ GEX ${lctx.gex || "?"} · 3m ${lctx.r3 || "?"} · 10m ${lctx.r10 || "?"} · judg
               + `\nConfluence ${cf.score}/6: ${cf.bits.join(" · ")}`,
           });
         }
+        // Trendline break (Saty: pullback to the ribbon, trendline over the pullback, enter on the break). Same trend + 1h cloud filters as pb21.
+        {
+          const tb0 = pbDir ? trendBreak(b3, pbDir) : null;
+          const tb = tb0 && T10.cloudH === (tb0.dir === "bull" ? "up" : "down") ? tb0 : null;
+          if (tb) {
+            const up = tb.dir === "bull";
+            const next = Object.values(lv).filter((v) => (up ? v > tb.entry : v < tb.entry)).sort((x, y) => (up ? x - y : y - x))[0];
+            const sp = D && D.atr && D.pdc ? stepProb((tb.entry - D.pdc) / D.atr) : null;
+            found.push({
+              kind: "setup", sym, key: `tlbrk:${tb.bar.datetime}:${tb.dir}`, once: true, color: up ? COLORS.bull : COLORS.bear,
+              track: { dir: tb.dir, entry: r2(tb.entry), stop: r2(tb.stop), target: next != null ? r2(next) : null, needTrigger: false },
+              title: `📐 SPX TRENDLINE BREAK ${up ? "CALLS ▲" : "PUTS ▼"}`,
+              text: `**Entry:** now ~${r2(tb.entry)} · **Stop:** ${r2(tb.stop)} (past the pullback and the 21 EMA ${tb.ema21}) · **Target:** next level ${next != null ? r2(next) : "—"}`
+                + (sp ? `
+Odds (Tezak study): from ${(sp.from * 100).toFixed(1)}% ATR the next level is reached ${Math.round(sp.p * 100)}% of the time.` : "")
+                + `
+3m closed ${up ? "above" : "below"} the pullback trendline (${tb.line}) in a ${up ? "rising" : "falling"} ribbon after dipping to the 21 EMA: Saty's break-of-the-pullback entry.`,
+            });
+          }
+        }
         // PDF 2 10m checklist: trigger + 34/50 trend + <70% ATR used, then the 10m pullback to the 8/21 EMA (SPY 10m 106 trades +0.29R)
         for (const dirC of ["bull", "bear"]) {
           const ck = T10.ckl && T10.ckl[dirC];
@@ -1711,6 +1731,7 @@ Contract idea: ${show(sym)} ${idea(list, dir)}` : ""}`,
             : fam === "ggo" ?`SPX crossed the Golden Gate (±38.2% ATR) before noon with the 3m ribbon stacked: most such mornings reach the Golden Fib`
             : fam === "ggpb" ? `after crossing the Golden Gate, SPX pulled back to the 3m ribbon and held the 48 EMA: the PDF 7 entry, aiming for the Golden Fib`
             : fam === "pb21" ?`SPX pulled back into the 3m 21 EMA in a ${bull ? "rising" : "falling"} ribbon and held: the wait-for-the-pullback entry (no chasing)`
+            : fam === "tlbrk" ? `3m closed ${bull ? "above" : "below"} the pullback trendline in a ${bull ? "rising" : "falling"} ribbon after a dip to the 21 EMA: the break-of-the-pullback entry`
             : fam === "vomy" ? `the ${bull ? "falling" : "rising"} 3m ribbon broke and held the 48 EMA: a multi-EMA crossover reversal (${bull ? "inverse Vomy" : "Vomy"})`
             : "setup triggered";
           const ctxBits = [

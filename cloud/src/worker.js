@@ -508,6 +508,13 @@ async function handle(req, env) {
       library: lib ? lib.items.map(({ context, raw, images, ...x }) => ({ ...x, text: String(raw || "").slice(0, 200) })) : [],
     });
   }
+  // reset the paper account to an amount (default $22,000); the bot applies it on its next minute (bot/src/paper.js "paper:balreset")
+  if (url.pathname === "/api/bot/paper-reset" && req.method === "POST") {
+    const b = await req.json().catch(() => ({})), amount = Math.round(+b.amount || 22000);
+    if (!(amount >= 500 && amount <= 1000000)) return json({ ok: false, error: "bad amount" }, 400);
+    await writeBlob(env, "paper:balreset", JSON.stringify({ amount, at: Date.now(), done: false }));
+    return json({ ok: true, amount });
+  }
   // 🧪 test mode for today (bot/src/paper.js): a separate pullback-tolerant book takes every SPX signal, 1 contract, posts to Discord
   if (url.pathname === "/api/bot/test" && req.method === "POST") {
     const { on } = await req.json().catch(() => ({}));

@@ -12,5 +12,6 @@ const html = fs.readFileSync(src, "utf8").replace(
   "Saved to your Cloudflare journal. Use Export backup now and then to keep a copy."
 );
 fs.writeFileSync(path.join(outDir, "index.html"), html);
+if (fs.existsSync(path.join(root, "..", "discord-export.html"))) fs.copyFileSync(path.join(root, "..", "discord-export.html"), path.join(outDir, "discord-export.html"));
 fs.copyFileSync(path.join(root, "src", "worker.js"), path.join(outDir, "_worker.js"));
 console.log("page copied from " + src);

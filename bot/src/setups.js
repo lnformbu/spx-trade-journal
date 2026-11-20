@@ -60,6 +60,52 @@ export function pullback21(bars, dir) {
   };
 }
 
+
+// Saty ATR Levels level-to-level probabilities (Robert Tezak's historical study, posted in the lessons channel; Day mode within the day).
+// Chance that price, once at a level, reaches the NEXT one in its direction: trigger 23.6 -> 38.2 80%, 38.2 -> 50 80%, 50 -> 61.8 80%,
+// 61.8 -> 78.6 69%, 78.6 -> 100 60%, 100 -> 123.6 55%. Golden Gate (38.2 -> 61.8) 64%; momentum GG (61.8 -> 161.8) 64%;
+// previous close to +/-1 ATR 14%, to +/-2 ATR 0.7%. Same numbers both directions.
+export const STEP_PROB = [[1.0, 0.55], [0.786, 0.60], [0.618, 0.69], [0.5, 0.80], [0.382, 0.80], [0.236, 0.80]];
+export function stepProb(frac) {
+  const a = Math.abs(frac);
+  const hit = STEP_PROB.find(([k]) => a >= k - 1e-9);
+  return hit ? { from: hit[0], p: hit[1] } : null;   // below the trigger: no published number
+}
+
+// Trendline break in the trend's direction (Saty: pullback to the ribbon, draw the line over the pullback, enter when it breaks).
+// bull: ribbon stacked up, the pullback's last two swing highs make a DESCENDING line, this bar is the first close above it,
+// and the pullback came within ~0.7 ATR of the 21 EMA. bear is the mirror. Bars should include earlier days.
+export function trendBreak(bars, dir) {
+  if (!bars || bars.length < 60) return null;
+  const c = bars.map((b) => b.close), e8 = ema(c, 8), e13 = ema(c, 13), e21 = ema(c, 21), e48 = ema(c, 48);
+  const i = bars.length - 1, b = bars[i], A = barAtr(bars);
+  if (!A) return null;
+  const bull = dir === "bull";
+  // trend ribbon intact: 13 over 48 and 21 over 48 (the 8 EMA often dips under the 21 during the pullback itself)
+  if (!(bull ? e13[i] >= e48[i] && e21[i] >= e48[i] : e13[i] <= e48[i] && e21[i] <= e48[i])) return null;
+  const W = 30, from = Math.max(2, i - W), sw = [];
+  for (let k = from; k < i - 1; k++) {          // swing highs (lows for puts): local peak: higher than the bar either side
+    const v = bull ? bars[k].high : bars[k].low;
+    const ok = [-1, 1].every((d) => bars[k + d] && (bull ? bars[k + d].high < v : bars[k + d].low > v));
+    if (ok) sw.push(k);
+  }
+  if (sw.length < 2) return null;
+  const y = (k) => (bull ? bars[k].high : bars[k].low), k2 = sw[sw.length - 1], k1 = sw.slice(0, -1).reverse().find((k) => k2 - k >= 6 && Math.abs(y(k2) - y(k)) >= 0.5 * A);
+  if (k1 == null) return null;
+  const slope = (y(k2) - y(k1)) / (k2 - k1);
+  if (bull ? slope >= 0 : slope <= 0) return null;                    // the pullback line must run against the trend
+  const line = (k) => y(k1) + slope * (k - k1);
+  const brokeNow = bull ? b.close > line(i) && b.close > b.open : b.close < line(i) && b.close < b.open;
+  const wasInside = bull ? bars[i - 1].close <= line(i - 1) : bars[i - 1].close >= line(i - 1);
+  if (!brokeNow || !wasInside) return null;
+  // the pullback reached the ribbon: its extreme came within 0.7 ATR of the 21 EMA (or went through it)
+  const pbX = bull ? Math.min(...bars.slice(k2, i + 1).map((x) => x.low)) : Math.max(...bars.slice(k2, i + 1).map((x) => x.high));
+  if (bull ? pbX > e21[i] + 0.7 * A : pbX < e21[i] - 0.7 * A) return null;
+  if (Math.abs(b.close - e21[i]) > 2.5 * A) return null;              // too extended: don't chase
+  return { dir, bar: b, entry: b.close, stop: bull ? Math.min(pbX, e21[i]) - A * 0.3 : Math.max(pbX, e21[i]) + A * 0.3,
+    line: r2(line(i)), ema21: r2(e21[i]), ema48: r2(e48[i]), atr3: r2(A), from: bars[k1].datetime, to: bars[k2].datetime };
+}
+
 // Confluence for a 21 EMA pullback (1 point each): trend mode on, other 21 EMAs stacked at the touch (10m / 1h / daily),
 // a quiet pullback (SPY 3m volume on the dip under 80% of the push before it), VIX moving the other way,
 // Golden Gate already crossed that way, 1h cloud agreeing.

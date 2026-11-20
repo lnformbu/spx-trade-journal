@@ -33,6 +33,7 @@ export const DEFAULT_PARAMS = {
   timeStopMin: 15,    // backstop only: still red after 15 minutes (and never +10%); structure / flow exits do the real work
   timeStopGain: 0.10,
   stallMin: 15,       // runner makes no new high for 15 minutes: out (let winners run)
+  lvlScale: false,    // Saty style: sell half at the first key level reached beyond the entry, then a breakeven stop on the runner
 };
 export const SCALP_V = 4;   // bump to re-apply the scalp exits over learned params
 export const DEFAULT_MODEL = { v: 0, updated: null, lastRun: null, fams: {}, feats: {}, minScore: 70, threshold: -0.15, params: { ...DEFAULT_PARAMS }, changes: [] };
@@ -41,13 +42,15 @@ const PRIOR = 10;      // results worth of "0R" every average starts from
 const MIN_N = 15;      // results needed before a family can be switched off ...
 const MIN_DAYS = 3;    // ... from at least 3 different days (one bad day can't switch a setup off)
 const OFF_R = -0.15;
+// setups the user wants kept on whatever the numbers say (11/18: "I need the leaderboard shakeout"); they keep being graded and shown
+const PINNED_ON = new Set(["lbinc"]);
 const ON_R = 0;        // a switched-off family comes back above this
 const r2 = (x) => Math.round(x * 100) / 100;
 
 export const FAM_NAMES = {
   star: "A/A+ setups", mom: "Momentum", flip: "Phase flip", squeeze: "Squeeze", box: "10m compression breakout",
   div1m: "1m divergence", div3m: "3m divergence", cbox1m: "1m compression breakout", cbox3m: "3m compression breakout",
-  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch", pb21: "21 EMA pullback", vomy: "Vomy / iVomy", orb: "Opening range break", orb1m: "1m ORB break (open)", flip1m: "1m cloud flip scalp", rev1m: "Early reversal (1m, watch)", lbinc: "LB shakeout incoming", x21: "3m 21×200 cross", atrhold: "Scalp ATR retest (1m)", conv1m: "1m ribbon flip + conviction", conv3m: "3m ribbon flip + conviction", myline: "Your lines (bounce)", orrt: "OR break & retest (15m)", orsw: "OR sweep + engulfing (watch)", gexbreak: "GEX wall break (-GEX)", gexreject: "GEX wall rejection (+GEX)", gexflip: "GEX regime change", eodplan: "EOD GEX follow/fade call", eodshake: "EOD final 20", pb8: "8 EMA ride", trend: "Trend day alerts", gg: "Golden Gate", ggo: "Golden Gate go", ggpb: "Golden Gate pullback", atr1: "±1 ATR snap-back", bo1m: "1m breakout scalp (AM)", eodfade: "EOD fakeout fade", ckl10: "10m checklist pullback", highlander: "Highlander", open: "Opening read",
+  "plan-trigger": "Your plan triggers", you: "Your training setups", eye: "Eye of Sauron", maxpain: "LB max pain", lbshake: "LB shakeout watch", pb21: "21 EMA pullback", tlbrk: "Trendline break", vomy: "Vomy / iVomy", orb: "Opening range break", orb1m: "1m ORB break (open)", flip1m: "1m cloud flip scalp", rev1m: "Early reversal (1m, watch)", lbinc: "LB shakeout incoming", x21: "3m 21×200 cross", atrhold: "Scalp ATR retest (1m)", conv1m: "1m ribbon flip + conviction", conv3m: "3m ribbon flip + conviction", myline: "Your lines (bounce)", orrt: "OR break & retest (15m)", orsw: "OR sweep + engulfing (watch)", gexbreak: "GEX wall break (-GEX)", gexreject: "GEX wall rejection (+GEX)", gexflip: "GEX regime change", eodplan: "EOD GEX follow/fade call", eodshake: "EOD final 20", pb8: "8 EMA ride", trend: "Trend day alerts", gg: "Golden Gate", ggo: "Golden Gate go", ggpb: "Golden Gate pullback", atr1: "±1 ATR snap-back", bo1m: "1m breakout scalp (AM)", eodfade: "EOD fakeout fade", ckl10: "10m checklist pullback", highlander: "Highlander", open: "Opening read",
 };
 export const famOf = (key) => {
   const [p, a, b] = String(key).split(":");
@@ -87,7 +90,7 @@ const shrunk = (sum, n) => sum / (n + PRIOR);
 export function decide(model, cand) {
   const m = model || DEFAULT_MODEL;
   const F = m.fams[cand.fam];
-  if (F && F.off) return { ok: false, est: F.r, why: `${FAM_NAMES[cand.fam] || cand.fam} is switched off by learning (${F.n} results, avg ${F.r}R)` };
+  if (F && F.off && !PINNED_ON.has(cand.fam)) return { ok: false, est: F.r, why: `${FAM_NAMES[cand.fam] || cand.fam} is switched off by learning (${F.n} results, avg ${F.r}R)` };
   if (cand.fam === "star" && cand.score != null && cand.score < m.minScore) return { ok: false, why: `score ${cand.score} under the learned minimum ${m.minScore}` };
   let est = F ? F.r : 0;
   // your ✅/❌ reactions on this kind of signal
@@ -152,7 +155,7 @@ export function learn(prev, statsItems, trades, today, extra = {}) {
   for (const x of all) { const f = (byFam[x.fam] = byFam[x.fam] || { n: 0, sum: 0, wins: 0, trades: 0, days: new Set() }); f.days.add(x.date); f.n += x.w; f.sum += x.R * x.w; if (x.R > 0) f.wins += x.w; if (x.paper) f.trades++; }
   for (const [fam, f] of Object.entries(byFam)) {
     const r = r2(shrunk(f.sum, f.n)), was = m.fams[fam] && m.fams[fam].off;
-    const off = was ? !(r > ON_R) : f.n >= MIN_N && f.days.size >= MIN_DAYS && r < OFF_R;
+    const off = PINNED_ON.has(fam) ? false : was ? !(r > ON_R) : f.n >= MIN_N && f.days.size >= MIN_DAYS && r < OFF_R;
     if (off !== !!was) changes.push(`${off ? "⛔ Switched OFF" : "✅ Switched back ON"}: ${FAM_NAMES[fam] || fam} (${f.n} results, avg ${r}R, win ${Math.round((f.wins / f.n) * 100)}%)`);
     m.fams[fam] = { n: f.n, days: f.days.size, r, win: r2(f.wins / f.n), trades: f.trades, off };
   }

@@ -405,7 +405,7 @@ async function run(env, { force = false } = {}) {
   return st;
 }
 
-const deps = { schwabToken, schwab, history, readJSON, writeJSON, plansByTicker };
+const deps = { schwabToken, schwab, history, readJSON, writeJSON, readBlob, plansByTicker };
 
 // one paper pass at a time (they read and write the same books): a D1 lock row that expires after 25 s
 async function withPaperLock(env, wait, fn) {
@@ -462,6 +462,10 @@ export default {
       // daily swing scan (calls only), after the close
       if (t.min >= 975 && t.min <= 995) ctx.waitUntil(runSwing(env, deps, { t }).catch((e) => console.error("swing", e)));
       // daily bot trade review with chart pictures -> #spx-training thread (user 11/18), 4:40-5:40 PM ET, once a day
+      // real GEX from Cboe's free chain (once after the close, once before the open; skips itself when already saved)
+      if ((t.min >= 975 && t.min <= 1000) || (t.min >= 525 && t.min <= 560)) ctx.waitUntil(import("./cboegex.js").then(({ runCboeGex }) => runCboeGex(env, deps)).catch((e) => console.error("cboe gex", e)));
+      // Saty chart pictures: a few per minute-run after the close, free-tier capped (see satyimages.js)
+      if (t.min >= 1005 && t.min <= 1080 && !["Sat", "Sun"].includes(t.wd)) ctx.waitUntil(import("./satyimages.js").then(({ runSatyImages }) => runSatyImages(env, deps, { t })).catch((e) => console.error("saty images", e)));
       if (t.min >= 1000 && t.min <= 1060) ctx.waitUntil(import("./review.js").then(({ runReview }) => runReview(env, deps, { date: t.date })).catch((e) => console.error("review", e)));
     }
   },
@@ -495,6 +499,8 @@ export default {
     if (url.pathname === "/paper") return json({ acct: await readJSON(env, "paper:acct"), model: await readJSON(env, "paper:model"), trades: ((await readJSON(env, "paper:trades")) || { items: [] }).items.slice(-20) });
     // test mode for today (user 11/18): ?on=1 / ?on=0 (the journal's 🧪 button writes the same key)
     if (url.pathname === "/paper/test") { const on = url.searchParams.get("on"); if (on != null) await writeJSON(env, "paper:test", { on: on === "1", date: et(Date.now()).date, at: Date.now() }); return json((await readJSON(env, "paper:test")) || { on: false }); }
+    // Cboe real GEX now: /gex/cboe?run=1 (&kind=eod|pre); without run=1 it returns the last saved one
+    if (url.pathname === "/gex/cboe") { if (url.searchParams.get("run") === "1") { const { runCboeGex } = await import("./cboegex.js"); try { return json(await runCboeGex(env, deps, { kind: url.searchParams.get("kind") || undefined, force: true })); } catch (e) { return json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 500) }); } } const l = await readJSON(env, "gex:cboe:last"); return json(l ? { ...l, strikes: undefined } : { none: true }); }
     // daily trade review now: /review?date=YYYY-MM-DD (default today) &force=1 to post again
     if (url.pathname === "/review") { const { runReview } = await import("./review.js"); return json(await runReview(env, deps, { date: url.searchParams.get("date") || et(Date.now()).date, force: url.searchParams.get("force") === "1", dry: url.searchParams.get("dry") === "1" })); }
     // leaderboard post test: posts the current SPX leaderboard + greek exposure (with picture) to the copy channel now
@@ -512,6 +518,23 @@ export default {
     }
     if (url.pathname === "/paper/reset-day") { await writeJSON(env, "paper:reset", { date: et(Date.now()).date, done: false }); return json({ ok: true, note: "applied on the next paper run (within a minute)" }); }
     if (url.pathname === "/paper/learn") return json(await runLearning(env, deps, { force: true, report: url.searchParams.get("report") === "1", quiet: url.searchParams.get("quiet") === "1", t: et(Date.now()) }));
+    // Saty picture reader: load the queue once (POST {items:[{u,d,c}]}), read the digest, or run a few pictures now
+    if (url.pathname === "/saty/queue" && req.method === "POST") {
+      const body = await req.json(); const items = (body.items || []).filter((x) => x && /^https:\/\/(cdn|media)\.discordapp\.(com|net)\//.test(x.u));
+      const old = body.append ? (await readJSON(env, "saty:queue")) : null;
+      const q = { items: [...(old ? old.items : []), ...items], next: old ? old.next : 0, loaded: Date.now() };
+      await writeJSON(env, "saty:queue", q); return json({ ok: true, queued: q.items.length, next: q.next });
+    }
+    // one stored picture: POST {k, b64 (jpeg), d, c}; it joins the end of the queue and the nightly run reads it from the database
+    if (url.pathname === "/saty/img" && req.method === "POST") {
+      const b = await req.json(); if (!b.k || !b.b64 || b.b64.length > 900000) return json({ ok: false, error: "bad picture" });
+      await writeBlob(env, "saty:img:" + b.k, b.b64);
+      const q = (await readJSON(env, "saty:queue")) || { items: [], next: 0 };
+      if (!q.items.some((x) => x.k === b.k)) q.items.push({ k: b.k, d: b.d, c: b.c });
+      await writeJSON(env, "saty:queue", q); return json({ ok: true, queued: q.items.length, next: q.next });
+    }
+    if (url.pathname === "/saty/insights") { const { satyDigest } = await import("./satyimages.js"); const ins = await readJSON(env, "saty:insights"); return json(url.searchParams.get("full") === "1" ? ins : satyDigest(ins)); }
+    if (url.pathname === "/saty/run") { const { runSatyImages } = await import("./satyimages.js"); return json(await runSatyImages(env, deps, { t: et(Date.now()) })); }
     if (url.pathname === "/library") return json(await readJSON(env, "lib:setups"));
     // data pool as CSV: board (5-min greeks/gamma/flow rows), lb (top-10 0DTE contracts per 5 min), eod (daily close vs the
     // EOD plan), signals (scorecard), paper (paper trades). ?from=YYYY-MM-DD&to=YYYY-MM-DD (board/lb: max 120 days per call)
